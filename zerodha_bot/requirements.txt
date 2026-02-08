@@ -1,0 +1,9 @@
+kiteconnect
+pandas
+numpy
+yfinance
+scikit-learn
+telethon
+python-dotenv
+pytz
+openpyxl
