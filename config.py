@@ -12,11 +12,6 @@ def _get_bool(key: str, default="false") -> bool:
         d = str(d)
     return os.getenv(key, d).strip().lower() == "true"
 
-    if val is None:
-        return bool(default)
-
-    return str(val).strip().lower() in ("1", "true", "yes", "y")
-
 def _get_str(key: str, default: str = "") -> str:
     return os.getenv(key, default).strip()
 
@@ -106,8 +101,4 @@ NIGHT_AUTO_ENABLED = _get_bool("NIGHT_AUTO_ENABLED", True)
 NIGHT_START = _get_str("NIGHT_START", "18:30")
 NIGHT_INTERVAL_MIN = _get_int("NIGHT_INTERVAL_MIN", 90)
 NIGHT_END_OFFSET_MIN = _get_int("NIGHT_END_OFFSET_MIN", 5)
-RESTART_FLAG_PATH = _get_str("RESTART_FLAG_PATH", "/home/ubuntu/trident-bot/RESTART_REQUIRED")
-ENABLE_TOKEN_AUTORESTART = _get_bool("ENABLE_TOKEN_AUTORESTART", True)
-# --- Profit lock defaults ---
-PROFIT_LOCK_ACTIVATE_PCT = 1.5   # activates once trade PnL% >= 1.5%
-PROFIT_LOCK_TRAIL_PCT    = 2.0   # exit if PnL% falls (peak - 2.0)
+# Profit lock values are read from env above (PROFIT_LOCK_ACTIVATE_PCT / PROFIT_LOCK_TRAIL_PCT).

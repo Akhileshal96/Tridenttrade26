@@ -18,8 +18,12 @@ HELP_TEXT = (
     "🤖 TRIDENT BOT – COMMANDS\n\n"
     "ACCESS:\n"
     "• /myid                → shows your Telegram ID\n"
-    "• (Owner) /addtrader <id>, /removetrader <id>\n"
-    "• (Owner) /addviewer <id>, /removeviewer <id>\n\n"
+    "• /help                → show this command list\n"
+    "• /commands            → alias for /help\n"
+    "• /addtrader <id>      (Owner)\n"
+    "• /removetrader <id>   (Owner)\n"
+    "• /addviewer <id>      (Owner)\n"
+    "• /removeviewer <id>   (Owner)\n\n"
     "TOKEN (Zerodha daily) [Owner]:\n"
     "• /renewtoken            → sends Zerodha login link\n"
     "• /token <request_token> → generates access token + saves to .env\n"
@@ -52,7 +56,7 @@ HELP_TEXT = (
     "• /include SBIN   → release symbol\n"
     "• /excluded       → list blocked symbols\n\n"
     "EMERGENCY [Owner]:\n"
-    "• /panic     → pause + disengage + close open trade\n"
+    "• /panic     → pause + disengage + close all open positions\n"
     "• /resetday  → reset today's pnl & risk counters\n"
 )
 
@@ -228,6 +232,25 @@ async def main():
     client = TelegramClient("trident", api_id, api_hash)
     await client.start(bot_token=CFG.TELEGRAM_BOT_TOKEN)
     append_log("INFO", "BOT", "Telegram bot started")
+
+    owner_chat = _owner_id()
+
+    def _cycle_notifier(msg: str):
+        if not owner_chat:
+            return
+
+        async def _send():
+            try:
+                await client.send_message(owner_chat, msg)
+            except Exception as e:
+                append_log("WARN", "BOT", f"Notifier send failed: {e}")
+
+        try:
+            client.loop.create_task(_send())
+        except Exception as e:
+            append_log("WARN", "BOT", f"Notifier schedule failed: {e}")
+
+    CYCLE.set_notifier(_cycle_notifier)
 
     @client.on(events.NewMessage())
     async def handler(event):
@@ -424,8 +447,8 @@ async def main():
             if not _is_trader(sender):
                 await event.reply("❌ Not permitted (Trader/Owner only).")
                 return
-            if CYCLE.STATE.get("open_trade"):
-                await event.reply("❌ Cannot promote while in open trade.")
+            if CYCLE.STATE.get("open_trades"):
+                await event.reply("❌ Cannot promote while in open positions.")
                 return
             ok = CYCLE.promote_universe(reason="MANUAL")
             await event.reply("✅ Promoted live→trading" if ok else ("❌ Promote blocked: " + (CYCLE.STATE.get("last_promote_msg") or "")))
@@ -475,8 +498,8 @@ async def main():
             CYCLE.STATE["paused"] = True
             CYCLE.STATE["initiated"] = False
             CYCLE.STATE["live_override"] = False
-            CYCLE._close_open_trade("PANIC")
-            await event.reply("🛑 PANIC done: paused + disengaged + attempted close.")
+            CYCLE._close_all_open_trades("PANIC")
+            await event.reply("🛑 PANIC done: paused + disengaged + attempted close of all positions.")
             return
 
         if cmd == "/resetday":
@@ -536,13 +559,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-def _request_restart_flag():
-    try:
-        if getattr(CFG, "ENABLE_TOKEN_AUTORESTART", True):
-            flag_path = getattr(CFG, "RESTART_FLAG_PATH", "/home/ubuntu/trident-bot/RESTART_REQUIRED")
-            with open(flag_path, "w", encoding="utf-8") as f:
-                f.write("restart\n")
-            append_log("INFO","RESTART","Restart flag created after /token. systemd will restart the bot.")
-    except Exception as e:
-        append_log("ERROR","RESTART", f"Failed to create restart flag: {e}")
