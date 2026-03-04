@@ -12,7 +12,7 @@ LOG_DIR = os.path.join(os.getcwd(), "logs")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-EXCLUSIONS_FILE = os.path.join(DATA_DIR, "exclusions.txt")
+EXCLUSIONS_FILE = getattr(CFG, "EXCLUSIONS_PATH", os.path.join(DATA_DIR, "exclusions.txt"))
 NIGHT_SCORES_CSV = os.path.join(DATA_DIR, "night_scores.csv")
 NIGHT_REPORT_TXT = os.path.join(LOG_DIR, "night_research_report.txt")
 

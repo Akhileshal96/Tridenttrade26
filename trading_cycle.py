@@ -13,7 +13,7 @@ from strategy_engine import generate_signal
 DATA_DIR = os.path.join(os.getcwd(), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-EXCLUSIONS_FILE = os.path.join(DATA_DIR, "exclusions.txt")
+EXCLUSIONS_FILE = getattr(CFG, "EXCLUSIONS_PATH", os.path.join(DATA_DIR, "exclusions.txt"))
 
 STATE = {
     "paused": True,
@@ -302,24 +302,24 @@ def _sync_wallet_and_caps(force=False):
     wallet_net = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
     wallet_avail = wallet_net
 
-    if is_live_enabled():
-        try:
-            m = get_kite().margins() or {}
-            eq = m.get("equity", {}) if isinstance(m, dict) else {}
-            wallet_net = float(eq.get("net") or wallet_net or 0.0)
-            avail = eq.get("available", {}) if isinstance(eq, dict) else {}
-            if isinstance(avail, dict):
-                wallet_avail = float(
-                    avail.get("live_balance")
-                    or avail.get("cash")
-                    or avail.get("opening_balance")
-                    or avail.get("adhoc_margin")
-                    or wallet_net
-                )
-            else:
-                wallet_avail = wallet_net
-        except Exception as e:
-            append_log("WARN", "WALLET", f"Margins sync failed: {e}")
+    # Wallet sync should not depend on LIVE initiation; /status must show broker wallet if token is valid.
+    try:
+        m = get_kite().margins() or {}
+        eq = m.get("equity", {}) if isinstance(m, dict) else {}
+        wallet_net = float(eq.get("net") or wallet_net or 0.0)
+        avail = eq.get("available", {}) if isinstance(eq, dict) else {}
+        if isinstance(avail, dict):
+            wallet_avail = float(
+                avail.get("live_balance")
+                or avail.get("cash")
+                or avail.get("opening_balance")
+                or avail.get("adhoc_margin")
+                or wallet_net
+            )
+        else:
+            wallet_avail = wallet_net
+    except Exception as e:
+        append_log("WARN", "WALLET", f"Margins sync failed: {e}")
 
     STATE["wallet_net_inr"] = max(0.0, wallet_net)
     STATE["wallet_available_inr"] = max(0.0, wallet_avail)
