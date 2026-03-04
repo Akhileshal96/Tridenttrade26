@@ -1,0 +1,19 @@
+🌙 TRIDENT NIGHT RESEARCH REPORT
+Timestamp: 2026-03-04 21:39:48
+Candidates scanned: 8
+Excluded symbols: 2
+Valid scored: 8
+Errors: 0
+Universe live written: 8 -> /home/ubuntu/trident-bot/data/universe_live.txt
+Scores CSV: /home/ubuntu/trident-bot/data/night_scores.csv
+Duration: 5.6s
+
+Top 15 symbols:
+- SBIN: 128.33
+- LT: 101.89
+- ICICIBANK: 97.54
+- RELIANCE: 92.85
+- HDFCBANK: 89.47
+- INFY: 85.87
+- TCS: 83.82
+- ITC: 80.94

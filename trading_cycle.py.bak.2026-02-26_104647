@@ -1,0 +1,110 @@
+import time
+from datetime import datetime
+import pytz
+
+import config as CFG
+from log_store import append_log
+from broker_zerodha import get_kite
+
+IST = pytz.timezone("Asia/Kolkata")
+
+STATE = {
+    "paused": False,
+    "open_trade": None,
+    "today_pnl": 0.0,
+    "peak": None,
+}
+
+
+# =========================
+# Time helpers
+# =========================
+def now():
+    return datetime.now(IST)
+
+
+def _parse_hhmm(val):
+    h, m = val.split(":")
+    return int(h), int(m)
+
+
+def within_entry_window():
+    n = now()
+    sh, sm = _parse_hhmm(getattr(CFG, "ENTRY_START", "09:20"))
+    eh, em = _parse_hhmm(getattr(CFG, "ENTRY_END", "14:30"))
+    start = n.replace(hour=sh, minute=sm, second=0)
+    end = n.replace(hour=eh, minute=em, second=0)
+    return start <= n <= end
+
+
+# =========================
+# Exit logic
+# =========================
+def exit_trade(reason):
+    trade = STATE.get("open_trade")
+    if not trade:
+        return
+
+    sym = trade["symbol"]
+    qty = trade["qty"]
+    side = "SELL"
+
+    if not CFG.IS_LIVE:
+        append_log("WARN", "EXIT", f"PAPER exit {sym} ({reason})")
+        STATE["open_trade"] = None
+        STATE["peak"] = None
+        return
+
+    kite = get_kite()
+    try:
+        kite.place_order(
+            tradingsymbol=sym,
+            exchange="NSE",
+            transaction_type=side,
+            quantity=qty,
+            order_type="MARKET",
+            product="MIS",
+        )
+        append_log("WARN", "EXIT", f"LIVE exit {sym} ({reason})")
+        STATE["open_trade"] = None
+        STATE["peak"] = None
+    except Exception as e:
+        append_log("ERROR", "EXIT", str(e))
+
+
+# =========================
+# Profit lock
+# =========================
+def check_profit_lock(price):
+    trade = STATE.get("open_trade")
+    if not trade:
+        return
+
+    entry = trade["price"]
+    pnl_pct = (price - entry) / entry * 100
+
+    if STATE["peak"] is None:
+        STATE["peak"] = pnl_pct
+
+    STATE["peak"] = max(STATE["peak"], pnl_pct)
+
+    if STATE["peak"] >= CFG.PROFIT_LOCK_ACTIVATE_PCT:
+        trail = STATE["peak"] - CFG.PROFIT_LOCK_TRAIL_PCT
+        if pnl_pct <= trail:
+            exit_trade("Profit lock trail")
+
+
+# =========================
+# Tick
+# =========================
+def tick():
+    append_log("INFO", "CYCLE", "tick() entered")
+
+    if STATE["paused"]:
+        return
+
+    trade = STATE.get("open_trade")
+    if trade:
+        kite = get_kite()
+        ltp = kite.ltp(f"NSE:{trade['symbol']}")[f"NSE:{trade['symbol']}"]["last_price"]
+        check_profit_lock(ltp)

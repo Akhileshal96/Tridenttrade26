@@ -1,0 +1,171 @@
+        f"Paused: {STATE.get('paused')}\n"
+        f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
+        f"Universe(trading): {len(uni_t)} symbols\n"
+        f"Universe(live): {len(uni_l)} symbols\n"
+        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n"
+        f"Open Trade: {STATE.get('open_trade')}\n\n"
+        "Caps:\n"
+        f"- Daily Loss Cap: {CFG.DAILY_LOSS_CAP_INR}\n"
+        f"- Daily Profit Target: {CFG.DAILY_PROFIT_TARGET_INR}\n"
+        f"- Stoploss %: {CFG.STOPLOSS_PCT}\n"
+        f"- Risk/Trade %: {CFG.RISK_PER_TRADE_PCT}\n"
+        f"- Tick Seconds: {CFG.TICK_SECONDS}\n"
+        f"- Max Slippage %: {RUNTIME.get('MAX_ENTRY_SLIPPAGE_PCT')}\n\n"
+        f"AutoPromote: {getattr(CFG, 'AUTO_PROMOTE_ENABLED', False)} | Last: {STATE.get('last_promote_msg')}\n"
+    )
+
+def _calc_qty(price):
+    capital = float(CFG.CAPITAL_INR)
+    risk_amt = capital * float(CFG.RISK_PER_TRADE_PCT) / 100.0
+    per_share_risk = price * float(CFG.STOPLOSS_PCT) / 100.0
+    if per_share_risk <= 0:
+        return 1
+    risk_qty = int(risk_amt / per_share_risk)
+    affordable_qty = int(capital / price) if price > 0 else 0
+    return max(1, min(risk_qty, affordable_qty))
+
+def _ltp(kite, sym):
+    try:
+        ins = f"{CFG.EXCHANGE}:{sym}"
+        data = kite.ltp([ins])
+        return float(data[ins]["last_price"])
+    except Exception:
+        return None
+
+def _place_live_order(kite, sym, side, qty):
+    try:
+        order_id = kite.place_order(
+            variety=kite.VARIETY_REGULAR,
+            exchange=CFG.EXCHANGE,
+            tradingsymbol=sym,
+            transaction_type=kite.TRANSACTION_TYPE_BUY if side == "BUY" else kite.TRANSACTION_TYPE_SELL,
+            quantity=qty,
+            product=CFG.PRODUCT,
+            order_type=kite.ORDER_TYPE_MARKET,
+        )
+        return order_id
+    except Exception as e:
+        append_log("ERROR", "ORDER", f"Order failed {sym} {side} qty={qty}: {e}")
+        return None
+
+def _close_open_trade(reason="MANUAL"):
+    trade = STATE.get("open_trade")
+    if not trade:
+        return False
+    sym = trade.get("symbol")
+    side = trade.get("side")
+    qty = int(trade.get("qty") or 0) or 1
+    exit_side = "SELL" if side == "BUY" else "BUY"
+
+    if not is_live_enabled():
+        append_log("WARN", "EXIT", f"PAPER exit {sym} ({reason})")
+        STATE["open_trade"] = None
+        return True
+
+    kite = get_kite()
+    oid = _place_live_order(kite, sym, exit_side, qty)
+    if oid:
+        append_log("WARN", "EXIT", f"LIVE exit {sym} ({reason}) order_id={oid}")
+        STATE["open_trade"] = None
+        return True
+    return False
+
+def _within_entry_window():
+    now = datetime.now()
+    sh, sm = _parse_hhmm(getattr(CFG, "ENTRY_START", "09:20"))
+    eh, em = _parse_hhmm(getattr(CFG, "ENTRY_END", "14:30"))
+    start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+    end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+    return start <= now <= end
+
+def tick():
+    from log_store import append_log
+    append_log("INFO", "CYCLE", "tick() entered")
+    append_log("INFO", "TICK", "Tick running")
+    if STATE.get("paused"):
+        append_log("INFO", "TICK", "Paused=True (use /startloop)")
+        return
+    _ensure_day_key()
+    if STATE.get("paused"):
+        return
+
+    if STATE["today_pnl"] <= -abs(CFG.DAILY_LOSS_CAP_INR):
+        append_log("WARN", "CAP", "Daily loss cap hit. Pausing loop.")
+        STATE["paused"] = True
+        return
+
+    if STATE["today_pnl"] >= abs(CFG.DAILY_PROFIT_TARGET_INR):
+        append_log("INFO", "CAP", "Daily profit target hit. Pausing loop.")
+        STATE["paused"] = True
+        return
+
+    if (
+        getattr(CFG, "AUTO_PROMOTE_ENABLED", False)
+        and STATE.get("open_trade") is None
+        and _in_any_promote_window()
+        and _cooldown_ok()
+    ):
+        if _market_stable():
+            promote_universe(reason="AUTO_STABLE")
+        else:
+            STATE["last_promote_msg"] = "Skipped promote: market not stable"
+
+    if not _within_entry_window():
+        return
+
+    if STATE.get("open_trade"):
+        return
+
+    universe = load_universe_trading()
+
+    if universe is None:
+
+        universe = []
+
+    if not universe:
+        append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
+        return
+
+    sig = generate_signal(universe)
+    if not sig:
+        return
+
+    sym = sig["symbol"].strip().upper()
+    entry = float(sig.get("entry") or 0.0)
+    if entry <= 0:
+        append_log("WARN", "TRADE", f"Invalid signal entry for {sym}: {entry}")
+        return
+
+    qty = _calc_qty(entry)
+    sl_price = entry * (1.0 - float(CFG.STOPLOSS_PCT) / 100.0)
+
+    if is_live_enabled():
+        kite = get_kite()
+        now_price = _ltp(kite, sym)
+        # TRIDENT_PROFITLOCK_CALL_v1 (auto-added)
+        try:
+            check_profit_lock(now_price)
+        except Exception as e:
+            try:
+                append_log('ERROR','LOCK',str(e))
+            except Exception:
+                pass
+
+        if now_price is not None:
+            sig_price = entry
+            if sig_price <= 0:
+                append_log("WARN", "SLIP", f"Skip {sym}: invalid sig price {sig_price}")
+                return
+            max_slip = float(RUNTIME.get("MAX_ENTRY_SLIPPAGE_PCT", 0.30)) / 100.0
+            if now_price > sig_price * (1.0 + max_slip):
+                append_log("WARN", "SLIP", f"Skip {sym}: slip too high now={now_price} sig={sig_price}")
+                return
+
+        oid = _place_live_order(kite, sym, "BUY", qty)
+        if not oid:
+            return
+
+        STATE["open_trade"] = {
+            "symbol": sym,
+            "side": "BUY",
+            "entry": entry,

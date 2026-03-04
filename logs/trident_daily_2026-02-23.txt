@@ -1,0 +1,2078 @@
+2026-02-23 00:00:05,013 | INFO | [DAY] Auto rollover reset for 2026-02-23
+2026-02-23 00:38:27,976 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 00:38:27,976 | INFO | [NIGHT] Night research started
+2026-02-23 00:38:33,466 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 02:08:33,489 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 02:08:33,490 | INFO | [NIGHT] Night research started
+2026-02-23 02:08:38,857 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 03:38:38,864 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 03:38:38,864 | INFO | [NIGHT] Night research started
+2026-02-23 03:38:44,552 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 05:08:44,585 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 05:08:44,585 | INFO | [NIGHT] Night research started
+2026-02-23 05:08:50,477 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 06:38:50,515 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 06:38:50,515 | INFO | [NIGHT] Night research started
+2026-02-23 06:38:56,560 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 08:08:56,576 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 08:08:56,576 | INFO | [NIGHT] Night research started
+2026-02-23 08:09:03,216 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 09:20:05,463 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,509 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,549 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,588 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,626 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,666 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,705 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,745 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:05,745 | INFO | [SIG] No signal found
+2026-02-23 09:20:25,787 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:25,824 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:25,859 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:25,894 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:25,932 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:25,968 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:26,010 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:26,046 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:26,046 | INFO | [SIG] No signal found
+2026-02-23 09:20:46,100 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,139 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,175 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,213 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,263 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,310 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,350 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,402 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:20:46,402 | INFO | [SIG] No signal found
+2026-02-23 09:21:06,461 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,499 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,538 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,576 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,613 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,654 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,692 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,731 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:06,731 | INFO | [SIG] No signal found
+2026-02-23 09:21:26,783 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:26,828 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:26,865 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:26,932 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:26,988 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:27,024 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:27,060 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:27,095 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:27,095 | INFO | [SIG] No signal found
+2026-02-23 09:21:47,143 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,188 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,223 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,258 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,295 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,351 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,387 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,428 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:21:47,428 | INFO | [SIG] No signal found
+2026-02-23 09:22:07,480 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,519 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,556 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,595 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,649 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,687 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,725 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,770 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:07,770 | INFO | [SIG] No signal found
+2026-02-23 09:22:27,820 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:27,860 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:27,908 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:27,950 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:28,008 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:28,045 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:28,087 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:28,125 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:28,125 | INFO | [SIG] No signal found
+2026-02-23 09:22:48,169 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,204 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,240 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,275 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,309 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,343 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,378 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,413 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:22:48,413 | INFO | [SIG] No signal found
+2026-02-23 09:23:08,471 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,517 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,557 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,597 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,637 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,684 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,727 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,768 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:08,768 | INFO | [SIG] No signal found
+2026-02-23 09:23:28,813 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:28,849 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:28,884 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:28,919 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:28,954 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:28,991 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:29,028 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:29,065 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:29,065 | INFO | [SIG] No signal found
+2026-02-23 09:23:49,115 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,153 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,191 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,230 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,275 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,315 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,352 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,389 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:23:49,389 | INFO | [SIG] No signal found
+2026-02-23 09:24:09,435 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,470 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,506 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,547 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,580 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,615 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,654 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,699 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:09,700 | INFO | [SIG] No signal found
+2026-02-23 09:24:29,743 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,778 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,823 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,859 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,897 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,931 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:29,965 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:30,002 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:30,002 | INFO | [SIG] No signal found
+2026-02-23 09:24:50,050 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,090 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,129 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,170 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,214 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,251 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,293 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,338 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:24:50,339 | INFO | [SIG] No signal found
+2026-02-23 09:25:10,383 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,423 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,458 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,494 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,531 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,568 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,616 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,653 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:10,653 | INFO | [SIG] No signal found
+2026-02-23 09:25:30,701 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,740 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,781 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,821 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,858 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,895 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,930 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,969 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:30,969 | INFO | [SIG] No signal found
+2026-02-23 09:25:51,013 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,047 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,080 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,123 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,159 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,197 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,232 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,266 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:25:51,266 | INFO | [SIG] No signal found
+2026-02-23 09:26:11,317 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,361 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,398 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,453 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,495 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,536 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,584 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,621 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:11,621 | INFO | [SIG] No signal found
+2026-02-23 09:26:31,669 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,704 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,741 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,780 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,817 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,851 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,888 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,931 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:31,931 | INFO | [SIG] No signal found
+2026-02-23 09:26:51,977 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,011 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,051 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,087 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,123 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,175 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,214 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,251 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:26:52,251 | INFO | [SIG] No signal found
+2026-02-23 09:27:12,307 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,350 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,389 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,437 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,483 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,522 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,563 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,604 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:12,604 | INFO | [SIG] No signal found
+2026-02-23 09:27:32,650 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,688 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,723 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,764 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,799 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,846 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,879 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,917 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:32,918 | INFO | [SIG] No signal found
+2026-02-23 09:27:52,964 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,008 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,049 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,085 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,120 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,155 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,193 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,227 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:27:53,227 | INFO | [SIG] No signal found
+2026-02-23 09:28:13,282 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,328 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,378 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,424 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,464 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,501 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,543 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,586 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:13,586 | INFO | [SIG] No signal found
+2026-02-23 09:28:33,633 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,670 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,709 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,747 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,787 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,826 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,863 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,902 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:33,902 | INFO | [SIG] No signal found
+2026-02-23 09:28:53,956 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:53,995 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,037 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,076 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,123 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,165 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,205 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,250 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:28:54,250 | INFO | [SIG] No signal found
+2026-02-23 09:29:14,296 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,331 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,366 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,402 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,445 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,480 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,519 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,553 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:14,553 | INFO | [SIG] No signal found
+2026-02-23 09:29:34,606 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,646 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,686 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,725 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,764 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,804 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,843 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,882 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:34,882 | INFO | [SIG] No signal found
+2026-02-23 09:29:54,933 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:54,975 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,014 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,055 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,091 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,128 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,170 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,208 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:29:55,208 | INFO | [SIG] No signal found
+2026-02-23 09:30:15,252 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,287 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,328 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,372 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,413 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,451 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,487 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,529 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:15,529 | INFO | [SIG] No signal found
+2026-02-23 09:30:35,577 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,613 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,649 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,683 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,722 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,757 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,793 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,828 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:35,828 | INFO | [SIG] No signal found
+2026-02-23 09:30:55,872 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:55,912 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:55,971 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,011 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,046 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,082 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,121 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,160 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:30:56,160 | INFO | [SIG] No signal found
+2026-02-23 09:31:16,210 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,250 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,293 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,333 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,372 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,415 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,458 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,497 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:16,497 | INFO | [SIG] No signal found
+2026-02-23 09:31:36,671 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,706 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,741 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,784 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,829 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,864 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,900 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,940 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:36,941 | INFO | [SIG] No signal found
+2026-02-23 09:31:56,983 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,018 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,051 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,087 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,123 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,157 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,192 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,235 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:31:57,235 | INFO | [SIG] No signal found
+2026-02-23 09:32:17,285 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,323 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,362 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,404 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,443 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,482 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,526 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,566 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:17,566 | INFO | [SIG] No signal found
+2026-02-23 09:32:37,637 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,690 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,729 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,774 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,811 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,852 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,912 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,951 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:37,951 | INFO | [SIG] No signal found
+2026-02-23 09:32:58,019 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,060 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,098 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,140 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,185 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,225 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,266 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,310 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:32:58,310 | INFO | [SIG] No signal found
+2026-02-23 09:33:18,355 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,391 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,427 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,500 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,538 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,574 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,608 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,644 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:18,644 | INFO | [SIG] No signal found
+2026-02-23 09:33:38,710 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,748 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,786 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,824 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,866 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,904 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,947 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,985 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:38,985 | INFO | [SIG] No signal found
+2026-02-23 09:33:59,038 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,077 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,117 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,159 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,200 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,240 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,291 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,336 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:33:59,336 | INFO | [SIG] No signal found
+2026-02-23 09:34:19,382 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,419 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,455 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,491 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,538 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,580 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,616 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,655 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:19,655 | INFO | [SIG] No signal found
+2026-02-23 09:34:39,702 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,736 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,777 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,813 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,849 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,882 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,915 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,949 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:34:39,950 | INFO | [SIG] No signal found
+2026-02-23 09:34:59,997 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,089 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,139 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,183 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,222 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,264 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,306 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,351 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:00,352 | INFO | [SIG] No signal found
+2026-02-23 09:35:20,401 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,441 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,482 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,529 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,567 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,606 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,649 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,690 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:20,690 | INFO | [SIG] No signal found
+2026-02-23 09:35:40,753 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:40,797 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:40,849 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:40,890 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:40,939 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:40,980 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:41,019 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:41,060 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:35:41,060 | INFO | [SIG] No signal found
+2026-02-23 09:36:01,118 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,211 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,266 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,320 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,418 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,509 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,612 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,717 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:01,717 | INFO | [SIG] No signal found
+2026-02-23 09:36:21,761 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,795 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,830 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,867 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,905 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,947 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:21,984 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:22,020 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:22,020 | INFO | [SIG] No signal found
+2026-02-23 09:36:42,083 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,131 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,175 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,217 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,265 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,308 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,353 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,399 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:36:42,399 | INFO | [SIG] No signal found
+2026-02-23 09:37:02,464 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,503 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,547 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,585 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,632 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,674 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,744 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,783 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:02,783 | INFO | [SIG] No signal found
+2026-02-23 09:37:22,831 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:22,868 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:22,915 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:22,953 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:22,991 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:23,031 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:23,069 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:23,109 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:23,109 | INFO | [SIG] No signal found
+2026-02-23 09:37:43,154 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,192 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,231 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,268 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,304 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,343 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,388 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,432 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:37:43,432 | INFO | [SIG] No signal found
+2026-02-23 09:38:03,481 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,523 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,563 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,602 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,651 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,689 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,731 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,775 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:03,775 | INFO | [SIG] No signal found
+2026-02-23 09:38:23,839 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:23,882 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:23,922 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:23,977 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:24,020 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:24,061 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:24,101 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:24,148 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:24,148 | INFO | [SIG] No signal found
+2026-02-23 09:38:44,198 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,238 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,278 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,324 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,381 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,426 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,464 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,505 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:38:44,505 | INFO | [SIG] No signal found
+2026-02-23 09:39:04,564 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,620 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,657 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,694 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,733 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,774 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,813 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,853 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:04,853 | INFO | [SIG] No signal found
+2026-02-23 09:39:24,904 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:24,944 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:24,984 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,025 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,064 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,107 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,146 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,189 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:25,189 | INFO | [SIG] No signal found
+2026-02-23 09:39:45,247 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,285 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,327 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,363 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,411 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,450 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,488 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,526 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:39:45,526 | INFO | [SIG] No signal found
+2026-02-23 09:40:05,575 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,618 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,654 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,693 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,733 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,775 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,816 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,855 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:05,855 | INFO | [SIG] No signal found
+2026-02-23 09:40:25,905 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:25,943 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:25,985 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,024 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,063 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,106 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,141 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,192 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:26,193 | INFO | [SIG] No signal found
+2026-02-23 09:40:46,243 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,283 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,321 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,360 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,411 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,453 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,495 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,536 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:40:46,537 | INFO | [SIG] No signal found
+2026-02-23 09:41:06,593 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,631 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,668 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,706 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,751 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,793 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,845 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,885 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:06,885 | INFO | [SIG] No signal found
+2026-02-23 09:41:26,933 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:26,968 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,006 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,044 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,080 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,119 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,161 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,195 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:27,195 | INFO | [SIG] No signal found
+2026-02-23 09:41:47,287 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,330 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,368 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,410 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,448 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,486 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,552 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,591 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:41:47,591 | INFO | [SIG] No signal found
+2026-02-23 09:42:07,636 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,676 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,712 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,749 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,792 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,828 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,864 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,904 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:07,904 | INFO | [SIG] No signal found
+2026-02-23 09:42:27,957 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,014 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,064 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,105 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,150 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,190 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,235 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,273 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:28,273 | INFO | [SIG] No signal found
+2026-02-23 09:42:48,329 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,373 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,416 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,459 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,506 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,547 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,585 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,626 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:42:48,626 | INFO | [SIG] No signal found
+2026-02-23 09:43:08,677 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,715 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,762 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,803 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,843 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,879 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,916 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,951 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:08,951 | INFO | [SIG] No signal found
+2026-02-23 09:43:29,011 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,051 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,095 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,141 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,180 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,235 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,273 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,314 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:29,314 | INFO | [SIG] No signal found
+2026-02-23 09:43:49,369 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,409 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,446 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,485 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,530 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,567 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,605 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,645 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:43:49,645 | INFO | [SIG] No signal found
+2026-02-23 09:44:09,694 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,744 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,788 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,827 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,867 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,905 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,944 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,989 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:09,989 | INFO | [SIG] No signal found
+2026-02-23 09:44:30,042 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,079 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,119 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,157 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,198 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,244 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,285 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,325 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:30,326 | INFO | [SIG] No signal found
+2026-02-23 09:44:50,369 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,405 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,440 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,473 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,508 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,545 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,580 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,624 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:44:50,624 | INFO | [SIG] No signal found
+2026-02-23 09:45:10,677 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,716 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,758 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,803 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,856 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,894 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,946 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,986 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:10,986 | INFO | [SIG] No signal found
+2026-02-23 09:45:31,030 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,072 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,109 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,145 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,184 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,228 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,266 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,302 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:31,302 | INFO | [SIG] No signal found
+2026-02-23 09:45:51,358 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,396 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,435 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,477 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,516 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,556 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,596 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,635 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:45:51,635 | INFO | [SIG] No signal found
+2026-02-23 09:46:11,698 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,733 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,771 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,810 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,846 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,882 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,924 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,963 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:11,963 | INFO | [SIG] No signal found
+2026-02-23 09:46:32,019 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,058 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,103 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,140 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,185 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,222 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,259 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,294 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:32,294 | INFO | [SIG] No signal found
+2026-02-23 09:46:52,348 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,384 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,421 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,460 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,495 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,534 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,571 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,612 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:46:52,612 | INFO | [SIG] No signal found
+2026-02-23 09:47:12,672 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,714 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,754 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,793 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,837 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,875 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,913 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,968 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:12,968 | INFO | [SIG] No signal found
+2026-02-23 09:47:33,020 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,061 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,097 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,134 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,170 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,206 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,240 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,278 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:33,278 | INFO | [SIG] No signal found
+2026-02-23 09:47:53,323 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,362 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,397 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,445 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,492 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,533 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,570 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,606 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:47:53,607 | INFO | [SIG] No signal found
+2026-02-23 09:48:13,656 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,696 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,740 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,785 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,830 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,869 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,910 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,950 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:13,950 | INFO | [SIG] No signal found
+2026-02-23 09:48:33,996 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,034 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,070 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,106 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,144 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,178 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,213 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,248 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:34,248 | INFO | [SIG] No signal found
+2026-02-23 09:48:54,315 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,352 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,388 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,429 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,467 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,502 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,540 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,580 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:48:54,580 | INFO | [SIG] No signal found
+2026-02-23 09:49:14,626 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,662 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,697 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,733 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,776 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,812 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,847 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,883 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:14,884 | INFO | [SIG] No signal found
+2026-02-23 09:49:34,926 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:34,960 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,005 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,040 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,075 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,113 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,148 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,183 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:35,183 | INFO | [SIG] No signal found
+2026-02-23 09:49:55,235 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,276 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,324 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,363 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,408 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,455 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,496 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,540 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:49:55,540 | INFO | [SIG] No signal found
+2026-02-23 09:50:15,587 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,628 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,668 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,705 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,744 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,784 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,821 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,861 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:15,861 | INFO | [SIG] No signal found
+2026-02-23 09:50:35,911 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:35,949 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:35,989 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,029 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,078 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,119 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,160 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,229 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:36,229 | INFO | [SIG] No signal found
+2026-02-23 09:50:56,286 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,329 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,370 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,408 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,451 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,492 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,532 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,578 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:50:56,578 | INFO | [SIG] No signal found
+2026-02-23 09:51:16,624 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,664 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,708 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,749 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,788 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,823 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,859 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,894 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:16,894 | INFO | [SIG] No signal found
+2026-02-23 09:51:36,945 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:36,980 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,016 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,053 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,087 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,125 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,163 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,198 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:37,198 | INFO | [SIG] No signal found
+2026-02-23 09:51:57,244 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,281 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,317 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,353 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,387 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,423 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,469 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,505 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:51:57,505 | INFO | [SIG] No signal found
+2026-02-23 09:52:17,551 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,591 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,630 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,665 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,700 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,735 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,771 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,808 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:17,808 | INFO | [SIG] No signal found
+2026-02-23 09:52:37,860 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:37,895 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:37,930 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:37,964 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:38,009 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:38,044 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:38,078 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:38,114 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:38,114 | INFO | [SIG] No signal found
+2026-02-23 09:52:58,166 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,209 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,247 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,294 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,337 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,381 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,436 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,485 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:52:58,485 | INFO | [SIG] No signal found
+2026-02-23 09:53:18,533 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,567 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,602 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,639 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,674 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,710 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,752 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,792 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:18,792 | INFO | [SIG] No signal found
+2026-02-23 09:53:38,850 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:38,888 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:38,924 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:38,961 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:38,998 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:39,037 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:39,076 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:39,112 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:39,112 | INFO | [SIG] No signal found
+2026-02-23 09:53:59,159 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,196 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,231 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,267 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,303 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,340 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,377 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,413 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:53:59,413 | INFO | [SIG] No signal found
+2026-02-23 09:54:19,455 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,490 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,527 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,560 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,596 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,629 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,676 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,719 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:19,719 | INFO | [SIG] No signal found
+2026-02-23 09:54:39,761 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,797 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,835 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,872 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,907 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,942 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:39,985 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:40,019 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:54:40,019 | INFO | [SIG] No signal found
+2026-02-23 09:55:00,148 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,190 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,236 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,272 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,319 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,358 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,399 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,438 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:00,439 | INFO | [SIG] No signal found
+2026-02-23 09:55:20,493 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,527 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,562 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,597 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,633 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,669 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,702 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,735 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:20,735 | INFO | [SIG] No signal found
+2026-02-23 09:55:40,779 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:40,815 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:40,849 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:40,884 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:40,920 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:40,961 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:41,001 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:41,046 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:55:41,047 | INFO | [SIG] No signal found
+2026-02-23 09:56:01,099 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,144 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,198 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,293 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,340 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,495 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,603 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,697 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:01,697 | INFO | [SIG] No signal found
+2026-02-23 09:56:21,742 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,789 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,833 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,874 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,915 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,956 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:21,993 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:22,033 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:22,033 | INFO | [SIG] No signal found
+2026-02-23 09:56:42,081 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,125 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,164 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,206 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,243 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,279 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,317 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,356 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:56:42,356 | INFO | [SIG] No signal found
+2026-02-23 09:57:02,423 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,463 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,509 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,551 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,591 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,630 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,677 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,718 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:02,718 | INFO | [SIG] No signal found
+2026-02-23 09:57:22,762 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,795 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,832 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,882 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,920 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,954 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:22,999 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:23,036 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:23,037 | INFO | [SIG] No signal found
+2026-02-23 09:57:43,087 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,129 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,168 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,208 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,250 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,291 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,330 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,367 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:57:43,367 | INFO | [SIG] No signal found
+2026-02-23 09:58:03,417 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,454 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,495 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,533 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,571 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,610 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,647 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,687 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:03,687 | INFO | [SIG] No signal found
+2026-02-23 09:58:23,742 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,781 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,830 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,875 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,918 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,957 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:23,998 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:24,040 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:24,041 | INFO | [SIG] No signal found
+2026-02-23 09:58:44,099 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,137 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,181 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,227 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,284 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,332 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,380 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,432 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:58:44,432 | INFO | [SIG] No signal found
+2026-02-23 09:59:04,480 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,520 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,557 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,599 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,636 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,671 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,709 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,746 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:04,746 | INFO | [SIG] No signal found
+2026-02-23 09:59:24,793 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:24,845 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:24,883 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:24,919 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:24,954 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:24,988 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:25,025 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:25,061 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:25,061 | INFO | [SIG] No signal found
+2026-02-23 09:59:45,132 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,174 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,214 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,255 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,298 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,347 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,386 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,429 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 09:59:45,429 | INFO | [SIG] No signal found
+2026-02-23 10:00:05,495 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,635 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,674 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,725 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,772 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,831 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,889 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:05,984 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:06,074 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:06,075 | INFO | [SIG] No signal found
+2026-02-23 10:00:26,122 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,173 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,212 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,248 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,284 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,320 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,359 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,396 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,433 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:26,433 | INFO | [SIG] No signal found
+2026-02-23 10:00:46,486 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,534 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,571 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,610 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,646 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,683 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,718 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,754 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,796 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:00:46,796 | INFO | [SIG] No signal found
+2026-02-23 10:01:06,851 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:06,906 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:06,961 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,009 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,067 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,124 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,166 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,207 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,251 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:07,251 | INFO | [SIG] No signal found
+2026-02-23 10:01:27,296 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,341 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,380 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,426 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,476 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,515 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,558 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,596 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,635 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:27,635 | INFO | [SIG] No signal found
+2026-02-23 10:01:47,685 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,736 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,780 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,820 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,858 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,900 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,944 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:47,982 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:48,037 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:01:48,037 | INFO | [SIG] No signal found
+2026-02-23 10:02:08,087 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,135 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,172 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,211 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,248 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,287 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,333 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,372 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,411 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:08,411 | INFO | [SIG] No signal found
+2026-02-23 10:02:28,462 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,520 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,561 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,603 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,687 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,725 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,773 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,822 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,867 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:28,867 | INFO | [SIG] No signal found
+2026-02-23 10:02:48,920 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:48,969 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,006 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,041 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,085 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,121 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,161 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,206 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,242 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:02:49,242 | INFO | [SIG] No signal found
+2026-02-23 10:03:09,295 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,340 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,383 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,420 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,456 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,491 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,529 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,571 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,607 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:09,607 | INFO | [SIG] No signal found
+2026-02-23 10:03:29,656 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,709 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,747 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,788 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,827 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,872 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,909 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,949 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,988 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:29,989 | INFO | [SIG] No signal found
+2026-02-23 10:03:50,037 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,085 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,124 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,163 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,204 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,244 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,280 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,318 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,356 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:03:50,356 | INFO | [SIG] No signal found
+2026-02-23 10:04:10,408 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,463 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,503 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,566 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,615 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,656 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,696 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,733 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,778 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:10,779 | INFO | [SIG] No signal found
+2026-02-23 10:04:30,824 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:30,880 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:30,922 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:30,958 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,002 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,040 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,078 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,124 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,164 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:31,164 | INFO | [SIG] No signal found
+2026-02-23 10:04:51,210 | WARNING | [STABLE] Stability check failed: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,256 | WARNING | [SIG] SBIN skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,305 | WARNING | [SIG] LT skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,343 | WARNING | [SIG] ICICIBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,391 | WARNING | [SIG] RELIANCE skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,431 | WARNING | [SIG] HDFCBANK skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,478 | WARNING | [SIG] INFY skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,516 | WARNING | [SIG] TCS skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,554 | WARNING | [SIG] ITC skipped: Incorrect `api_key` or `access_token`.
+2026-02-23 10:04:51,555 | INFO | [SIG] No signal found
+2026-02-23 14:59:00,205 | INFO | [BOT] Telegram bot started
+2026-02-23 14:59:00,205 | INFO | [LOOP] Trading loop started
+2026-02-23 14:59:00,205 | INFO | [TICK] Tick running
+2026-02-23 14:59:00,205 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 14:59:00,206 | INFO | [NIGHT] Night scheduler active
+2026-02-23 14:59:20,206 | INFO | [TICK] Tick running
+2026-02-23 14:59:20,206 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 14:59:40,206 | INFO | [TICK] Tick running
+2026-02-23 14:59:40,206 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 15:00:00,206 | INFO | [TICK] Tick running
+2026-02-23 15:00:00,207 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 15:00:20,207 | INFO | [TICK] Tick running
+2026-02-23 15:00:20,207 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 15:00:40,207 | INFO | [TICK] Tick running
+2026-02-23 15:00:40,207 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 15:01:00,208 | INFO | [TICK] Tick running
+2026-02-23 15:01:20,208 | INFO | [TICK] Tick running
+2026-02-23 15:01:40,208 | INFO | [TICK] Tick running
+2026-02-23 15:01:45,452 | INFO | [NIGHT] Night research started
+2026-02-23 15:01:51,446 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 15:02:00,209 | INFO | [TICK] Tick running
+2026-02-23 15:02:20,209 | INFO | [TICK] Tick running
+2026-02-23 15:02:40,209 | INFO | [TICK] Tick running
+2026-02-23 15:03:00,210 | INFO | [TICK] Tick running
+2026-02-23 15:03:20,210 | INFO | [TICK] Tick running
+2026-02-23 15:03:40,211 | INFO | [TICK] Tick running
+2026-02-23 15:04:00,211 | INFO | [TICK] Tick running
+2026-02-23 15:04:20,211 | INFO | [TICK] Tick running
+2026-02-23 15:04:40,212 | INFO | [TICK] Tick running
+2026-02-23 15:05:00,212 | INFO | [TICK] Tick running
+2026-02-23 15:05:20,212 | INFO | [TICK] Tick running
+2026-02-23 15:05:40,213 | INFO | [TICK] Tick running
+2026-02-23 15:06:00,213 | INFO | [TICK] Tick running
+2026-02-23 15:06:20,213 | INFO | [TICK] Tick running
+2026-02-23 15:06:40,214 | INFO | [TICK] Tick running
+2026-02-23 15:07:00,214 | INFO | [TICK] Tick running
+2026-02-23 15:07:20,215 | INFO | [TICK] Tick running
+2026-02-23 15:07:40,215 | INFO | [TICK] Tick running
+2026-02-23 15:08:00,215 | INFO | [TICK] Tick running
+2026-02-23 15:08:20,216 | INFO | [TICK] Tick running
+2026-02-23 15:08:40,216 | INFO | [TICK] Tick running
+2026-02-23 15:09:00,216 | INFO | [TICK] Tick running
+2026-02-23 15:09:20,217 | INFO | [TICK] Tick running
+2026-02-23 15:09:40,217 | INFO | [TICK] Tick running
+2026-02-23 15:10:00,218 | INFO | [TICK] Tick running
+2026-02-23 15:10:20,218 | INFO | [TICK] Tick running
+2026-02-23 15:10:40,218 | INFO | [TICK] Tick running
+2026-02-23 15:11:00,219 | INFO | [TICK] Tick running
+2026-02-23 15:11:20,219 | INFO | [TICK] Tick running
+2026-02-23 15:11:40,219 | INFO | [TICK] Tick running
+2026-02-23 15:12:00,220 | INFO | [TICK] Tick running
+2026-02-23 15:12:20,220 | INFO | [TICK] Tick running
+2026-02-23 15:12:40,220 | INFO | [TICK] Tick running
+2026-02-23 15:13:00,221 | INFO | [TICK] Tick running
+2026-02-23 15:13:20,221 | INFO | [TICK] Tick running
+2026-02-23 15:13:40,221 | INFO | [TICK] Tick running
+2026-02-23 15:14:00,222 | INFO | [TICK] Tick running
+2026-02-23 15:14:20,222 | INFO | [TICK] Tick running
+2026-02-23 15:14:40,223 | INFO | [TICK] Tick running
+2026-02-23 15:15:00,223 | INFO | [TICK] Tick running
+2026-02-23 15:15:20,223 | INFO | [TICK] Tick running
+2026-02-23 15:15:40,224 | INFO | [TICK] Tick running
+2026-02-23 15:16:00,224 | INFO | [TICK] Tick running
+2026-02-23 15:16:20,225 | INFO | [TICK] Tick running
+2026-02-23 15:16:40,225 | INFO | [TICK] Tick running
+2026-02-23 15:17:00,225 | INFO | [TICK] Tick running
+2026-02-23 15:17:20,226 | INFO | [TICK] Tick running
+2026-02-23 15:17:40,226 | INFO | [TICK] Tick running
+2026-02-23 15:18:00,226 | INFO | [TICK] Tick running
+2026-02-23 15:18:20,227 | INFO | [TICK] Tick running
+2026-02-23 15:18:40,227 | INFO | [TICK] Tick running
+2026-02-23 15:19:00,227 | INFO | [TICK] Tick running
+2026-02-23 15:19:20,228 | INFO | [TICK] Tick running
+2026-02-23 15:19:40,228 | INFO | [TICK] Tick running
+2026-02-23 15:20:00,229 | INFO | [TICK] Tick running
+2026-02-23 15:20:20,229 | INFO | [TICK] Tick running
+2026-02-23 15:20:40,229 | INFO | [TICK] Tick running
+2026-02-23 15:21:00,230 | INFO | [TICK] Tick running
+2026-02-23 15:21:20,230 | INFO | [TICK] Tick running
+2026-02-23 15:21:40,231 | INFO | [TICK] Tick running
+2026-02-23 15:22:00,231 | INFO | [TICK] Tick running
+2026-02-23 15:22:20,231 | INFO | [TICK] Tick running
+2026-02-23 15:22:40,232 | INFO | [TICK] Tick running
+2026-02-23 15:23:00,232 | INFO | [TICK] Tick running
+2026-02-23 15:23:20,233 | INFO | [TICK] Tick running
+2026-02-23 15:23:40,233 | INFO | [TICK] Tick running
+2026-02-23 15:24:00,233 | INFO | [TICK] Tick running
+2026-02-23 15:24:20,234 | INFO | [TICK] Tick running
+2026-02-23 15:24:40,234 | INFO | [TICK] Tick running
+2026-02-23 15:25:00,234 | INFO | [TICK] Tick running
+2026-02-23 15:25:20,235 | INFO | [TICK] Tick running
+2026-02-23 15:25:40,235 | INFO | [TICK] Tick running
+2026-02-23 15:26:00,235 | INFO | [TICK] Tick running
+2026-02-23 15:26:20,236 | INFO | [TICK] Tick running
+2026-02-23 15:26:40,236 | INFO | [TICK] Tick running
+2026-02-23 15:27:00,236 | INFO | [TICK] Tick running
+2026-02-23 15:27:20,237 | INFO | [TICK] Tick running
+2026-02-23 15:27:40,237 | INFO | [TICK] Tick running
+2026-02-23 15:28:00,237 | INFO | [TICK] Tick running
+2026-02-23 15:28:20,238 | INFO | [TICK] Tick running
+2026-02-23 15:28:40,238 | INFO | [TICK] Tick running
+2026-02-23 15:29:00,239 | INFO | [TICK] Tick running
+2026-02-23 15:29:20,239 | INFO | [TICK] Tick running
+2026-02-23 15:29:40,239 | INFO | [TICK] Tick running
+2026-02-23 15:30:00,240 | INFO | [TICK] Tick running
+2026-02-23 15:30:20,240 | INFO | [TICK] Tick running
+2026-02-23 15:30:40,240 | INFO | [TICK] Tick running
+2026-02-23 15:31:00,241 | INFO | [TICK] Tick running
+2026-02-23 15:31:20,241 | INFO | [TICK] Tick running
+2026-02-23 15:31:40,241 | INFO | [TICK] Tick running
+2026-02-23 15:32:00,242 | INFO | [TICK] Tick running
+2026-02-23 15:32:20,242 | INFO | [TICK] Tick running
+2026-02-23 15:32:40,243 | INFO | [TICK] Tick running
+2026-02-23 15:33:00,243 | INFO | [TICK] Tick running
+2026-02-23 15:33:20,243 | INFO | [TICK] Tick running
+2026-02-23 15:33:40,244 | INFO | [TICK] Tick running
+2026-02-23 15:34:00,244 | INFO | [TICK] Tick running
+2026-02-23 15:34:20,244 | INFO | [TICK] Tick running
+2026-02-23 15:34:40,245 | INFO | [TICK] Tick running
+2026-02-23 15:35:00,245 | INFO | [TICK] Tick running
+2026-02-23 15:35:20,246 | INFO | [TICK] Tick running
+2026-02-23 15:35:40,246 | INFO | [TICK] Tick running
+2026-02-23 15:36:00,246 | INFO | [TICK] Tick running
+2026-02-23 15:36:20,247 | INFO | [TICK] Tick running
+2026-02-23 15:36:40,247 | INFO | [TICK] Tick running
+2026-02-23 15:37:00,248 | INFO | [TICK] Tick running
+2026-02-23 15:37:20,248 | INFO | [TICK] Tick running
+2026-02-23 15:37:40,248 | INFO | [TICK] Tick running
+2026-02-23 15:38:00,249 | INFO | [TICK] Tick running
+2026-02-23 15:38:20,249 | INFO | [TICK] Tick running
+2026-02-23 15:38:40,249 | INFO | [TICK] Tick running
+2026-02-23 15:39:00,250 | INFO | [TICK] Tick running
+2026-02-23 15:39:20,250 | INFO | [TICK] Tick running
+2026-02-23 15:39:40,250 | INFO | [TICK] Tick running
+2026-02-23 15:40:00,251 | INFO | [TICK] Tick running
+2026-02-23 15:40:20,251 | INFO | [TICK] Tick running
+2026-02-23 15:40:40,252 | INFO | [TICK] Tick running
+2026-02-23 15:41:00,252 | INFO | [TICK] Tick running
+2026-02-23 15:41:20,252 | INFO | [TICK] Tick running
+2026-02-23 15:41:40,253 | INFO | [TICK] Tick running
+2026-02-23 15:42:00,253 | INFO | [TICK] Tick running
+2026-02-23 15:42:20,253 | INFO | [TICK] Tick running
+2026-02-23 15:42:40,254 | INFO | [TICK] Tick running
+2026-02-23 15:43:00,254 | INFO | [TICK] Tick running
+2026-02-23 15:43:20,255 | INFO | [TICK] Tick running
+2026-02-23 15:43:40,255 | INFO | [TICK] Tick running
+2026-02-23 15:44:00,255 | INFO | [TICK] Tick running
+2026-02-23 15:44:20,256 | INFO | [TICK] Tick running
+2026-02-23 15:44:40,257 | INFO | [TICK] Tick running
+2026-02-23 15:45:00,257 | INFO | [TICK] Tick running
+2026-02-23 15:45:20,258 | INFO | [TICK] Tick running
+2026-02-23 15:45:40,258 | INFO | [TICK] Tick running
+2026-02-23 15:46:00,259 | INFO | [TICK] Tick running
+2026-02-23 15:46:20,259 | INFO | [TICK] Tick running
+2026-02-23 15:46:40,259 | INFO | [TICK] Tick running
+2026-02-23 15:47:00,260 | INFO | [TICK] Tick running
+2026-02-23 15:47:20,260 | INFO | [TICK] Tick running
+2026-02-23 15:47:40,260 | INFO | [TICK] Tick running
+2026-02-23 15:48:00,261 | INFO | [TICK] Tick running
+2026-02-23 15:48:20,261 | INFO | [TICK] Tick running
+2026-02-23 15:48:40,261 | INFO | [TICK] Tick running
+2026-02-23 15:49:00,262 | INFO | [TICK] Tick running
+2026-02-23 15:49:20,262 | INFO | [TICK] Tick running
+2026-02-23 15:49:40,262 | INFO | [TICK] Tick running
+2026-02-23 15:50:00,263 | INFO | [TICK] Tick running
+2026-02-23 15:50:20,263 | INFO | [TICK] Tick running
+2026-02-23 15:50:40,264 | INFO | [TICK] Tick running
+2026-02-23 15:51:00,264 | INFO | [TICK] Tick running
+2026-02-23 15:51:20,264 | INFO | [TICK] Tick running
+2026-02-23 15:51:40,265 | INFO | [TICK] Tick running
+2026-02-23 15:52:00,265 | INFO | [TICK] Tick running
+2026-02-23 15:52:20,265 | INFO | [TICK] Tick running
+2026-02-23 15:52:40,266 | INFO | [TICK] Tick running
+2026-02-23 15:53:00,266 | INFO | [TICK] Tick running
+2026-02-23 15:53:20,267 | INFO | [TICK] Tick running
+2026-02-23 15:53:40,267 | INFO | [TICK] Tick running
+2026-02-23 15:54:00,267 | INFO | [TICK] Tick running
+2026-02-23 15:54:20,268 | INFO | [TICK] Tick running
+2026-02-23 15:54:40,268 | INFO | [TICK] Tick running
+2026-02-23 15:55:00,268 | INFO | [TICK] Tick running
+2026-02-23 15:55:20,269 | INFO | [TICK] Tick running
+2026-02-23 15:55:40,269 | INFO | [TICK] Tick running
+2026-02-23 15:56:00,269 | INFO | [TICK] Tick running
+2026-02-23 15:56:20,270 | INFO | [TICK] Tick running
+2026-02-23 15:56:40,270 | INFO | [TICK] Tick running
+2026-02-23 15:57:00,271 | INFO | [TICK] Tick running
+2026-02-23 15:57:20,271 | INFO | [TICK] Tick running
+2026-02-23 15:57:40,271 | INFO | [TICK] Tick running
+2026-02-23 15:58:00,272 | INFO | [TICK] Tick running
+2026-02-23 15:58:20,272 | INFO | [TICK] Tick running
+2026-02-23 15:58:40,272 | INFO | [TICK] Tick running
+2026-02-23 15:59:00,273 | INFO | [TICK] Tick running
+2026-02-23 15:59:20,273 | INFO | [TICK] Tick running
+2026-02-23 15:59:40,273 | INFO | [TICK] Tick running
+2026-02-23 16:00:00,274 | INFO | [TICK] Tick running
+2026-02-23 16:00:20,274 | INFO | [TICK] Tick running
+2026-02-23 16:00:20,274 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:00:40,275 | INFO | [TICK] Tick running
+2026-02-23 16:00:58,880 | INFO | [NIGHT] Night research started
+2026-02-23 16:01:00,275 | INFO | [TICK] Tick running
+2026-02-23 16:01:04,576 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 16:01:20,275 | INFO | [TICK] Tick running
+2026-02-23 16:01:40,276 | INFO | [TICK] Tick running
+2026-02-23 16:02:00,276 | INFO | [TICK] Tick running
+2026-02-23 16:02:20,277 | INFO | [TICK] Tick running
+2026-02-23 16:02:40,277 | INFO | [TICK] Tick running
+2026-02-23 16:03:00,277 | INFO | [TICK] Tick running
+2026-02-23 16:03:20,278 | INFO | [TICK] Tick running
+2026-02-23 16:03:40,278 | INFO | [TICK] Tick running
+2026-02-23 16:04:00,278 | INFO | [TICK] Tick running
+2026-02-23 16:04:20,279 | INFO | [TICK] Tick running
+2026-02-23 16:04:40,279 | INFO | [TICK] Tick running
+2026-02-23 16:05:00,279 | INFO | [TICK] Tick running
+2026-02-23 16:05:20,280 | INFO | [TICK] Tick running
+2026-02-23 16:05:40,280 | INFO | [TICK] Tick running
+2026-02-23 16:06:00,281 | INFO | [TICK] Tick running
+2026-02-23 16:06:20,281 | INFO | [TICK] Tick running
+2026-02-23 16:06:40,281 | INFO | [TICK] Tick running
+2026-02-23 16:07:00,282 | INFO | [TICK] Tick running
+2026-02-23 16:07:20,282 | INFO | [TICK] Tick running
+2026-02-23 16:07:40,282 | INFO | [TICK] Tick running
+2026-02-23 16:08:00,283 | INFO | [TICK] Tick running
+2026-02-23 16:08:20,283 | INFO | [TICK] Tick running
+2026-02-23 16:08:40,283 | INFO | [TICK] Tick running
+2026-02-23 16:09:00,284 | INFO | [TICK] Tick running
+2026-02-23 16:09:20,284 | INFO | [TICK] Tick running
+2026-02-23 16:09:40,284 | INFO | [TICK] Tick running
+2026-02-23 16:10:00,285 | INFO | [TICK] Tick running
+2026-02-23 16:10:20,285 | INFO | [TICK] Tick running
+2026-02-23 16:10:40,286 | INFO | [TICK] Tick running
+2026-02-23 16:11:00,286 | INFO | [TICK] Tick running
+2026-02-23 16:11:20,286 | INFO | [TICK] Tick running
+2026-02-23 16:11:40,287 | INFO | [TICK] Tick running
+2026-02-23 16:12:00,287 | INFO | [TICK] Tick running
+2026-02-23 16:12:20,288 | INFO | [TICK] Tick running
+2026-02-23 16:12:40,288 | INFO | [TICK] Tick running
+2026-02-23 16:13:00,288 | INFO | [TICK] Tick running
+2026-02-23 16:13:20,289 | INFO | [TICK] Tick running
+2026-02-23 16:13:40,289 | INFO | [TICK] Tick running
+2026-02-23 16:14:00,289 | INFO | [TICK] Tick running
+2026-02-23 16:14:20,290 | INFO | [TICK] Tick running
+2026-02-23 16:14:40,290 | INFO | [TICK] Tick running
+2026-02-23 16:15:00,290 | INFO | [TICK] Tick running
+2026-02-23 16:15:20,291 | INFO | [TICK] Tick running
+2026-02-23 16:15:40,291 | INFO | [TICK] Tick running
+2026-02-23 16:16:00,292 | INFO | [TICK] Tick running
+2026-02-23 16:16:20,292 | INFO | [TICK] Tick running
+2026-02-23 16:16:40,292 | INFO | [TICK] Tick running
+2026-02-23 16:17:00,293 | INFO | [TICK] Tick running
+2026-02-23 16:17:20,293 | INFO | [TICK] Tick running
+2026-02-23 16:17:40,293 | INFO | [TICK] Tick running
+2026-02-23 16:18:00,294 | INFO | [TICK] Tick running
+2026-02-23 16:18:20,294 | INFO | [TICK] Tick running
+2026-02-23 16:18:40,295 | INFO | [TICK] Tick running
+2026-02-23 16:19:00,295 | INFO | [TICK] Tick running
+2026-02-23 16:19:20,295 | INFO | [TICK] Tick running
+2026-02-23 16:19:40,296 | INFO | [TICK] Tick running
+2026-02-23 16:20:00,296 | INFO | [TICK] Tick running
+2026-02-23 16:20:20,296 | INFO | [TICK] Tick running
+2026-02-23 16:20:40,297 | INFO | [TICK] Tick running
+2026-02-23 16:21:00,297 | INFO | [TICK] Tick running
+2026-02-23 16:21:20,297 | INFO | [TICK] Tick running
+2026-02-23 16:21:40,298 | INFO | [TICK] Tick running
+2026-02-23 16:22:00,298 | INFO | [TICK] Tick running
+2026-02-23 16:22:20,299 | INFO | [TICK] Tick running
+2026-02-23 16:22:40,299 | INFO | [TICK] Tick running
+2026-02-23 16:23:00,299 | INFO | [TICK] Tick running
+2026-02-23 16:23:20,300 | INFO | [TICK] Tick running
+2026-02-23 16:23:23,003 | INFO | [BOT] Telegram bot started
+2026-02-23 16:23:23,004 | INFO | [LOOP] Trading loop started
+2026-02-23 16:23:23,004 | INFO | [TICK] Tick running
+2026-02-23 16:23:23,004 | INFO | [NIGHT] Night scheduler active
+2026-02-23 16:23:23,005 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:23:43,005 | INFO | [TICK] Tick running
+2026-02-23 16:23:43,005 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:24:03,006 | INFO | [TICK] Tick running
+2026-02-23 16:24:03,006 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:24:23,006 | INFO | [TICK] Tick running
+2026-02-23 16:24:23,006 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:24:43,006 | INFO | [TICK] Tick running
+2026-02-23 16:24:43,007 | INFO | [TICK] Paused=True (use /startloop)
+2026-02-23 16:25:03,007 | INFO | [TICK] Tick running
+2026-02-23 16:25:23,007 | INFO | [TICK] Tick running
+2026-02-23 16:25:43,007 | INFO | [TICK] Tick running
+2026-02-23 16:26:03,008 | INFO | [TICK] Tick running
+2026-02-23 16:26:23,008 | INFO | [TICK] Tick running
+2026-02-23 16:26:43,008 | INFO | [TICK] Tick running
+2026-02-23 16:27:03,009 | INFO | [TICK] Tick running
+2026-02-23 16:27:23,009 | INFO | [TICK] Tick running
+2026-02-23 16:27:37,831 | INFO | [NIGHT] Night research started
+2026-02-23 16:27:43,010 | INFO | [TICK] Tick running
+2026-02-23 16:27:43,815 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 16:28:03,010 | INFO | [TICK] Tick running
+2026-02-23 16:28:23,011 | INFO | [TICK] Tick running
+2026-02-23 16:28:43,011 | INFO | [TICK] Tick running
+2026-02-23 16:29:03,011 | INFO | [TICK] Tick running
+2026-02-23 16:29:23,012 | INFO | [TICK] Tick running
+2026-02-23 16:29:43,012 | INFO | [TICK] Tick running
+2026-02-23 16:30:03,013 | INFO | [TICK] Tick running
+2026-02-23 16:30:23,013 | INFO | [TICK] Tick running
+2026-02-23 16:30:43,013 | INFO | [TICK] Tick running
+2026-02-23 16:31:03,014 | INFO | [TICK] Tick running
+2026-02-23 16:31:23,015 | INFO | [TICK] Tick running
+2026-02-23 16:31:43,015 | INFO | [TICK] Tick running
+2026-02-23 16:32:03,015 | INFO | [TICK] Tick running
+2026-02-23 16:32:23,016 | INFO | [TICK] Tick running
+2026-02-23 16:32:43,016 | INFO | [TICK] Tick running
+2026-02-23 16:33:03,016 | INFO | [TICK] Tick running
+2026-02-23 16:33:23,017 | INFO | [TICK] Tick running
+2026-02-23 16:33:43,017 | INFO | [TICK] Tick running
+2026-02-23 16:34:03,018 | INFO | [TICK] Tick running
+2026-02-23 16:34:23,018 | INFO | [TICK] Tick running
+2026-02-23 16:34:43,018 | INFO | [TICK] Tick running
+2026-02-23 16:35:03,019 | INFO | [TICK] Tick running
+2026-02-23 16:35:23,019 | INFO | [TICK] Tick running
+2026-02-23 16:35:43,020 | INFO | [TICK] Tick running
+2026-02-23 16:36:03,020 | INFO | [TICK] Tick running
+2026-02-23 16:36:23,021 | INFO | [TICK] Tick running
+2026-02-23 16:36:43,021 | INFO | [TICK] Tick running
+2026-02-23 16:37:03,021 | INFO | [TICK] Tick running
+2026-02-23 16:37:23,022 | INFO | [TICK] Tick running
+2026-02-23 16:37:43,022 | INFO | [TICK] Tick running
+2026-02-23 16:38:03,023 | INFO | [TICK] Tick running
+2026-02-23 16:38:23,023 | INFO | [TICK] Tick running
+2026-02-23 16:38:43,024 | INFO | [TICK] Tick running
+2026-02-23 16:39:03,024 | INFO | [TICK] Tick running
+2026-02-23 16:39:23,024 | INFO | [TICK] Tick running
+2026-02-23 16:39:43,025 | INFO | [TICK] Tick running
+2026-02-23 16:40:03,025 | INFO | [TICK] Tick running
+2026-02-23 16:40:23,025 | INFO | [TICK] Tick running
+2026-02-23 16:40:43,026 | INFO | [TICK] Tick running
+2026-02-23 16:41:03,026 | INFO | [TICK] Tick running
+2026-02-23 16:41:23,027 | INFO | [TICK] Tick running
+2026-02-23 16:41:43,027 | INFO | [TICK] Tick running
+2026-02-23 16:42:03,028 | INFO | [TICK] Tick running
+2026-02-23 16:42:23,028 | INFO | [TICK] Tick running
+2026-02-23 16:42:43,028 | INFO | [TICK] Tick running
+2026-02-23 16:43:03,029 | INFO | [TICK] Tick running
+2026-02-23 16:43:23,029 | INFO | [TICK] Tick running
+2026-02-23 16:43:43,029 | INFO | [TICK] Tick running
+2026-02-23 16:44:03,030 | INFO | [TICK] Tick running
+2026-02-23 16:44:23,030 | INFO | [TICK] Tick running
+2026-02-23 16:44:43,031 | INFO | [TICK] Tick running
+2026-02-23 16:45:03,031 | INFO | [TICK] Tick running
+2026-02-23 16:45:23,031 | INFO | [TICK] Tick running
+2026-02-23 16:45:43,032 | INFO | [TICK] Tick running
+2026-02-23 16:46:03,032 | INFO | [TICK] Tick running
+2026-02-23 16:46:23,032 | INFO | [TICK] Tick running
+2026-02-23 16:46:43,033 | INFO | [TICK] Tick running
+2026-02-23 16:47:03,033 | INFO | [TICK] Tick running
+2026-02-23 16:47:23,033 | INFO | [TICK] Tick running
+2026-02-23 16:47:43,034 | INFO | [TICK] Tick running
+2026-02-23 16:48:03,034 | INFO | [TICK] Tick running
+2026-02-23 16:48:23,035 | INFO | [TICK] Tick running
+2026-02-23 16:48:43,035 | INFO | [TICK] Tick running
+2026-02-23 16:49:03,035 | INFO | [TICK] Tick running
+2026-02-23 16:49:23,036 | INFO | [TICK] Tick running
+2026-02-23 16:49:43,036 | INFO | [TICK] Tick running
+2026-02-23 16:50:03,036 | INFO | [TICK] Tick running
+2026-02-23 16:50:23,037 | INFO | [TICK] Tick running
+2026-02-23 16:50:43,037 | INFO | [TICK] Tick running
+2026-02-23 16:51:03,037 | INFO | [TICK] Tick running
+2026-02-23 16:51:23,038 | INFO | [TICK] Tick running
+2026-02-23 16:51:43,038 | INFO | [TICK] Tick running
+2026-02-23 16:52:03,039 | INFO | [TICK] Tick running
+2026-02-23 16:52:23,039 | INFO | [TICK] Tick running
+2026-02-23 16:52:43,039 | INFO | [TICK] Tick running
+2026-02-23 16:53:03,040 | INFO | [TICK] Tick running
+2026-02-23 16:53:23,040 | INFO | [TICK] Tick running
+2026-02-23 16:53:43,040 | INFO | [TICK] Tick running
+2026-02-23 16:54:03,041 | INFO | [TICK] Tick running
+2026-02-23 16:54:23,041 | INFO | [TICK] Tick running
+2026-02-23 16:54:43,041 | INFO | [TICK] Tick running
+2026-02-23 16:55:03,042 | INFO | [TICK] Tick running
+2026-02-23 16:55:23,042 | INFO | [TICK] Tick running
+2026-02-23 16:55:43,042 | INFO | [TICK] Tick running
+2026-02-23 16:56:03,043 | INFO | [TICK] Tick running
+2026-02-23 16:56:23,043 | INFO | [TICK] Tick running
+2026-02-23 16:56:43,044 | INFO | [TICK] Tick running
+2026-02-23 16:57:03,044 | INFO | [TICK] Tick running
+2026-02-23 16:57:23,044 | INFO | [TICK] Tick running
+2026-02-23 16:57:43,045 | INFO | [TICK] Tick running
+2026-02-23 16:58:03,045 | INFO | [TICK] Tick running
+2026-02-23 16:58:23,045 | INFO | [TICK] Tick running
+2026-02-23 16:58:43,046 | INFO | [TICK] Tick running
+2026-02-23 16:59:03,046 | INFO | [TICK] Tick running
+2026-02-23 16:59:23,046 | INFO | [TICK] Tick running
+2026-02-23 16:59:43,047 | INFO | [TICK] Tick running
+2026-02-23 17:00:03,047 | INFO | [TICK] Tick running
+2026-02-23 17:00:23,048 | INFO | [TICK] Tick running
+2026-02-23 17:00:43,048 | INFO | [TICK] Tick running
+2026-02-23 17:01:03,048 | INFO | [TICK] Tick running
+2026-02-23 17:01:23,049 | INFO | [TICK] Tick running
+2026-02-23 17:01:43,049 | INFO | [TICK] Tick running
+2026-02-23 17:02:03,049 | INFO | [TICK] Tick running
+2026-02-23 17:02:23,050 | INFO | [TICK] Tick running
+2026-02-23 17:02:43,050 | INFO | [TICK] Tick running
+2026-02-23 17:03:03,050 | INFO | [TICK] Tick running
+2026-02-23 17:03:23,051 | INFO | [TICK] Tick running
+2026-02-23 17:03:43,051 | INFO | [TICK] Tick running
+2026-02-23 17:04:03,051 | INFO | [TICK] Tick running
+2026-02-23 17:04:23,052 | INFO | [TICK] Tick running
+2026-02-23 17:04:43,052 | INFO | [TICK] Tick running
+2026-02-23 17:05:03,053 | INFO | [TICK] Tick running
+2026-02-23 17:05:23,053 | INFO | [TICK] Tick running
+2026-02-23 17:05:43,053 | INFO | [TICK] Tick running
+2026-02-23 17:06:03,054 | INFO | [TICK] Tick running
+2026-02-23 17:06:23,054 | INFO | [TICK] Tick running
+2026-02-23 17:06:43,055 | INFO | [TICK] Tick running
+2026-02-23 17:07:03,055 | INFO | [TICK] Tick running
+2026-02-23 17:07:23,055 | INFO | [TICK] Tick running
+2026-02-23 17:07:43,056 | INFO | [TICK] Tick running
+2026-02-23 17:08:03,056 | INFO | [TICK] Tick running
+2026-02-23 17:08:23,056 | INFO | [TICK] Tick running
+2026-02-23 17:08:43,057 | INFO | [TICK] Tick running
+2026-02-23 17:09:03,057 | INFO | [TICK] Tick running
+2026-02-23 17:09:23,057 | INFO | [TICK] Tick running
+2026-02-23 17:09:43,058 | INFO | [TICK] Tick running
+2026-02-23 17:10:03,058 | INFO | [TICK] Tick running
+2026-02-23 17:10:23,059 | INFO | [TICK] Tick running
+2026-02-23 17:10:43,059 | INFO | [TICK] Tick running
+2026-02-23 17:11:03,059 | INFO | [TICK] Tick running
+2026-02-23 17:11:23,060 | INFO | [TICK] Tick running
+2026-02-23 17:11:43,060 | INFO | [TICK] Tick running
+2026-02-23 17:12:03,060 | INFO | [TICK] Tick running
+2026-02-23 17:12:23,061 | INFO | [TICK] Tick running
+2026-02-23 17:12:43,061 | INFO | [TICK] Tick running
+2026-02-23 17:13:03,061 | INFO | [TICK] Tick running
+2026-02-23 17:13:23,062 | INFO | [TICK] Tick running
+2026-02-23 17:13:43,062 | INFO | [TICK] Tick running
+2026-02-23 17:14:03,063 | INFO | [TICK] Tick running
+2026-02-23 17:14:23,063 | INFO | [TICK] Tick running
+2026-02-23 17:14:43,063 | INFO | [TICK] Tick running
+2026-02-23 17:15:03,064 | INFO | [TICK] Tick running
+2026-02-23 17:15:23,064 | INFO | [TICK] Tick running
+2026-02-23 17:15:43,064 | INFO | [TICK] Tick running
+2026-02-23 17:16:03,065 | INFO | [TICK] Tick running
+2026-02-23 17:16:23,065 | INFO | [TICK] Tick running
+2026-02-23 17:16:43,065 | INFO | [TICK] Tick running
+2026-02-23 17:17:03,066 | INFO | [TICK] Tick running
+2026-02-23 17:17:23,066 | INFO | [TICK] Tick running
+2026-02-23 17:17:43,066 | INFO | [TICK] Tick running
+2026-02-23 17:18:03,067 | INFO | [TICK] Tick running
+2026-02-23 17:18:23,067 | INFO | [TICK] Tick running
+2026-02-23 17:18:43,068 | INFO | [TICK] Tick running
+2026-02-23 17:19:03,068 | INFO | [TICK] Tick running
+2026-02-23 17:19:23,068 | INFO | [TICK] Tick running
+2026-02-23 17:19:43,069 | INFO | [TICK] Tick running
+2026-02-23 17:20:03,069 | INFO | [TICK] Tick running
+2026-02-23 17:20:23,069 | INFO | [TICK] Tick running
+2026-02-23 17:20:43,070 | INFO | [TICK] Tick running
+2026-02-23 17:21:03,070 | INFO | [TICK] Tick running
+2026-02-23 17:21:23,071 | INFO | [TICK] Tick running
+2026-02-23 17:21:43,071 | INFO | [TICK] Tick running
+2026-02-23 17:22:03,072 | INFO | [TICK] Tick running
+2026-02-23 17:22:23,072 | INFO | [TICK] Tick running
+2026-02-23 17:22:43,072 | INFO | [TICK] Tick running
+2026-02-23 17:23:03,073 | INFO | [TICK] Tick running
+2026-02-23 17:23:23,073 | INFO | [TICK] Tick running
+2026-02-23 17:23:43,073 | INFO | [TICK] Tick running
+2026-02-23 17:24:03,074 | INFO | [TICK] Tick running
+2026-02-23 17:24:23,074 | INFO | [TICK] Tick running
+2026-02-23 17:24:43,075 | INFO | [TICK] Tick running
+2026-02-23 17:25:03,075 | INFO | [TICK] Tick running
+2026-02-23 17:25:23,075 | INFO | [TICK] Tick running
+2026-02-23 17:25:43,076 | INFO | [TICK] Tick running
+2026-02-23 17:26:03,076 | INFO | [TICK] Tick running
+2026-02-23 17:26:23,076 | INFO | [TICK] Tick running
+2026-02-23 17:26:43,077 | INFO | [TICK] Tick running
+2026-02-23 17:27:03,077 | INFO | [TICK] Tick running
+2026-02-23 17:27:23,077 | INFO | [TICK] Tick running
+2026-02-23 17:27:43,078 | INFO | [TICK] Tick running
+2026-02-23 17:28:03,078 | INFO | [TICK] Tick running
+2026-02-23 17:28:23,079 | INFO | [TICK] Tick running
+2026-02-23 17:28:43,079 | INFO | [TICK] Tick running
+2026-02-23 17:29:03,079 | INFO | [TICK] Tick running
+2026-02-23 17:29:23,080 | INFO | [TICK] Tick running
+2026-02-23 17:29:43,080 | INFO | [TICK] Tick running
+2026-02-23 17:30:03,080 | INFO | [TICK] Tick running
+2026-02-23 17:30:23,081 | INFO | [TICK] Tick running
+2026-02-23 17:30:43,081 | INFO | [TICK] Tick running
+2026-02-23 17:31:03,081 | INFO | [TICK] Tick running
+2026-02-23 17:31:23,082 | INFO | [TICK] Tick running
+2026-02-23 17:31:43,082 | INFO | [TICK] Tick running
+2026-02-23 17:32:03,083 | INFO | [TICK] Tick running
+2026-02-23 17:32:23,083 | INFO | [TICK] Tick running
+2026-02-23 17:32:43,083 | INFO | [TICK] Tick running
+2026-02-23 17:33:03,084 | INFO | [TICK] Tick running
+2026-02-23 17:33:23,084 | INFO | [TICK] Tick running
+2026-02-23 17:33:43,084 | INFO | [TICK] Tick running
+2026-02-23 17:34:03,085 | INFO | [TICK] Tick running
+2026-02-23 17:34:23,085 | INFO | [TICK] Tick running
+2026-02-23 17:34:43,085 | INFO | [TICK] Tick running
+2026-02-23 17:35:03,086 | INFO | [TICK] Tick running
+2026-02-23 17:35:23,086 | INFO | [TICK] Tick running
+2026-02-23 17:35:43,087 | INFO | [TICK] Tick running
+2026-02-23 17:36:03,087 | INFO | [TICK] Tick running
+2026-02-23 17:36:23,087 | INFO | [TICK] Tick running
+2026-02-23 17:36:43,088 | INFO | [TICK] Tick running
+2026-02-23 17:37:03,088 | INFO | [TICK] Tick running
+2026-02-23 17:37:23,088 | INFO | [TICK] Tick running
+2026-02-23 17:37:43,089 | INFO | [TICK] Tick running
+2026-02-23 17:38:03,089 | INFO | [TICK] Tick running
+2026-02-23 17:38:23,089 | INFO | [TICK] Tick running
+2026-02-23 17:38:43,090 | INFO | [TICK] Tick running
+2026-02-23 17:39:03,090 | INFO | [TICK] Tick running
+2026-02-23 17:39:23,091 | INFO | [TICK] Tick running
+2026-02-23 17:39:43,091 | INFO | [TICK] Tick running
+2026-02-23 17:40:03,091 | INFO | [TICK] Tick running
+2026-02-23 17:40:23,092 | INFO | [TICK] Tick running
+2026-02-23 17:40:43,092 | INFO | [TICK] Tick running
+2026-02-23 17:41:03,092 | INFO | [TICK] Tick running
+2026-02-23 17:41:23,093 | INFO | [TICK] Tick running
+2026-02-23 17:41:43,093 | INFO | [TICK] Tick running
+2026-02-23 17:42:03,093 | INFO | [TICK] Tick running
+2026-02-23 17:42:23,094 | INFO | [TICK] Tick running
+2026-02-23 17:42:43,094 | INFO | [TICK] Tick running
+2026-02-23 17:43:03,095 | INFO | [TICK] Tick running
+2026-02-23 17:43:23,095 | INFO | [TICK] Tick running
+2026-02-23 17:43:43,095 | INFO | [TICK] Tick running
+2026-02-23 17:44:03,096 | INFO | [TICK] Tick running
+2026-02-23 17:44:23,096 | INFO | [TICK] Tick running
+2026-02-23 17:44:43,096 | INFO | [TICK] Tick running
+2026-02-23 17:45:03,097 | INFO | [TICK] Tick running
+2026-02-23 17:45:23,097 | INFO | [TICK] Tick running
+2026-02-23 17:45:43,097 | INFO | [TICK] Tick running
+2026-02-23 17:46:03,098 | INFO | [TICK] Tick running
+2026-02-23 17:46:23,098 | INFO | [TICK] Tick running
+2026-02-23 17:46:43,098 | INFO | [TICK] Tick running
+2026-02-23 17:47:03,099 | INFO | [TICK] Tick running
+2026-02-23 17:47:23,099 | INFO | [TICK] Tick running
+2026-02-23 17:47:43,099 | INFO | [TICK] Tick running
+2026-02-23 17:48:03,100 | INFO | [TICK] Tick running
+2026-02-23 17:48:23,100 | INFO | [TICK] Tick running
+2026-02-23 17:48:43,100 | INFO | [TICK] Tick running
+2026-02-23 17:49:03,101 | INFO | [TICK] Tick running
+2026-02-23 17:49:23,101 | INFO | [TICK] Tick running
+2026-02-23 17:49:43,102 | INFO | [TICK] Tick running
+2026-02-23 17:50:03,102 | INFO | [TICK] Tick running
+2026-02-23 17:50:23,102 | INFO | [TICK] Tick running
+2026-02-23 17:50:43,103 | INFO | [TICK] Tick running
+2026-02-23 17:51:03,103 | INFO | [TICK] Tick running
+2026-02-23 17:51:23,103 | INFO | [TICK] Tick running
+2026-02-23 17:51:43,104 | INFO | [TICK] Tick running
+2026-02-23 17:52:03,104 | INFO | [TICK] Tick running
+2026-02-23 17:52:23,104 | INFO | [TICK] Tick running
+2026-02-23 17:52:43,105 | INFO | [TICK] Tick running
+2026-02-23 17:53:03,105 | INFO | [TICK] Tick running
+2026-02-23 17:53:23,106 | INFO | [TICK] Tick running
+2026-02-23 17:53:43,106 | INFO | [TICK] Tick running
+2026-02-23 17:54:03,106 | INFO | [TICK] Tick running
+2026-02-23 17:54:23,107 | INFO | [TICK] Tick running
+2026-02-23 17:54:43,107 | INFO | [TICK] Tick running
+2026-02-23 17:55:03,107 | INFO | [TICK] Tick running
+2026-02-23 17:55:23,108 | INFO | [TICK] Tick running
+2026-02-23 17:55:43,108 | INFO | [TICK] Tick running
+2026-02-23 17:56:03,108 | INFO | [TICK] Tick running
+2026-02-23 17:56:23,109 | INFO | [TICK] Tick running
+2026-02-23 17:56:43,109 | INFO | [TICK] Tick running
+2026-02-23 17:57:03,110 | INFO | [TICK] Tick running
+2026-02-23 17:57:23,110 | INFO | [TICK] Tick running
+2026-02-23 17:57:43,110 | INFO | [TICK] Tick running
+2026-02-23 17:58:03,111 | INFO | [TICK] Tick running
+2026-02-23 17:58:23,111 | INFO | [TICK] Tick running
+2026-02-23 17:58:43,112 | INFO | [TICK] Tick running
+2026-02-23 17:59:03,112 | INFO | [TICK] Tick running
+2026-02-23 17:59:23,112 | INFO | [TICK] Tick running
+2026-02-23 17:59:43,113 | INFO | [TICK] Tick running
+2026-02-23 18:00:03,113 | INFO | [TICK] Tick running
+2026-02-23 18:00:23,113 | INFO | [TICK] Tick running
+2026-02-23 18:00:43,114 | INFO | [TICK] Tick running
+2026-02-23 18:01:03,114 | INFO | [TICK] Tick running
+2026-02-23 18:01:23,115 | INFO | [TICK] Tick running
+2026-02-23 18:01:43,115 | INFO | [TICK] Tick running
+2026-02-23 18:02:03,115 | INFO | [TICK] Tick running
+2026-02-23 18:02:23,116 | INFO | [TICK] Tick running
+2026-02-23 18:02:43,116 | INFO | [TICK] Tick running
+2026-02-23 18:03:03,116 | INFO | [TICK] Tick running
+2026-02-23 18:03:23,117 | INFO | [TICK] Tick running
+2026-02-23 18:03:43,117 | INFO | [TICK] Tick running
+2026-02-23 18:04:03,117 | INFO | [TICK] Tick running
+2026-02-23 18:04:23,118 | INFO | [TICK] Tick running
+2026-02-23 18:04:43,118 | INFO | [TICK] Tick running
+2026-02-23 18:05:03,118 | INFO | [TICK] Tick running
+2026-02-23 18:05:23,119 | INFO | [TICK] Tick running
+2026-02-23 18:05:43,119 | INFO | [TICK] Tick running
+2026-02-23 18:06:03,119 | INFO | [TICK] Tick running
+2026-02-23 18:06:23,120 | INFO | [TICK] Tick running
+2026-02-23 18:06:43,120 | INFO | [TICK] Tick running
+2026-02-23 18:07:03,121 | INFO | [TICK] Tick running
+2026-02-23 18:07:23,121 | INFO | [TICK] Tick running
+2026-02-23 18:07:43,121 | INFO | [TICK] Tick running
+2026-02-23 18:08:03,122 | INFO | [TICK] Tick running
+2026-02-23 18:08:23,122 | INFO | [TICK] Tick running
+2026-02-23 18:08:43,122 | INFO | [TICK] Tick running
+2026-02-23 18:09:03,123 | INFO | [TICK] Tick running
+2026-02-23 18:09:23,123 | INFO | [TICK] Tick running
+2026-02-23 18:09:43,123 | INFO | [TICK] Tick running
+2026-02-23 18:10:03,124 | INFO | [TICK] Tick running
+2026-02-23 18:10:23,124 | INFO | [TICK] Tick running
+2026-02-23 18:10:43,124 | INFO | [TICK] Tick running
+2026-02-23 18:11:03,125 | INFO | [TICK] Tick running
+2026-02-23 18:11:23,125 | INFO | [TICK] Tick running
+2026-02-23 18:11:43,126 | INFO | [TICK] Tick running
+2026-02-23 18:12:03,126 | INFO | [TICK] Tick running
+2026-02-23 18:12:23,126 | INFO | [TICK] Tick running
+2026-02-23 18:12:43,127 | INFO | [TICK] Tick running
+2026-02-23 18:13:03,127 | INFO | [TICK] Tick running
+2026-02-23 18:13:23,127 | INFO | [TICK] Tick running
+2026-02-23 18:13:43,128 | INFO | [TICK] Tick running
+2026-02-23 18:14:03,128 | INFO | [TICK] Tick running
+2026-02-23 18:14:23,128 | INFO | [TICK] Tick running
+2026-02-23 18:14:43,129 | INFO | [TICK] Tick running
+2026-02-23 18:15:03,129 | INFO | [TICK] Tick running
+2026-02-23 18:15:23,130 | INFO | [TICK] Tick running
+2026-02-23 18:15:43,130 | INFO | [TICK] Tick running
+2026-02-23 18:16:03,130 | INFO | [TICK] Tick running
+2026-02-23 18:16:23,131 | INFO | [TICK] Tick running
+2026-02-23 18:16:43,131 | INFO | [TICK] Tick running
+2026-02-23 18:17:03,131 | INFO | [TICK] Tick running
+2026-02-23 18:17:23,132 | INFO | [TICK] Tick running
+2026-02-23 18:17:43,132 | INFO | [TICK] Tick running
+2026-02-23 18:18:03,132 | INFO | [TICK] Tick running
+2026-02-23 18:18:23,133 | INFO | [TICK] Tick running
+2026-02-23 18:18:43,133 | INFO | [TICK] Tick running
+2026-02-23 18:19:03,133 | INFO | [TICK] Tick running
+2026-02-23 18:19:23,134 | INFO | [TICK] Tick running
+2026-02-23 18:19:43,134 | INFO | [TICK] Tick running
+2026-02-23 18:20:03,135 | INFO | [TICK] Tick running
+2026-02-23 18:20:23,135 | INFO | [TICK] Tick running
+2026-02-23 18:20:43,136 | INFO | [TICK] Tick running
+2026-02-23 18:21:03,136 | INFO | [TICK] Tick running
+2026-02-23 18:21:23,136 | INFO | [TICK] Tick running
+2026-02-23 18:21:43,137 | INFO | [TICK] Tick running
+2026-02-23 18:22:03,137 | INFO | [TICK] Tick running
+2026-02-23 18:22:23,138 | INFO | [TICK] Tick running
+2026-02-23 18:22:43,138 | INFO | [TICK] Tick running
+2026-02-23 18:23:03,138 | INFO | [TICK] Tick running
+2026-02-23 18:23:23,139 | INFO | [TICK] Tick running
+2026-02-23 18:23:43,139 | INFO | [TICK] Tick running
+2026-02-23 18:24:03,139 | INFO | [TICK] Tick running
+2026-02-23 18:24:23,140 | INFO | [TICK] Tick running
+2026-02-23 18:24:43,140 | INFO | [TICK] Tick running
+2026-02-23 18:25:03,140 | INFO | [TICK] Tick running
+2026-02-23 18:25:23,141 | INFO | [TICK] Tick running
+2026-02-23 18:25:43,141 | INFO | [TICK] Tick running
+2026-02-23 18:26:03,141 | INFO | [TICK] Tick running
+2026-02-23 18:26:23,142 | INFO | [TICK] Tick running
+2026-02-23 18:26:43,142 | INFO | [TICK] Tick running
+2026-02-23 18:27:03,143 | INFO | [TICK] Tick running
+2026-02-23 18:27:23,143 | INFO | [TICK] Tick running
+2026-02-23 18:27:43,143 | INFO | [TICK] Tick running
+2026-02-23 18:28:03,144 | INFO | [TICK] Tick running
+2026-02-23 18:28:23,144 | INFO | [TICK] Tick running
+2026-02-23 18:28:43,144 | INFO | [TICK] Tick running
+2026-02-23 18:29:03,145 | INFO | [TICK] Tick running
+2026-02-23 18:29:23,145 | INFO | [TICK] Tick running
+2026-02-23 18:29:43,145 | INFO | [TICK] Tick running
+2026-02-23 18:30:03,146 | INFO | [TICK] Tick running
+2026-02-23 18:30:23,146 | INFO | [TICK] Tick running
+2026-02-23 18:30:43,146 | INFO | [TICK] Tick running
+2026-02-23 18:31:03,147 | INFO | [TICK] Tick running
+2026-02-23 18:31:23,147 | INFO | [TICK] Tick running
+2026-02-23 18:31:43,148 | INFO | [TICK] Tick running
+2026-02-23 18:32:03,148 | INFO | [TICK] Tick running
+2026-02-23 18:32:23,148 | INFO | [TICK] Tick running
+2026-02-23 18:32:43,149 | INFO | [TICK] Tick running
+2026-02-23 18:33:03,149 | INFO | [TICK] Tick running
+2026-02-23 18:33:23,149 | INFO | [TICK] Tick running
+2026-02-23 18:33:23,376 | INFO | [NIGHT] Auto scheduler triggering night research
+2026-02-23 18:33:23,376 | INFO | [NIGHT] Night research started
+2026-02-23 18:33:28,935 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 18:33:43,150 | INFO | [TICK] Tick running
+2026-02-23 18:34:03,150 | INFO | [TICK] Tick running
+2026-02-23 18:34:23,150 | INFO | [TICK] Tick running
+2026-02-23 18:34:43,151 | INFO | [TICK] Tick running
+2026-02-23 18:35:03,151 | INFO | [TICK] Tick running
+2026-02-23 18:35:23,152 | INFO | [TICK] Tick running
+2026-02-23 18:35:43,152 | INFO | [TICK] Tick running
+2026-02-23 18:36:03,152 | INFO | [TICK] Tick running
+2026-02-23 18:36:23,153 | INFO | [TICK] Tick running
+2026-02-23 18:36:43,153 | INFO | [TICK] Tick running
+2026-02-23 18:37:03,153 | INFO | [TICK] Tick running
+2026-02-23 18:37:23,154 | INFO | [TICK] Tick running
+2026-02-23 18:37:43,154 | INFO | [TICK] Tick running
+2026-02-23 18:38:03,155 | INFO | [TICK] Tick running
+2026-02-23 18:38:23,155 | INFO | [TICK] Tick running
+2026-02-23 18:38:43,155 | INFO | [TICK] Tick running
+2026-02-23 18:39:03,156 | INFO | [TICK] Tick running
+2026-02-23 18:39:23,156 | INFO | [TICK] Tick running
+2026-02-23 18:39:43,156 | INFO | [TICK] Tick running
+2026-02-23 18:40:03,157 | INFO | [TICK] Tick running
+2026-02-23 18:40:23,157 | INFO | [TICK] Tick running
+2026-02-23 18:40:43,157 | INFO | [TICK] Tick running
+2026-02-23 18:41:03,158 | INFO | [TICK] Tick running
+2026-02-23 18:41:23,158 | INFO | [TICK] Tick running
+2026-02-23 18:41:43,158 | INFO | [TICK] Tick running
+2026-02-23 18:42:03,159 | INFO | [TICK] Tick running
+2026-02-23 18:42:23,159 | INFO | [TICK] Tick running
+2026-02-23 18:42:43,160 | INFO | [TICK] Tick running
+2026-02-23 18:43:03,160 | INFO | [TICK] Tick running
+2026-02-23 18:43:23,160 | INFO | [TICK] Tick running
+2026-02-23 18:43:43,161 | INFO | [TICK] Tick running
+2026-02-23 18:44:03,161 | INFO | [TICK] Tick running
+2026-02-23 18:44:23,161 | INFO | [TICK] Tick running
+2026-02-23 18:44:43,162 | INFO | [TICK] Tick running
+2026-02-23 18:45:03,162 | INFO | [TICK] Tick running
+2026-02-23 18:45:23,162 | INFO | [TICK] Tick running
+2026-02-23 18:45:43,163 | INFO | [TICK] Tick running
+2026-02-23 18:46:03,163 | INFO | [TICK] Tick running
+2026-02-23 18:46:23,163 | INFO | [TICK] Tick running
+2026-02-23 18:46:43,164 | INFO | [TICK] Tick running
+2026-02-23 18:47:03,164 | INFO | [TICK] Tick running
+2026-02-23 18:47:23,164 | INFO | [TICK] Tick running
+2026-02-23 18:47:43,165 | INFO | [TICK] Tick running
+2026-02-23 18:48:03,165 | INFO | [TICK] Tick running
+2026-02-23 18:48:23,165 | INFO | [TICK] Tick running
+2026-02-23 18:48:43,166 | INFO | [TICK] Tick running
+2026-02-23 18:49:03,166 | INFO | [TICK] Tick running
+2026-02-23 18:49:23,166 | INFO | [TICK] Tick running
+2026-02-23 18:49:43,167 | INFO | [TICK] Tick running
+2026-02-23 18:50:03,167 | INFO | [TICK] Tick running
+2026-02-23 18:50:23,167 | INFO | [TICK] Tick running
+2026-02-23 18:50:43,168 | INFO | [TICK] Tick running
+2026-02-23 18:51:03,168 | INFO | [TICK] Tick running
+2026-02-23 18:51:23,168 | INFO | [TICK] Tick running
+2026-02-23 18:51:43,169 | INFO | [TICK] Tick running
+2026-02-23 18:52:03,169 | INFO | [TICK] Tick running
+2026-02-23 18:52:23,169 | INFO | [TICK] Tick running
+2026-02-23 18:52:43,170 | INFO | [TICK] Tick running
+2026-02-23 18:53:03,170 | INFO | [TICK] Tick running
+2026-02-23 18:53:23,170 | INFO | [TICK] Tick running
+2026-02-23 18:53:43,171 | INFO | [TICK] Tick running
+2026-02-23 18:54:03,172 | INFO | [TICK] Tick running
+2026-02-23 18:54:23,172 | INFO | [TICK] Tick running
+2026-02-23 18:54:43,172 | INFO | [TICK] Tick running
+2026-02-23 18:55:03,173 | INFO | [TICK] Tick running
+2026-02-23 18:55:23,173 | INFO | [TICK] Tick running
+2026-02-23 18:55:43,173 | INFO | [TICK] Tick running
+2026-02-23 18:56:03,174 | INFO | [TICK] Tick running
+2026-02-23 18:56:23,174 | INFO | [TICK] Tick running
+2026-02-23 18:56:43,174 | INFO | [TICK] Tick running
+2026-02-23 18:57:03,175 | INFO | [TICK] Tick running
+2026-02-23 18:57:23,175 | INFO | [TICK] Tick running
+2026-02-23 18:57:43,175 | INFO | [TICK] Tick running
+2026-02-23 18:58:03,176 | INFO | [TICK] Tick running
+2026-02-23 18:58:23,176 | INFO | [TICK] Tick running
+2026-02-23 18:58:43,176 | INFO | [TICK] Tick running
+2026-02-23 18:59:03,177 | INFO | [TICK] Tick running
+2026-02-23 18:59:23,177 | INFO | [TICK] Tick running
+2026-02-23 18:59:43,177 | INFO | [TICK] Tick running
+2026-02-23 19:00:03,178 | INFO | [TICK] Tick running
+2026-02-23 19:00:23,178 | INFO | [TICK] Tick running
+2026-02-23 19:00:43,179 | INFO | [TICK] Tick running
+2026-02-23 19:01:03,179 | INFO | [TICK] Tick running
+2026-02-23 19:01:23,179 | INFO | [TICK] Tick running
+2026-02-23 19:01:43,180 | INFO | [TICK] Tick running
+2026-02-23 19:02:03,180 | INFO | [TICK] Tick running
+2026-02-23 19:02:23,180 | INFO | [TICK] Tick running
+2026-02-23 19:02:43,181 | INFO | [TICK] Tick running
+2026-02-23 19:03:03,181 | INFO | [TICK] Tick running
+2026-02-23 19:03:23,181 | INFO | [TICK] Tick running
+2026-02-23 19:03:43,182 | INFO | [TICK] Tick running
+2026-02-23 19:04:03,182 | INFO | [TICK] Tick running
+2026-02-23 19:04:23,183 | INFO | [TICK] Tick running
+2026-02-23 19:04:43,183 | INFO | [TICK] Tick running
+2026-02-23 19:05:03,183 | INFO | [TICK] Tick running
+2026-02-23 19:05:23,184 | INFO | [TICK] Tick running
+2026-02-23 19:05:43,184 | INFO | [TICK] Tick running
+2026-02-23 19:06:03,184 | INFO | [TICK] Tick running
+2026-02-23 19:06:23,185 | INFO | [TICK] Tick running
+2026-02-23 19:06:43,185 | INFO | [TICK] Tick running
+2026-02-23 19:07:03,186 | INFO | [TICK] Tick running
+2026-02-23 19:07:23,186 | INFO | [TICK] Tick running
+2026-02-23 19:07:43,186 | INFO | [TICK] Tick running
+2026-02-23 19:08:03,187 | INFO | [TICK] Tick running
+2026-02-23 19:08:23,187 | INFO | [TICK] Tick running
+2026-02-23 19:08:43,188 | INFO | [TICK] Tick running
+2026-02-23 19:09:03,188 | INFO | [TICK] Tick running
+2026-02-23 19:09:23,188 | INFO | [TICK] Tick running
+2026-02-23 19:09:43,189 | INFO | [TICK] Tick running
+2026-02-23 19:10:03,189 | INFO | [TICK] Tick running
+2026-02-23 19:10:23,189 | INFO | [TICK] Tick running
+2026-02-23 19:10:43,190 | INFO | [TICK] Tick running
+2026-02-23 19:11:03,190 | INFO | [TICK] Tick running
+2026-02-23 19:11:23,191 | INFO | [TICK] Tick running
+2026-02-23 19:11:43,191 | INFO | [TICK] Tick running
+2026-02-23 19:12:03,191 | INFO | [TICK] Tick running
+2026-02-23 19:12:23,192 | INFO | [TICK] Tick running
+2026-02-23 19:12:43,192 | INFO | [TICK] Tick running
+2026-02-23 19:13:03,192 | INFO | [TICK] Tick running
+2026-02-23 19:13:23,193 | INFO | [TICK] Tick running
+2026-02-23 19:13:43,193 | INFO | [TICK] Tick running
+2026-02-23 19:14:03,193 | INFO | [TICK] Tick running
+2026-02-23 19:14:23,194 | INFO | [TICK] Tick running
+2026-02-23 19:14:43,194 | INFO | [TICK] Tick running
+2026-02-23 19:15:03,194 | INFO | [TICK] Tick running
+2026-02-23 19:15:23,195 | INFO | [TICK] Tick running
+2026-02-23 19:15:43,195 | INFO | [TICK] Tick running
+2026-02-23 19:16:03,195 | INFO | [TICK] Tick running
+2026-02-23 19:16:23,196 | INFO | [TICK] Tick running
+2026-02-23 19:16:43,196 | INFO | [TICK] Tick running
+2026-02-23 19:17:03,196 | INFO | [TICK] Tick running
+2026-02-23 19:17:23,197 | INFO | [TICK] Tick running
+2026-02-23 19:17:43,197 | INFO | [TICK] Tick running
+2026-02-23 19:18:03,197 | INFO | [TICK] Tick running
+2026-02-23 19:18:23,198 | INFO | [TICK] Tick running
+2026-02-23 19:18:43,198 | INFO | [TICK] Tick running
+2026-02-23 19:19:03,199 | INFO | [TICK] Tick running
+2026-02-23 19:19:23,199 | INFO | [TICK] Tick running
+2026-02-23 19:19:43,199 | INFO | [TICK] Tick running
+2026-02-23 19:20:03,200 | INFO | [TICK] Tick running
+2026-02-23 19:20:23,200 | INFO | [TICK] Tick running
+2026-02-23 19:20:43,200 | INFO | [TICK] Tick running
+2026-02-23 19:21:03,201 | INFO | [TICK] Tick running
+2026-02-23 19:21:23,201 | INFO | [TICK] Tick running
+2026-02-23 19:21:43,201 | INFO | [TICK] Tick running
+2026-02-23 19:22:03,202 | INFO | [TICK] Tick running
+2026-02-23 19:22:23,202 | INFO | [TICK] Tick running
+2026-02-23 19:22:43,202 | INFO | [TICK] Tick running
+2026-02-23 19:23:03,203 | INFO | [TICK] Tick running
+2026-02-23 19:23:23,203 | INFO | [TICK] Tick running
+2026-02-23 19:23:43,204 | INFO | [TICK] Tick running
+2026-02-23 19:24:03,204 | INFO | [TICK] Tick running
+2026-02-23 19:24:23,204 | INFO | [TICK] Tick running
+2026-02-23 19:24:43,205 | INFO | [TICK] Tick running
+2026-02-23 19:25:03,205 | INFO | [TICK] Tick running
+2026-02-23 19:25:23,205 | INFO | [TICK] Tick running
+2026-02-23 19:25:43,206 | INFO | [TICK] Tick running
+2026-02-23 19:26:03,206 | INFO | [TICK] Tick running
+2026-02-23 19:26:23,207 | INFO | [TICK] Tick running
+2026-02-23 19:26:43,207 | INFO | [TICK] Tick running
+2026-02-23 19:27:03,207 | INFO | [TICK] Tick running
+2026-02-23 19:27:23,208 | INFO | [TICK] Tick running
+2026-02-23 19:27:43,208 | INFO | [TICK] Tick running
+2026-02-23 19:28:03,208 | INFO | [TICK] Tick running
+2026-02-23 19:28:23,209 | INFO | [TICK] Tick running
+2026-02-23 19:28:43,209 | INFO | [TICK] Tick running
+2026-02-23 19:29:03,209 | INFO | [TICK] Tick running
+2026-02-23 19:29:23,210 | INFO | [TICK] Tick running
+2026-02-23 19:29:43,210 | INFO | [TICK] Tick running
+2026-02-23 19:30:03,210 | INFO | [TICK] Tick running
+2026-02-23 19:30:11,176 | INFO | [NIGHT] Night research started
+2026-02-23 19:30:17,116 | INFO | [NIGHT] Universe live updated: 8 | scored=8 | errors=0
+2026-02-23 19:30:23,211 | INFO | [TICK] Tick running
+2026-02-23 19:30:43,211 | INFO | [TICK] Tick running
+2026-02-23 19:31:03,212 | INFO | [TICK] Tick running
