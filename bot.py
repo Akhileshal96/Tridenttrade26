@@ -56,7 +56,8 @@ HELP_TEXT = (
     "TOKEN (Zerodha daily) [Owner]:\n"
     "• /renewtoken            → sends Zerodha login link\n"
     "• /token <request_token> → generates access token + saves to .env\n"
-    "   After /token, restart: sudo systemctl restart trident\n\n"
+    "• /tokenstatus           → check current token validity\n"
+    "   /token auto-attempts restart of trident service\n\n"
     "LIVE SAFETY [Owner]:\n"
     "• /initiate (or /arm)     → enables LIVE immediately (runtime override)\n"
     "• /disengage (or /disarm) → stops LIVE immediately\n\n"
@@ -586,6 +587,23 @@ async def main():
             )
             return
 
+        if cmd_word == "/tokenstatus":
+            if not _is_owner(sender):
+                await event.reply("❌ Not permitted (Owner only).")
+                return
+            token_now = os.getenv("KITE_ACCESS_TOKEN", "").strip() or getattr(CFG, "KITE_ACCESS_TOKEN", "")
+            if not token_now:
+                await event.reply("❌ Token status: missing (no KITE_ACCESS_TOKEN set)")
+                return
+            try:
+                kite = get_kite()
+                profile = kite.profile() or {}
+                user = profile.get("user_name") or profile.get("user_id") or "unknown"
+                await event.reply(f"✅ Token status: valid (user={user})")
+            except Exception as e:
+                await event.reply(f"❌ Token status: invalid/expired ({e})")
+            return
+
         if cmd_word == "/token":
             if not _is_owner(sender):
                 await event.reply("❌ Not permitted (Owner only).")
@@ -603,6 +621,8 @@ async def main():
                 data = kite.generate_session(req_token, api_secret=api_secret)
                 access = data["access_token"]
                 set_env_value("KITE_ACCESS_TOKEN", access)
+                os.environ["KITE_ACCESS_TOKEN"] = access
+                await event.reply("✅ Access token accepted by Zerodha and saved. Checking restart...")
                 ok, detail = await _auto_restart_trident_service()
                 if ok:
                     await event.reply("✅ Access token updated. Service restarted automatically.")
