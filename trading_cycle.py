@@ -27,6 +27,7 @@ STATE = {
     "last_promote_msg": "Never promoted",
     "wallet_net_inr": 0.0,
     "wallet_available_inr": 0.0,
+    "last_wallet": float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0),
     "daily_loss_cap_inr": float(getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0)),
     "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0)),
     "profit_milestone_hit": False,
@@ -290,30 +291,77 @@ def promote_universe(reason="AUTO"):
     return ok
 
 
+def _is_market_hours(now: datetime) -> bool:
+    start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return start <= now <= end
+
+
+def _cached_wallet_value() -> float:
+    cached = float(STATE.get("last_wallet") or 0.0)
+    if cached > 0:
+        return cached
+    return float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+
+
 def _sync_wallet_and_caps(force=False):
     now = datetime.now(IST)
     last = STATE.get("last_wallet_sync_ts")
-    if not force and last and (now - last) < timedelta(seconds=120):
+
+    day_interval = int(getattr(CFG, "WALLET_SYNC_INTERVAL_SEC", 120))
+    night_interval = int(getattr(CFG, "WALLET_NIGHT_SYNC_INTERVAL_SEC", 900))
+    in_market = _is_market_hours(now)
+    min_interval = day_interval if in_market else night_interval
+
+    if not force and last and (now - last) < timedelta(seconds=min_interval):
+        if not in_market:
+            cached = _cached_wallet_value()
+            STATE["wallet_net_inr"] = max(0.0, cached)
+            STATE["wallet_available_inr"] = max(0.0, cached)
+            append_log("INFO", "WALLET", "Night skip → cached wallet used")
         return
 
-    wallet_net = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    retries = max(1, int(getattr(CFG, "WALLET_SYNC_RETRIES", 3)))
+    backoff = float(getattr(CFG, "WALLET_RETRY_BASE_SEC", 1.5))
+
+    wallet_net = _cached_wallet_value()
     wallet_avail = wallet_net
-    try:
-        m = get_kite().margins() or {}
-        eq = m.get("equity", {}) if isinstance(m, dict) else {}
-        wallet_net = float(eq.get("net") or wallet_net or 0.0)
-        avail = eq.get("available", {}) if isinstance(eq, dict) else {}
-        if isinstance(avail, dict):
-            wallet_avail = float(
-                avail.get("live_balance") or avail.get("cash") or avail.get("opening_balance") or avail.get("adhoc_margin") or wallet_net
-            )
-        else:
-            wallet_avail = wallet_net
-    except Exception as e:
-        append_log("WARN", "WALLET", f"Margins sync failed: {e}")
+    synced = False
+
+    for attempt in range(retries):
+        try:
+            m = get_kite().margins() or {}
+            eq = m.get("equity", {}) if isinstance(m, dict) else {}
+            wallet_net = float(eq.get("net") or wallet_net or 0.0)
+            avail = eq.get("available", {}) if isinstance(eq, dict) else {}
+            if isinstance(avail, dict):
+                wallet_avail = float(
+                    avail.get("live_balance") or avail.get("cash") or avail.get("opening_balance") or avail.get("adhoc_margin") or wallet_net
+                )
+            else:
+                wallet_avail = wallet_net
+            STATE["last_wallet"] = max(0.0, wallet_net)
+            append_log("INFO", "WALLET", f"Synced wallet={wallet_net:.2f}")
+            synced = True
+            break
+        except Exception as e:
+            append_log("WARNING", "WALLET", f"Attempt {attempt + 1} failed: {e}")
+            if attempt + 1 < retries:
+                append_log("WARNING", "WALLET", f"Retry {attempt + 2}/{retries}")
+                time.sleep(backoff * (attempt + 1))
+
+    if not synced:
+        wallet_net = _cached_wallet_value()
+        wallet_avail = wallet_net
+        append_log("WARNING", "WALLET", f"API failure → using cached wallet={wallet_net:.2f}")
+
+    if wallet_net <= 0:
+        wallet_net = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        wallet_avail = max(wallet_avail, wallet_net)
+        append_log("WARNING", "WALLET", f"API failed → using cached wallet={wallet_net:.2f}")
 
     STATE["wallet_net_inr"] = max(0.0, wallet_net)
-    STATE["wallet_available_inr"] = max(0.0, wallet_avail)
+    STATE["wallet_available_inr"] = max(0.0, wallet_avail if wallet_avail > 0 else wallet_net)
 
     loss_pct = float(os.getenv("DAILY_LOSS_CAP_PCT", "2.0"))
     prof_pct = float(os.getenv("DAILY_PROFIT_MILESTONE_PCT", os.getenv("DAILY_PROFIT_TARGET_PCT", "1.0")))
@@ -364,7 +412,10 @@ def _bucket_inr(wallet_net: float) -> float:
 
 
 def _calc_qty(symbol: str, price: float):
-    wallet = float(STATE.get("wallet_net_inr") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    wallet = float(STATE.get("wallet_net_inr") or 0.0)
+    if wallet <= 0:
+        wallet = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        append_log("WARNING", "BUCKET", "Wallet unavailable → fallback capital used")
     bucket = _bucket_inr(wallet)
     risk_amt = bucket * float(getattr(CFG, "RISK_PER_TRADE_PCT", 1.0)) / 100.0
     per_share_risk = price * float(getattr(CFG, "STOPLOSS_PCT", 2.0)) / 100.0
