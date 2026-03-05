@@ -399,7 +399,17 @@ async def main():
 
         # ===== Logs (Viewer+) =====
         if cmd_word == "/logs":
-            await event.reply(tail_text(20) or "(no logs)")
+            try:
+                txt = tail_text(20) or "(no logs)"
+                if len(txt) <= 3500:
+                    await event.reply(txt)
+                else:
+                    # Telegram messages have size limits; send in safe chunks.
+                    for i in range(0, len(txt), 3500):
+                        await event.reply(txt[i:i + 3500])
+            except Exception as e:
+                append_log("ERROR", "BOT", f"/logs reply failed: {e}")
+                await event.reply("❌ Failed to send logs. Try /exportlog")
             return
 
         if cmd_word == "/exportlog":
