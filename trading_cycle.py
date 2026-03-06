@@ -225,6 +225,7 @@ def is_live_enabled():
 
 
 
+
 def list_exclusions():
     s = load_excluded()
     if not s:
@@ -251,6 +252,7 @@ def include_symbol(sym):
         append_log("INFO", "EXCL", f"Included back {sym}")
         return f"✅ {sym} released from exclusions."
     return f"ℹ️ {sym} was not in exclusions."
+
 
 def _atomic_copy(src, dst):
     if not os.path.exists(src):
