@@ -12,18 +12,25 @@ from kiteconnect import KiteConnect
 from log_store import append_log, tail_text, export_all, LOG_FILE
 from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
-
+from trade_notifier import notify, notification_worker, setup_loop
+from control_panel import register_control_panel
 
 HELP_TEXT = (
     "🤖 TRIDENT BOT – COMMANDS\n\n"
     "ACCESS:\n"
     "• /myid                → shows your Telegram ID\n"
-    "• (Owner) /addtrader <id>, /removetrader <id>\n"
-    "• (Owner) /addviewer <id>, /removeviewer <id>\n\n"
+    "• /help                → show this command list\n"
+    "• /commands            → alias for /help\n"
+    "• /addtrader <id>      (Owner)\n"
+    "• /removetrader <id>   (Owner)\n"
+    "• /addviewer <id>      (Owner)\n"
+    "• /removeviewer <id>   (Owner)\n\n"
     "TOKEN (Zerodha daily) [Owner]:\n"
     "• /renewtoken            → sends Zerodha login link\n"
     "• /token <request_token> → generates access token + saves to .env\n"
-    "   After /token, restart: sudo systemctl restart trident\n\n"
+    "• /tokenstatus           → check current token validity\n"
+    "   /token updates token and restarts bot process\n"
+    "• /restart               → restart bot process\n\n"
     "LIVE SAFETY [Owner]:\n"
     "• /initiate (or /arm)     → enables LIVE immediately (runtime override)\n"
     "• /disengage (or /disarm) → stops LIVE immediately\n\n"
@@ -32,6 +39,7 @@ HELP_TEXT = (
     "• /stoploop  → pause trading loop\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
+    "• /trailstatus → trailing lock details\n"
     "• /logs       → last 20 log lines\n"
     "• /exportlog  → full log as txt\n"
     "• /dailylog   → today's log as txt\n"
@@ -52,7 +60,7 @@ HELP_TEXT = (
     "• /include SBIN   → release symbol\n"
     "• /excluded       → list blocked symbols\n\n"
     "EMERGENCY [Owner]:\n"
-    "• /panic     → pause + disengage + close open trade\n"
+    "• /panic     → pause + disengage + close all open positions\n"
     "• /resetday  → reset today's pnl & risk counters\n"
 )
 
@@ -218,6 +226,361 @@ def _update_id_list_env(key, user_id, add=True):
     return new_val
 
 
+async def _auto_restart_trident_service() -> tuple[bool, str]:
+    """
+    Try to restart trident service after token rotation.
+    Expected deployment has passwordless sudo for this unit.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "systemctl", "restart", "trident",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=20)
+        out = (out_b or b"").decode("utf-8", errors="ignore").strip()
+        err = (err_b or b"").decode("utf-8", errors="ignore").strip()
+        if proc.returncode == 0:
+            return True, (out or "service restart command succeeded")
+        msg = err or out or f"systemctl exit={proc.returncode}"
+        return False, msg
+    except Exception as e:
+        return False, str(e)
+
+
+async def _restart_bot_process(event) -> None:
+    """Prefer service restart in managed deployments; fallback to process exit."""
+    ok, msg = await _auto_restart_trident_service()
+    if ok:
+        await event.reply("♻️ Service restart requested successfully.")
+        append_log("INFO", "BOT", f"Service restart requested: {msg}")
+        return
+
+    append_log("WARN", "BOT", f"Service restart unavailable ({msg}); falling back to process exit")
+    await event.reply(f"⚠️ Service restart unavailable ({msg}). Falling back to process exit.")
+    os._exit(0)
+
+
+async def _dispatch_command(event, sender, cmd_word, cmd_arg):
+    if cmd_word == "/myid":
+        await event.reply(f"🆔 Your Telegram ID: `{int(sender)}`")
+        return True
+
+    if cmd_word in ("/help", "/commands"):
+        await event.reply(HELP_TEXT)
+        return True
+
+    if cmd_word == "/status":
+        await event.reply(CYCLE.get_status_text())
+        return True
+
+    if cmd_word == "/trailstatus":
+        await event.reply(CYCLE.get_trailing_status_text())
+        return True
+
+    if cmd_word in ("/addtrader", "/removetrader", "/addviewer", "/removeviewer", "/setslip", "/exclude", "/include", "/token") and not cmd_arg:
+        await event.reply("Usage error: missing command argument.")
+        return True
+
+    # ===== Owner user management =====
+    if cmd_word == "/addtrader" and _is_owner(sender):
+        uid = cmd_arg
+        if uid.isdigit():
+            newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=True)
+            await event.reply(f"✅ Added trader {uid}\nTRADER_USER_IDS={newv}\n(Changes apply immediately)")
+        else:
+            await event.reply("Usage: /addtrader 123456789")
+        return True
+
+    if cmd_word == "/removetrader" and _is_owner(sender):
+        uid = cmd_arg
+        if uid.isdigit():
+            newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=False)
+            await event.reply(f"✅ Removed trader {uid}\nTRADER_USER_IDS={newv}")
+        else:
+            await event.reply("Usage: /removetrader 123456789")
+        return True
+
+    if cmd_word == "/addviewer" and _is_owner(sender):
+        uid = cmd_arg
+        if uid.isdigit():
+            newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=True)
+            await event.reply(f"✅ Added viewer {uid}\nVIEWER_USER_IDS={newv}\n(Changes apply immediately)")
+        else:
+            await event.reply("Usage: /addviewer 123456789")
+        return True
+
+    if cmd_word == "/removeviewer" and _is_owner(sender):
+        uid = cmd_arg
+        if uid.isdigit():
+            newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=False)
+            await event.reply(f"✅ Removed viewer {uid}\nVIEWER_USER_IDS={newv}")
+        else:
+            await event.reply("Usage: /removeviewer 123456789")
+        return True
+
+    # ===== Trader gated commands =====
+    if cmd_word == "/startloop":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        CYCLE.STATE["paused"] = False
+        await event.reply("▶️ Loop Started")
+        return True
+
+    if cmd_word == "/stoploop":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        CYCLE.STATE["paused"] = True
+        await event.reply("⏸️ Loop Paused")
+        return True
+
+    # ===== Owner-only LIVE safety =====
+    if cmd_word in ("/initiate", "/arm"):
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        CYCLE.STATE["initiated"] = True
+        CYCLE.STATE["live_override"] = True
+        await event.reply("🟢 LIVE INITIATED (runtime override enabled). Use /disengage to stop.")
+        return True
+
+    if cmd_word in ("/disengage", "/disarm"):
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        CYCLE.STATE["initiated"] = False
+        CYCLE.STATE["live_override"] = False
+        await event.reply("🔴 DISENGAGED (runtime override disabled). Orders blocked.")
+        return True
+
+    # ===== Logs (Viewer+) =====
+    if cmd_word == "/logs":
+        try:
+            txt = tail_text(20) or "(no logs)"
+            if len(txt) <= 3500:
+                await event.reply(txt)
+            else:
+                for i in range(0, len(txt), 3500):
+                    await event.reply(txt[i:i + 3500])
+        except Exception as e:
+            append_log("ERROR", "BOT", f"/logs reply failed: {e}")
+            await event.reply("❌ Failed to send logs. Try /exportlog")
+        return True
+
+    if cmd_word == "/exportlog":
+        fp = export_all()
+        if not fp or not os.path.exists(fp):
+            await event.reply("(no logs)")
+            return True
+        await event.reply(file=fp, message="📦 Full log export")
+        return True
+
+    if cmd_word == "/dailylog":
+        fp = _make_daily_log_file()
+        if not fp or not os.path.exists(fp):
+            await event.reply("(no logs for today)")
+            return True
+        await event.reply(file=fp, message="📅 Today's log export")
+        return True
+
+    if cmd_word == "/positions":
+        try:
+            txt = CYCLE.get_positions_text()
+        except Exception as e:
+            txt = f"❌ Failed to fetch positions: {e}"
+        await event.reply(txt)
+        return True
+
+    # ===== Research (Trader/Owner) =====
+    if cmd_word == "/nightnow":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        await event.reply("🌙 Running night research now...")
+        try:
+            await asyncio.to_thread(night_research.run_night_job)
+            await event.reply("✅ Night research done.")
+        except Exception as e:
+            await event.reply("❌ Night research failed: %s" % e)
+        return True
+
+    if cmd_word == "/nightreport":
+        rep = getattr(night_research, "last_report_summary", None)
+        txt = rep() if callable(rep) else "(night report summary unavailable)"
+        await event.reply("🧪 Night Report\n\n" + (txt or "(empty)"))
+        return True
+
+    if cmd_word == "/nightlog":
+        txt = _tail_night_lines(120)
+        if len(txt) <= 3500:
+            await event.reply("📝 NIGHT LOG\n\n" + txt)
+        else:
+            for i in range(0, len(txt), 3500):
+                await event.reply(txt[i:i + 3500])
+        return True
+
+    if cmd_word == "/universe":
+        path = getattr(CFG, "UNIVERSE_PATH", os.path.join(os.getcwd(), "data", "universe.txt"))
+        syms = _read_universe(path, 50)
+        await event.reply("📦 TRADING Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
+        return True
+
+    if cmd_word == "/universe_live":
+        live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(os.getcwd(), "data", "universe_live.txt"))
+        syms = _read_universe(live_path, 50)
+        await event.reply("📈 LIVE Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
+        return True
+
+    # ===== Promote (Trader/Owner) =====
+    if cmd_word == "/promotestatus":
+        msg = "Last promote: %s" % (CYCLE.STATE.get("last_promote_msg") or "N/A")
+        await event.reply("🔄 Promote Status\n\n" + msg)
+        return True
+
+    if cmd_word == "/promote_now":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        if CYCLE.STATE.get("open_trades"):
+            await event.reply("❌ Cannot promote while in open positions.")
+            return True
+        ok = CYCLE.promote_universe(reason="MANUAL")
+        await event.reply("✅ Promoted live→trading" if ok else ("❌ Promote blocked: " + (CYCLE.STATE.get("last_promote_msg") or "")))
+        return True
+
+    # ===== Slippage (Trader/Owner) =====
+    if cmd_word == "/setslip":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        v = _parse_float(cmd_arg)
+        if v is None or v < 0:
+            await event.reply("Usage: /setslip 0.30")
+            return True
+        set_env_value("MAX_ENTRY_SLIPPAGE_PCT", str(v))
+        os.environ["MAX_ENTRY_SLIPPAGE_PCT"] = str(v)
+        CYCLE.set_runtime_param("MAX_ENTRY_SLIPPAGE_PCT", float(v))
+        await event.reply("✅ MAX_ENTRY_SLIPPAGE_PCT set to %s (restart optional)" % v)
+        return True
+
+    # ===== Insider safety (Owner only) =====
+    if cmd_word == "/excluded":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        await event.reply(CYCLE.list_exclusions())
+        return True
+
+    if cmd_word == "/exclude":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        sym = cmd_arg.strip().upper()
+        await event.reply(CYCLE.exclude_symbol(sym))
+        return True
+
+    if cmd_word == "/include":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        sym = cmd_arg.strip().upper()
+        await event.reply(CYCLE.include_symbol(sym))
+        return True
+
+    # ===== Emergency (Owner only) =====
+    if cmd_word == "/panic":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        CYCLE.STATE["paused"] = True
+        close_ok = CYCLE._close_all_open_trades("PANIC")
+        CYCLE.STATE["initiated"] = False
+        CYCLE.STATE["live_override"] = False
+        if close_ok:
+            await event.reply("🛑 PANIC done: paused + disengaged + close-all attempted.")
+        else:
+            await event.reply("🛑 PANIC done: paused + disengaged; one or more close actions failed.")
+        return True
+
+    if cmd_word == "/restart":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        await event.reply("♻️ Restart requested...")
+        await _restart_bot_process(event)
+        return True
+
+    if cmd_word == "/resetday":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        CYCLE.manual_reset_day()
+        await event.reply("✅ Day reset done.")
+        return True
+
+    # ===== Token flow (Owner only) =====
+    if cmd_word == "/renewtoken":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        if not getattr(CFG, "KITE_LOGIN_URL", ""):
+            await event.reply("❌ KITE_LOGIN_URL missing in .env")
+            return True
+        await event.reply(
+            "🔑 Renew Zerodha Session\n\n"
+            "1) Open this link & login:\n%s\n\n"
+            "2) Copy request_token from redirect URL\n"
+            "3) Send:\n/token YOUR_REQUEST_TOKEN" % CFG.KITE_LOGIN_URL
+        )
+        return True
+
+    if cmd_word == "/tokenstatus":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        token_now = os.getenv("KITE_ACCESS_TOKEN", "").strip() or getattr(CFG, "KITE_ACCESS_TOKEN", "")
+        if not token_now:
+            await event.reply("❌ Token status: missing (no KITE_ACCESS_TOKEN set)")
+            return True
+        try:
+            kite = get_kite()
+            profile = kite.profile() or {}
+            user = profile.get("user_name") or profile.get("user_id") or "unknown"
+            await event.reply(f"✅ Token status: valid (user={user})")
+        except Exception as e:
+            await event.reply(f"❌ Token status: invalid/expired ({e})")
+        return True
+
+    if cmd_word == "/token":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        req_token = cmd_arg.strip()
+        if not getattr(CFG, "KITE_API_KEY", ""):
+            await event.reply("❌ KITE_API_KEY missing in .env")
+            return True
+        api_secret = os.getenv("KITE_API_SECRET", "").strip()
+        if not api_secret:
+            await event.reply("❌ KITE_API_SECRET missing in .env (add it and restart)")
+            return True
+        try:
+            kite = KiteConnect(api_key=CFG.KITE_API_KEY)
+            data = kite.generate_session(req_token, api_secret=api_secret)
+            access = data["access_token"]
+            set_env_value("KITE_ACCESS_TOKEN", access)
+            os.environ["KITE_ACCESS_TOKEN"] = access
+            await event.reply("✅ Token updated. Restarting bot.")
+            append_log("INFO", "BOT", "Token updated; restarting bot process")
+            os._exit(0)
+        except Exception as e:
+            await event.reply("❌ Token update failed: %s" % e)
+        return True
+
+    return False
+
+
 async def main():
     api_id = int(getattr(CFG, "TELEGRAM_API_ID", 9888950))
     api_hash = getattr(CFG, "TELEGRAM_API_HASH", "ecfa673e2c85b4ef16743acf0ba0d1c1")
@@ -229,6 +592,47 @@ async def main():
     await client.start(bot_token=CFG.TELEGRAM_BOT_TOKEN)
     append_log("INFO", "BOT", "Telegram bot started")
 
+    setup_loop(asyncio.get_running_loop())
+    asyncio.create_task(notification_worker(client, lambda: int(getattr(CFG, "ADMIN_USER_ID", 0) or _owner_id() or 0)))
+
+    CYCLE.set_notifier(notify)
+
+    def _mk_panel_handler(command_name):
+        async def _run(message_event):
+            sender = int(message_event.sender_id)
+            await _dispatch_command(message_event, sender, f"/{command_name}", "")
+        return _run
+
+    panel_handlers = {
+        "myid": _mk_panel_handler("myid"),
+        "help": _mk_panel_handler("help"),
+        "commands": _mk_panel_handler("commands"),
+        "startloop": _mk_panel_handler("startloop"),
+        "stoploop": _mk_panel_handler("stoploop"),
+        "status": _mk_panel_handler("status"),
+        "trailstatus": _mk_panel_handler("trailstatus"),
+        "logs": _mk_panel_handler("logs"),
+        "positions": _mk_panel_handler("positions"),
+        "nightnow": _mk_panel_handler("nightnow"),
+        "universe": _mk_panel_handler("universe"),
+        "universe_live": _mk_panel_handler("universe_live"),
+        "nightreport": _mk_panel_handler("nightreport"),
+        "nightlog": _mk_panel_handler("nightlog"),
+        "promotestatus": _mk_panel_handler("promotestatus"),
+        "promote_now": _mk_panel_handler("promote_now"),
+        "renewtoken": _mk_panel_handler("renewtoken"),
+        "tokenstatus": _mk_panel_handler("tokenstatus"),
+        "restart": _mk_panel_handler("restart"),
+        "initiate": _mk_panel_handler("initiate"),
+        "arm": _mk_panel_handler("arm"),
+        "disengage": _mk_panel_handler("disengage"),
+        "disarm": _mk_panel_handler("disarm"),
+        "panic": _mk_panel_handler("panic"),
+        "resetday": _mk_panel_handler("resetday"),
+        "excluded": _mk_panel_handler("excluded"),
+    }
+    register_control_panel(client, panel_handlers)
+
     @client.on(events.NewMessage())
     async def handler(event):
         if not _is_private(event):
@@ -236,296 +640,28 @@ async def main():
 
         sender = int(event.sender_id)
         cmd = (event.raw_text or "").strip()
+        parts = cmd.split(maxsplit=1)
+        cmd_word = (parts[0].split("@", 1)[0].lower() if parts else "")
+        cmd_arg = (parts[1].strip() if len(parts) > 1 else "")
 
-        # Always allow /myid
-        if cmd == "/myid":
+        # Always allow /myid and /start
+        if cmd_word == "/myid":
             await event.reply(f"🆔 Your Telegram ID: `{sender}`")
+            return
+        if cmd_word == "/start":
+            # Control panel module handles rendering /start.
             return
 
         # Viewer gate for everything else
         if not _is_viewer(sender):
+            append_log("WARN", "AUTH", f"Denied command from {sender}: {cmd_word}")
+            await event.reply("❌ Not permitted. Use /myid and ask owner to grant Viewer/Trader access.")
             return
 
-        if cmd in ("/help", "/commands"):
-            await event.reply(HELP_TEXT)
-            return
+        handled = await _dispatch_command(event, sender, cmd_word, cmd_arg)
+        if not handled:
+            await event.reply("Unknown command. Use /help")
 
-        if cmd == "/status":
-            await event.reply(CYCLE.get_status_text())
-            return
-
-        # ===== Owner user management =====
-        if cmd.startswith("/addtrader ") and _is_owner(sender):
-            uid = cmd.split(maxsplit=1)[1].strip()
-            if uid.isdigit():
-                newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=True)
-                await event.reply(f"✅ Added trader {uid}\nTRADER_USER_IDS={newv}\n(Changes apply immediately)")
-            else:
-                await event.reply("Usage: /addtrader 123456789")
-            return
-
-        if cmd.startswith("/removetrader ") and _is_owner(sender):
-            uid = cmd.split(maxsplit=1)[1].strip()
-            if uid.isdigit():
-                newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=False)
-                await event.reply(f"✅ Removed trader {uid}\nTRADER_USER_IDS={newv}")
-            else:
-                await event.reply("Usage: /removetrader 123456789")
-            return
-
-        if cmd.startswith("/addviewer ") and _is_owner(sender):
-            uid = cmd.split(maxsplit=1)[1].strip()
-            if uid.isdigit():
-                newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=True)
-                await event.reply(f"✅ Added viewer {uid}\nVIEWER_USER_IDS={newv}\n(Changes apply immediately)")
-            else:
-                await event.reply("Usage: /addviewer 123456789")
-            return
-
-        if cmd.startswith("/removeviewer ") and _is_owner(sender):
-            uid = cmd.split(maxsplit=1)[1].strip()
-            if uid.isdigit():
-                newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=False)
-                await event.reply(f"✅ Removed viewer {uid}\nVIEWER_USER_IDS={newv}")
-            else:
-                await event.reply("Usage: /removeviewer 123456789")
-            return
-
-        # ===== Trader gated commands =====
-        if cmd == "/startloop":
-            if not _is_trader(sender):
-                await event.reply("❌ Not permitted (Trader/Owner only).")
-                return
-            CYCLE.STATE["paused"] = False
-            await event.reply("▶️ Loop Started")
-            return
-
-        if cmd == "/stoploop":
-            if not _is_trader(sender):
-                await event.reply("❌ Not permitted (Trader/Owner only).")
-                return
-            CYCLE.STATE["paused"] = True
-            await event.reply("⏸️ Loop Paused")
-            return
-
-        # ===== Owner-only LIVE safety =====
-        if cmd in ("/initiate", "/arm"):
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            CYCLE.STATE["initiated"] = True
-            CYCLE.STATE["live_override"] = True
-            await event.reply("🟢 LIVE INITIATED (runtime override enabled). Use /disengage to stop.")
-            return
-
-        if cmd in ("/disengage", "/disarm"):
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            CYCLE.STATE["initiated"] = False
-            CYCLE.STATE["live_override"] = False
-            await event.reply("🔴 DISENGAGED (runtime override disabled). Orders blocked.")
-            return
-
-        # ===== Logs (Viewer+) =====
-        if cmd == "/logs":
-            await event.reply(tail_text(20) or "(no logs)")
-            return
-
-        if cmd == "/exportlog":
-            fp = export_all()
-            if not fp or not os.path.exists(fp):
-                await event.reply("No log file found.")
-                return
-            await event.reply("📤 Sending full log (txt)…")
-            await client.send_file(event.chat_id, fp)
-            return
-
-        if cmd == "/dailylog":
-            fp = _make_daily_log_file()
-            if not fp:
-                await event.reply("No logs for today yet.")
-                return
-            await event.reply("📤 Sending today's log (txt)…")
-            await client.send_file(event.chat_id, fp)
-            return
-
-        # ===== Positions (Viewer+) =====
-        if cmd == "/positions":
-            try:
-                kite = get_kite()
-                pos = kite.positions() or {}
-                net = pos.get("net", []) or []
-                rows = []
-                for p in net:
-                    qty = int(p.get("quantity") or 0)
-                    if qty == 0:
-                        continue
-                    rows.append(
-                        "%s:%s qty=%s avg=%.2f pnl=%.2f" % (
-                            p.get("exchange"),
-                            p.get("tradingsymbol"),
-                            qty,
-                            float(p.get("average_price") or 0.0),
-                            float(p.get("pnl") or 0.0),
-                        )
-                    )
-                await event.reply("📊 Net Positions\n\n" + ("\n".join(rows) if rows else "None"))
-            except Exception as e:
-                await event.reply("❌ Positions failed: %s" % e)
-            return
-
-        # ===== Research (Trader/Owner) =====
-        if cmd == "/nightnow":
-            if not _is_trader(sender):
-                await event.reply("❌ Not permitted (Trader/Owner only).")
-                return
-            await event.reply("🌙 Running Night Research…")
-            try:
-                await asyncio.to_thread(night_research.run_night_job)
-                await event.reply("✅ Done. Use /universe_live or /nightreport.")
-            except Exception as e:
-                await event.reply("❌ Night research failed: %s" % e)
-            return
-
-        if cmd == "/nightlog":
-            await event.reply("🌙 Night Logs (recent)\n\n" + _tail_night_lines(120))
-            return
-
-        if cmd == "/nightreport":
-            rpt = os.path.join(os.getcwd(), "logs", "night_research_report.txt")
-            if os.path.exists(rpt):
-                with open(rpt, "r") as f:
-                    txt = f.read()
-                await event.reply(txt[-3500:])
-            else:
-                await event.reply("No night report yet. Run /nightnow")
-            return
-
-        if cmd == "/universe":
-            trade_path = getattr(CFG, "UNIVERSE_TRADING_PATH", os.path.join(os.getcwd(), "data", "universe_trading.txt"))
-            syms = _read_universe(trade_path, 50)
-            await event.reply("📌 TRADING Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
-            return
-
-        if cmd == "/universe_live":
-            live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(os.getcwd(), "data", "universe_live.txt"))
-            syms = _read_universe(live_path, 50)
-            await event.reply("📈 LIVE Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
-            return
-
-        # ===== Promote (Trader/Owner) =====
-        if cmd == "/promotestatus":
-            msg = "Last promote: %s" % (CYCLE.STATE.get("last_promote_msg") or "N/A")
-            await event.reply("🔄 Promote Status\n\n" + msg)
-            return
-
-        if cmd == "/promote_now":
-            if not _is_trader(sender):
-                await event.reply("❌ Not permitted (Trader/Owner only).")
-                return
-            if CYCLE.STATE.get("open_trade"):
-                await event.reply("❌ Cannot promote while in open trade.")
-                return
-            ok = CYCLE.promote_universe(reason="MANUAL")
-            await event.reply("✅ Promoted live→trading" if ok else ("❌ Promote blocked: " + (CYCLE.STATE.get("last_promote_msg") or "")))
-            return
-
-        # ===== Slippage (Trader/Owner) =====
-        if cmd.startswith("/setslip "):
-            if not _is_trader(sender):
-                await event.reply("❌ Not permitted (Trader/Owner only).")
-                return
-            v = _parse_float(cmd.split(maxsplit=1)[1])
-            if v is None or v < 0:
-                await event.reply("Usage: /setslip 0.30")
-                return
-            set_env_value("MAX_ENTRY_SLIPPAGE_PCT", str(v))
-            os.environ["MAX_ENTRY_SLIPPAGE_PCT"] = str(v)
-            CYCLE.set_runtime_param("MAX_ENTRY_SLIPPAGE_PCT", float(v))
-            await event.reply("✅ MAX_ENTRY_SLIPPAGE_PCT set to %s (restart optional)" % v)
-            return
-
-        # ===== Insider safety (Owner only) =====
-        if cmd == "/excluded":
-            await event.reply(CYCLE.list_exclusions())
-            return
-
-        if cmd.startswith("/exclude "):
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            sym = cmd.split(maxsplit=1)[1].strip().upper()
-            await event.reply(CYCLE.exclude_symbol(sym))
-            return
-
-        if cmd.startswith("/include "):
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            sym = cmd.split(maxsplit=1)[1].strip().upper()
-            await event.reply(CYCLE.include_symbol(sym))
-            return
-
-        # ===== Emergency (Owner only) =====
-        if cmd == "/panic":
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            CYCLE.STATE["paused"] = True
-            CYCLE.STATE["initiated"] = False
-            CYCLE.STATE["live_override"] = False
-            CYCLE._close_open_trade("PANIC")
-            await event.reply("🛑 PANIC done: paused + disengaged + attempted close.")
-            return
-
-        if cmd == "/resetday":
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            CYCLE.manual_reset_day()
-            await event.reply("✅ Day reset done.")
-            return
-
-        # ===== Token flow (Owner only) =====
-        if cmd == "/renewtoken":
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            if not getattr(CFG, "KITE_LOGIN_URL", ""):
-                await event.reply("❌ KITE_LOGIN_URL missing in .env")
-                return
-            await event.reply(
-                "🔑 Renew Zerodha Session\n\n"
-                "1) Open this link & login:\n%s\n\n"
-                "2) Copy request_token from redirect URL\n"
-                "3) Send:\n/token YOUR_REQUEST_TOKEN" % CFG.KITE_LOGIN_URL
-            )
-            return
-
-        if cmd.startswith("/token "):
-            if not _is_owner(sender):
-                await event.reply("❌ Not permitted (Owner only).")
-                return
-            req_token = cmd.split(" ", 1)[1].strip()
-            if not getattr(CFG, "KITE_API_KEY", ""):
-                await event.reply("❌ KITE_API_KEY missing in .env")
-                return
-            api_secret = os.getenv("KITE_API_SECRET", "").strip()
-            if not api_secret:
-                await event.reply("❌ KITE_API_SECRET missing in .env (add it and restart)")
-                return
-            try:
-                kite = KiteConnect(api_key=CFG.KITE_API_KEY)
-                data = kite.generate_session(req_token, api_secret=api_secret)
-                access = data["access_token"]
-                set_env_value("KITE_ACCESS_TOKEN", access)
-                await event.reply("✅ Access token updated in .env. Now run: sudo systemctl restart trident")
-            except Exception as e:
-                await event.reply("❌ Token update failed: %s" % e)
-            return
-
-        await event.reply("Unknown command. Use /help")
 
     await asyncio.gather(
         client.run_until_disconnected(),
@@ -536,13 +672,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-def _request_restart_flag():
-    try:
-        if getattr(CFG, "ENABLE_TOKEN_AUTORESTART", True):
-            flag_path = getattr(CFG, "RESTART_FLAG_PATH", "/home/ubuntu/trident-bot/RESTART_REQUIRED")
-            with open(flag_path, "w", encoding="utf-8") as f:
-                f.write("restart\n")
-            append_log("INFO","RESTART","Restart flag created after /token. systemd will restart the bot.")
-    except Exception as e:
-        append_log("ERROR","RESTART", f"Failed to create restart flag: {e}")
