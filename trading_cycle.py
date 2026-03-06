@@ -69,7 +69,29 @@ def _notify(msg: str):
 
 
 def _positions():
-    return STATE.setdefault("positions", {})
+    pos = STATE.setdefault("positions", {})
+
+    # backward compatibility: migrate legacy single trade slot if present
+    legacy = STATE.get("open_trade")
+    if legacy and not pos and isinstance(legacy, dict):
+        sym = str(legacy.get("symbol") or "").strip().upper()
+        if sym:
+            entry = float(legacy.get("entry") or legacy.get("entry_price") or 0.0)
+            qty = int(legacy.get("qty") or legacy.get("quantity") or 1)
+            peak = float(legacy.get("peak") or legacy.get("peak_pct") or 0.0)
+            trail_active = bool(legacy.get("trail_active", legacy.get("trailing_active", False)))
+            pos[sym] = {
+                "entry": entry,
+                "entry_price": entry,
+                "qty": qty,
+                "quantity": qty,
+                "peak": peak,
+                "peak_pct": peak,
+                "trail_active": trail_active,
+                "trailing_active": trail_active,
+            }
+            append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
+    return pos
 
 
 def _trade_entry_qty(trade: dict) -> tuple[float, int]:
@@ -549,13 +571,15 @@ def _manage_open_trades(force_only=False):
         if entry <= 0:
             continue
         pnl_pct = ((ltp - entry) / entry) * 100.0
-        peak_pct = float(trade.get("peak_pct") or pnl_pct)
+        peak_pct = float(trade.get("peak_pct") or trade.get("peak") or pnl_pct)
         if pnl_pct > peak_pct:
             peak_pct = pnl_pct
         trade["peak_pct"] = peak_pct
+        trade["peak"] = peak_pct
 
         if pnl_pct >= float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5)):
             trade["trailing_active"] = True
+            trade["trail_active"] = True
 
         stoploss_pct = float(getattr(CFG, "STOPLOSS_PCT", 2.0))
         if pnl_pct <= -abs(stoploss_pct):
@@ -654,9 +678,13 @@ def _maybe_enter_from_signal(sig):
             return False
 
     _positions()[sym] = {
+        "entry": booked_entry,
         "entry_price": booked_entry,
+        "qty": qty,
         "quantity": qty,
+        "peak": 0.0,
         "peak_pct": 0.0,
+        "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
     }
@@ -720,7 +748,7 @@ def get_trailing_status_text():
         if ltp is None:
             ltp = entry
         pnl_pct = ((ltp - entry) / entry) * 100.0 if entry > 0 else 0.0
-        peak_pct = float(t.get("peak_pct") or pnl_pct)
+        peak_pct = float(t.get("peak_pct") or t.get("peak") or pnl_pct)
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
         activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
         trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
