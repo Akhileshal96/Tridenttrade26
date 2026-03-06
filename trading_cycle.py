@@ -34,6 +34,7 @@ STATE = {
     "last_wallet_sync_ts": None,
     "cooldown_until": None,
     "last_exit_ts": {},
+    "skip_cooldown": {},
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -46,7 +47,7 @@ RUNTIME = {
     "BUCKET_INR": float(getattr(CFG, "BUCKET_INR", 1000.0)),
     "BUCKET_MIN_INR": float(getattr(CFG, "BUCKET_MIN_INR", 1000.0)),
     "BUCKET_MAX_INR": float(getattr(CFG, "BUCKET_MAX_INR", 5000.0)),
-    "MAX_EXPOSURE_PCT": float(getattr(CFG, "MAX_EXPOSURE_PCT", 30.0)),
+    "MAX_EXPOSURE_PCT": float(getattr(CFG, "MAX_EXPOSURE_PCT", 60.0)),
     "USE_BUCKET_SLABS": bool(getattr(CFG, "USE_BUCKET_SLABS", True)),
     "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
@@ -442,7 +443,7 @@ def _current_exposure_inr():
 
 def _max_exposure_inr():
     base = float(STATE.get("wallet_net_inr") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
-    return base * float(RUNTIME.get("MAX_EXPOSURE_PCT", 30.0)) / 100.0
+    return base * float(RUNTIME.get("MAX_EXPOSURE_PCT", 60.0)) / 100.0
 
 
 def _bucket_inr(wallet_net: float) -> float:
@@ -477,12 +478,13 @@ def _calc_qty(symbol: str, price: float):
     bucket = _bucket_inr(wallet)
     risk_amt = bucket * float(getattr(CFG, "RISK_PER_TRADE_PCT", 1.0)) / 100.0
     per_share_risk = price * float(getattr(CFG, "STOPLOSS_PCT", 2.0)) / 100.0
-    risk_qty = int(risk_amt / per_share_risk) if per_share_risk > 0 else 1
+    risk_qty = int(risk_amt / per_share_risk) if per_share_risk > 0 else 0
     bucket_qty = int(bucket / price) if price > 0 else 0
-    qty = max(1, min(risk_qty if risk_qty > 0 else 1, bucket_qty if bucket_qty > 0 else 1))
+    raw_qty = min(bucket_qty, risk_qty)
+    qty = raw_qty if raw_qty >= 1 else 0
     append_log("INFO", "BUCKET", f"wallet={wallet:.2f} slab_bucket={bucket:.2f} exposure={_current_exposure_inr():.2f}/{_max_exposure_inr():.2f}")
     append_log("INFO", "SIZE", f"{symbol} price={price:.2f} qty={qty} bucket_qty={bucket_qty} risk_qty={risk_qty}")
-    return qty
+    return qty, bucket_qty, risk_qty
 
 
 def _ltp(kite, sym):
@@ -512,6 +514,26 @@ def _place_live_order(kite, sym, side, qty):
 def _set_cooldown():
     sec = int(getattr(CFG, "COOLDOWN_SECONDS", 120))
     STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
+
+
+def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3):
+    sym = (sym or "").strip().upper()
+    if not sym:
+        return
+    until = datetime.now(IST) + timedelta(minutes=max(1, int(minutes)))
+    STATE.setdefault("skip_cooldown", {})[sym] = until
+    append_log("INFO", "SKIP", f"{sym} cooldown applied reason={reason}")
+
+
+def _skip_cooldown_active(sym: str) -> bool:
+    sym = (sym or "").strip().upper()
+    until = STATE.setdefault("skip_cooldown", {}).get(sym)
+    if not until:
+        return False
+    if datetime.now(IST) >= until:
+        STATE["skip_cooldown"].pop(sym, None)
+        return False
+    return True
 
 
 def _close_position(sym, reason="MANUAL", ltp_override=None):
@@ -639,6 +661,10 @@ def _can_open_new_trade(sym, entry, qty=1):
         append_log("INFO", "SKIP", f"{sym} reason=cooldown")
         return False
 
+    if _skip_cooldown_active(sym):
+        append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
+        return False
+
     last_exit = STATE.get("last_exit_ts", {}).get(sym)
     reentry_block = int(getattr(CFG, "REENTRY_BLOCK_MINUTES", 30))
     if last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
@@ -661,7 +687,8 @@ def _can_open_new_trade(sym, entry, qty=1):
         return False
 
     if (_current_exposure_inr() + required_value) > _max_exposure_inr():
-        append_log("INFO", "ENTRY", f"Skip {sym}: exposure guard hit next={(_current_exposure_inr() + required_value):.2f} max={_max_exposure_inr():.2f}")
+        append_log("INFO", "SKIP", f"{sym} reason=exposure next={(_current_exposure_inr() + required_value):.2f} max={_max_exposure_inr():.2f}")
+        _apply_skip_cooldown(sym, "exposure")
         return False
 
     return True
@@ -678,9 +705,10 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "SKIP", f"{sym} reason=invalid_entry")
         return False
 
-    qty = _calc_qty(sym, entry)
+    qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     if qty <= 0:
-        append_log("INFO", "SKIP", f"{sym} reason=qty_zero")
+        append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
+        _apply_skip_cooldown(sym, "qty_zero")
         return False
 
     if not _can_open_new_trade(sym, entry, qty):
@@ -834,9 +862,10 @@ def tick():
 
     max_new_entries = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
     opened = 0
+    blocked_this_tick = set()
     while opened < max_new_entries:
         held = set(_positions().keys())
-        candidates = [s for s in universe if s not in held]
+        candidates = [s for s in universe if s not in held and s not in blocked_this_tick]
         if not candidates:
             break
 
@@ -849,7 +878,10 @@ def tick():
         if _maybe_enter_from_signal(sig):
             opened += 1
         else:
-            break
+            bsym = str(sig.get("symbol") or "").strip().upper()
+            if bsym:
+                blocked_this_tick.add(bsym)
+            continue
 
 
 def run_loop_forever():
