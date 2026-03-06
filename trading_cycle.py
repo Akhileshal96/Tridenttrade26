@@ -71,26 +71,52 @@ def _notify(msg: str):
 def _positions():
     pos = STATE.setdefault("positions", {})
 
+    def _normalize_trade_dict(sym: str, tr: dict):
+        if not sym or not isinstance(tr, dict):
+            return None
+        entry = float(tr.get("entry") or tr.get("entry_price") or 0.0)
+        qty = int(tr.get("qty") or tr.get("quantity") or 1)
+        peak = float(tr.get("peak") or tr.get("peak_pct") or 0.0)
+        trail_active = bool(tr.get("trail_active", tr.get("trailing_active", False)))
+        return {
+            "entry": entry,
+            "entry_price": entry,
+            "qty": qty,
+            "quantity": qty,
+            "peak": peak,
+            "peak_pct": peak,
+            "trail_active": trail_active,
+            "trailing_active": trail_active,
+            "order_id": tr.get("order_id"),
+        }
+
+    # backward compatibility: merge legacy multi-trade map if present
+    legacy_map = STATE.get("open_trades")
+    if isinstance(legacy_map, dict) and legacy_map is not pos:
+        migrated = 0
+        for raw_sym, tr in legacy_map.items():
+            sym = str(raw_sym or "").strip().upper()
+            if not sym or sym in pos:
+                continue
+            norm = _normalize_trade_dict(sym, tr)
+            if norm:
+                pos[sym] = norm
+                migrated += 1
+        if migrated:
+            append_log("INFO", "STATE", f"Merged {migrated} legacy open_trades into positions")
+
     # backward compatibility: migrate legacy single trade slot if present
     legacy = STATE.get("open_trade")
-    if legacy and not pos and isinstance(legacy, dict):
+    if legacy and isinstance(legacy, dict):
         sym = str(legacy.get("symbol") or "").strip().upper()
-        if sym:
-            entry = float(legacy.get("entry") or legacy.get("entry_price") or 0.0)
-            qty = int(legacy.get("qty") or legacy.get("quantity") or 1)
-            peak = float(legacy.get("peak") or legacy.get("peak_pct") or 0.0)
-            trail_active = bool(legacy.get("trail_active", legacy.get("trailing_active", False)))
-            pos[sym] = {
-                "entry": entry,
-                "entry_price": entry,
-                "qty": qty,
-                "quantity": qty,
-                "peak": peak,
-                "peak_pct": peak,
-                "trail_active": trail_active,
-                "trailing_active": trail_active,
-            }
-            append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
+        if sym and sym not in pos:
+            norm = _normalize_trade_dict(sym, legacy)
+            if norm:
+                pos[sym] = norm
+                append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
+
+    # keep alias aligned
+    STATE["open_trades"] = pos
     return pos
 
 
