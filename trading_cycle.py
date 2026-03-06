@@ -392,14 +392,14 @@ def _bucket_inr(wallet_net: float) -> float:
         if wallet_net < 5000:
             return 500.0
         if wallet_net <= 15000:
-            return 1000.0
+            return 5000.0
         if wallet_net <= 30000:
-            return 1500.0
+            return 7000.0
         if wallet_net <= 60000:
-            return 2500.0
+            return 10000.0
         if wallet_net <= 100000:
-            return 4000.0
-        return 5000.0
+            return 15000.0
+        return 20000.0
 
     mode = str(RUNTIME.get("BUCKET_MODE", "PCT")).upper()
     if mode == "PCT":

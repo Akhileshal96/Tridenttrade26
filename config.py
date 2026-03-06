@@ -70,7 +70,7 @@ BUCKET_PCT = _get_float("BUCKET_PCT", "10")
 BUCKET_INR = _get_float("BUCKET_INR", "1000")
 BUCKET_MIN_INR = _get_float("BUCKET_MIN_INR", "1000")
 BUCKET_MAX_INR = _get_float("BUCKET_MAX_INR", "5000")
-MAX_EXPOSURE_PCT = _get_float("MAX_EXPOSURE_PCT", "30")
+MAX_EXPOSURE_PCT = _get_float("MAX_EXPOSURE_PCT", "60")
 USE_BUCKET_SLABS = _get_bool("USE_BUCKET_SLABS", "true")
 
 # ===== ENTRY SAFETY =====
