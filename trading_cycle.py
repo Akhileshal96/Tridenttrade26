@@ -72,6 +72,12 @@ def _positions():
     return STATE.setdefault("positions", {})
 
 
+def _trade_entry_qty(trade: dict) -> tuple[float, int]:
+    entry = float((trade or {}).get("entry_price") or (trade or {}).get("entry") or 0.0)
+    qty = int((trade or {}).get("quantity") or (trade or {}).get("qty") or 0)
+    return entry, (qty if qty > 0 else 1)
+
+
 def _parse_hhmm(s):
     try:
         hh, mm = str(s).strip().split(":")
@@ -379,7 +385,11 @@ def _open_positions_count():
 
 
 def _current_exposure_inr():
-    return sum(float(t.get("entry_price", 0.0)) * int(t.get("quantity", 0) or 0) for t in _positions().values())
+    total = 0.0
+    for t in _positions().values():
+        e, q = _trade_entry_qty(t)
+        total += e * q
+    return total
 
 
 def _max_exposure_inr():
@@ -461,8 +471,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     trade = _positions().get(sym)
     if not trade:
         return False
-    qty = int(trade.get("quantity") or 0) or 1
-    entry = float(trade.get("entry_price") or 0.0)
+    entry, qty = _trade_entry_qty(trade)
     ltp = float(ltp_override) if ltp_override is not None else None
 
     if not is_live_enabled():
@@ -519,8 +528,13 @@ def _manage_open_trades(force_only=False):
     if not _positions():
         return
     for sym, trade in list(_positions().items()):
-        kite = get_kite() if is_live_enabled() else None
-        ltp = _ltp(kite, sym) if kite else float(trade.get("entry_price") or 0.0)
+        kite = None
+        try:
+            kite = get_kite()
+        except Exception:
+            kite = None
+        entry, _qty = _trade_entry_qty(trade)
+        ltp = _ltp(kite, sym) if kite else entry
         if ltp is None:
             append_log("WARN", "RISK", f"{sym} ltp unavailable")
             continue
@@ -531,7 +545,7 @@ def _manage_open_trades(force_only=False):
         if force_only:
             continue
 
-        entry = float(trade.get("entry_price") or 0.0)
+        entry, _ = _trade_entry_qty(trade)
         if entry <= 0:
             continue
         pnl_pct = ((ltp - entry) / entry) * 100.0
@@ -550,7 +564,7 @@ def _manage_open_trades(force_only=False):
 
         trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
         buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
-        trailing_active = bool(trade.get("trailing_active", False))
+        trailing_active = bool(trade.get("trailing_active", trade.get("trail_active", False)))
         append_log("INFO", "RISK", f"{sym} pnl%={pnl_pct:.2f} peak%={peak_pct:.2f} trail_active={trailing_active}")
 
         if trailing_active and pnl_pct <= (peak_pct - trail - buf):
@@ -665,7 +679,8 @@ def get_status_text():
     mode = "LIVE ✅" if is_live_enabled() else "PAPER 🟡"
     rows = []
     for sym, p in sorted(_positions().items()):
-        rows.append(f"- {sym} qty={int(p.get('quantity') or 0)} entry={float(p.get('entry_price') or 0):.2f}")
+        e, q = _trade_entry_qty(p)
+        rows.append(f"- {sym} qty={q} entry={e:.2f}")
     return (
         "📟 Trident Status\n\n"
         f"Mode: {mode}\n"
