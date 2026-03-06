@@ -1,0 +1,110 @@
+import os
+import sys
+
+sys.path.insert(0, os.getcwd())
+
+import trading_cycle as tc
+
+
+def reset_state():
+    tc.STATE["positions"] = {}
+    tc.STATE["open_trades"] = tc.STATE["positions"]
+    tc.STATE["today_pnl"] = 0.0
+    tc.STATE["cooldown_until"] = None
+    tc.STATE["last_exit_ts"] = {}
+    tc.STATE["paused"] = False
+    tc.STATE["initiated"] = False
+    tc.STATE["live_override"] = False
+
+
+def test_close_position_paper_updates_pnl_and_removes_position(monkeypatch):
+    reset_state()
+    tc.STATE["positions"]["ABC"] = {"entry_price": 100.0, "quantity": 10}
+
+    monkeypatch.setattr(tc, "_set_cooldown", lambda: None)
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tc, "_notify", lambda *args, **kwargs: None)
+
+    ok = tc._close_position("ABC", reason="TEST", ltp_override=95.0)
+
+    assert ok is True
+    assert "ABC" not in tc.STATE["positions"]
+    assert tc.STATE["today_pnl"] == -50.0
+    assert "ABC" in tc.STATE["last_exit_ts"]
+
+
+def test_manage_open_trades_hits_stoploss_and_sells(monkeypatch):
+    reset_state()
+    tc.STATE["positions"]["ABC"] = {"entry_price": 100.0, "quantity": 10, "peak_pct": 0.0, "trailing_active": False}
+
+    monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+
+    tc._manage_open_trades = tc._manage_open_trades  # explicit use for lint clarity
+
+    # Force LTP down to -2% threshold breach
+    monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 98.0)
+    monkeypatch.setattr(tc, "is_live_enabled", lambda: True)
+    monkeypatch.setattr(tc, "get_kite", lambda: object())
+
+    closed = {"called": False, "reason": None}
+
+    def fake_close(sym, reason="MANUAL", ltp_override=None):
+        closed["called"] = True
+        closed["reason"] = reason
+        tc.STATE["positions"].pop(sym, None)
+        return True
+
+    monkeypatch.setattr(tc, "_close_position", fake_close)
+
+    tc._manage_open_trades(force_only=False)
+
+    assert closed["called"] is True
+    assert closed["reason"] == "SL"
+
+
+def test_manage_open_trades_trailing_exit(monkeypatch):
+    reset_state()
+    tc.STATE["positions"]["ABC"] = {
+        "entry_price": 100.0,
+        "quantity": 10,
+        "peak_pct": 2.0,
+        "trailing_active": True,
+    }
+
+    monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 101.0)  # +1%
+    monkeypatch.setattr(tc, "is_live_enabled", lambda: True)
+    monkeypatch.setattr(tc, "get_kite", lambda: object())
+
+    # trail threshold = peak(2.0) - trail(0.6) - buffer(0.1) = 1.3; pnl=1.0 should trigger
+    monkeypatch.setattr(tc.CFG, "TRAIL_PCT", 0.6, raising=False)
+    monkeypatch.setattr(tc.CFG, "BUFFER_PCT", 0.1, raising=False)
+
+    closed = {"reason": None}
+
+    def fake_close(sym, reason="MANUAL", ltp_override=None):
+        closed["reason"] = reason
+        tc.STATE["positions"].pop(sym, None)
+        return True
+
+    monkeypatch.setattr(tc, "_close_position", fake_close)
+
+    tc._manage_open_trades(force_only=False)
+
+    assert closed["reason"] == "TRAIL"
+
+
+def test_can_open_new_trade_uses_full_notional(monkeypatch):
+    reset_state()
+    tc.STATE["wallet_available_inr"] = 500.0
+    tc.STATE["wallet_net_inr"] = 500.0
+    tc.RUNTIME["MAX_EXPOSURE_PCT"] = 100.0
+
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+
+    # entry*qty = 100*6 = 600 > 500 should block
+    assert tc._can_open_new_trade("ABC", 100.0, qty=6) is False
+    # entry*qty = 400 <= 500 should pass (assuming no other blockers)
+    assert tc._can_open_new_trade("ABC", 100.0, qty=4) is True
