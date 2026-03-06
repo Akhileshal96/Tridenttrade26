@@ -225,7 +225,6 @@ def is_live_enabled():
 
 
 
-
 def list_exclusions():
     s = load_excluded()
     if not s:
