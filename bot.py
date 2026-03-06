@@ -66,6 +66,7 @@ HELP_TEXT = (
     "• /stoploop  → pause trading loop\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
+    "• /trailstatus → trailing lock details\n"
     "• /logs       → last 20 log lines\n"
     "• /exportlog  → full log as txt\n"
     "• /dailylog   → today's log as txt\n"
@@ -319,6 +320,10 @@ async def main():
 
         if cmd_word == "/status":
             await event.reply(CYCLE.get_status_text())
+            return
+
+        if cmd_word == "/trailstatus":
+            await event.reply(CYCLE.get_trailing_status_text())
             return
 
         if cmd_word in ("/addtrader", "/removetrader", "/addviewer", "/removeviewer", "/setslip", "/exclude", "/include", "/token") and not cmd_arg:

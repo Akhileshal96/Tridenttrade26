@@ -702,6 +702,40 @@ def get_status_text():
     )
 
 
+
+
+def get_trailing_status_text():
+    _ensure_day_key()
+    rows = []
+    for sym, t in sorted(_positions().items()):
+        entry, qty = _trade_entry_qty(t)
+        if entry <= 0:
+            continue
+        kite = None
+        try:
+            kite = get_kite()
+        except Exception:
+            kite = None
+        ltp = _ltp(kite, sym) if kite else entry
+        if ltp is None:
+            ltp = entry
+        pnl_pct = ((ltp - entry) / entry) * 100.0 if entry > 0 else 0.0
+        peak_pct = float(t.get("peak_pct") or pnl_pct)
+        trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
+        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
+        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
+        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+        trigger = peak_pct - trail - buf
+        rows.append(
+            f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl%={pnl_pct:.2f} "
+            f"peak%={peak_pct:.2f} trail_active={trail_active} act@{activate:.2f}% trail_trigger<={trigger:.2f}%"
+        )
+
+    if not rows:
+        return "📉 Trailing Status\n\nNo open trades."
+
+    return "📉 Trailing Status\n\n" + "\n".join(rows)
+
 def tick():
     _ensure_day_key()
     _sync_wallet_and_caps(force=False)
