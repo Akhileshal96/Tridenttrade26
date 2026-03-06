@@ -41,6 +41,7 @@ def generate_signal(universe):
 
             sma20 = df["close"].rolling(20).mean()
             last = float(df["close"].iloc[-1])
+            prev = float(df["close"].iloc[-2])
 
             avg_val = sma20.iloc[-1]
             if pd.isna(avg_val):
@@ -57,9 +58,16 @@ def generate_signal(universe):
             if abs(last - avg) / avg < 0.002:
                 append_log("INFO", "NEAR", f"{sym} near: last={last:.2f} sma20={avg:.2f}")
 
+            momentum_pct = ((last - prev) / prev * 100.0) if prev > 0 else 0.0
+
             if last > avg:
-                append_log("INFO", "SIG", f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f}")
-                return {"symbol": sym, "side": "BUY", "entry": float(last)}
+                append_log("INFO", "SIG", f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f} mom={momentum_pct:.2f}%")
+                return {
+                    "symbol": sym,
+                    "side": "BUY",
+                    "entry": float(last),
+                    "momentum_pct": float(momentum_pct),
+                }
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")

@@ -12,36 +12,7 @@ from kiteconnect import KiteConnect
 from log_store import append_log, tail_text, export_all, LOG_FILE
 from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
-
-NOTIFY_Q = asyncio.Queue()
-MAIN_LOOP = None
-
-
-async def notification_worker(client):
-    while True:
-        text = await NOTIFY_Q.get()
-        try:
-            chat_id = int(getattr(CFG, "ADMIN_USER_ID", 0) or 0)
-            if not chat_id:
-                chat_id = _owner_id()
-            if not chat_id:
-                append_log("WARN", "NOTIFY", "admin chat id missing, dropping msg")
-                continue
-            await client.send_message(chat_id, text)
-        except Exception as e:
-            append_log("ERROR", "NOTIFY", f"send failed: {e}")
-
-
-def notify(text: str):
-    global MAIN_LOOP
-    if not MAIN_LOOP:
-        append_log("WARN", "NOTIFY", "MAIN_LOOP not ready, dropping msg")
-        return
-    try:
-        MAIN_LOOP.call_soon_threadsafe(NOTIFY_Q.put_nowait, text)
-    except Exception as e:
-        append_log("ERROR", "NOTIFY", f"queue failed: {e}")
-
+from trade_notifier import notify, notification_worker, setup_loop
 
 HELP_TEXT = (
     "🤖 TRIDENT BOT – COMMANDS\n\n"
@@ -57,7 +28,8 @@ HELP_TEXT = (
     "• /renewtoken            → sends Zerodha login link\n"
     "• /token <request_token> → generates access token + saves to .env\n"
     "• /tokenstatus           → check current token validity\n"
-    "   /token auto-attempts restart of trident service\n\n"
+    "   /token updates token and restarts bot process\n"
+    "• /restart               → restart bot process\n\n"
     "LIVE SAFETY [Owner]:\n"
     "• /initiate (or /arm)     → enables LIVE immediately (runtime override)\n"
     "• /disengage (or /disarm) → stops LIVE immediately\n\n"
@@ -275,6 +247,19 @@ async def _auto_restart_trident_service() -> tuple[bool, str]:
         return False, str(e)
 
 
+async def _restart_bot_process(event) -> None:
+    """Prefer service restart in managed deployments; fallback to process exit."""
+    ok, msg = await _auto_restart_trident_service()
+    if ok:
+        await event.reply("♻️ Service restart requested successfully.")
+        append_log("INFO", "BOT", f"Service restart requested: {msg}")
+        return
+
+    append_log("WARN", "BOT", f"Service restart unavailable ({msg}); falling back to process exit")
+    await event.reply(f"⚠️ Service restart unavailable ({msg}). Falling back to process exit.")
+    os._exit(0)
+
+
 async def main():
     api_id = int(getattr(CFG, "TELEGRAM_API_ID", 9888950))
     api_hash = getattr(CFG, "TELEGRAM_API_HASH", "ecfa673e2c85b4ef16743acf0ba0d1c1")
@@ -286,9 +271,8 @@ async def main():
     await client.start(bot_token=CFG.TELEGRAM_BOT_TOKEN)
     append_log("INFO", "BOT", "Telegram bot started")
 
-    global MAIN_LOOP
-    MAIN_LOOP = asyncio.get_running_loop()
-    asyncio.create_task(notification_worker(client))
+    setup_loop(asyncio.get_running_loop())
+    asyncio.create_task(notification_worker(client, lambda: int(getattr(CFG, "ADMIN_USER_ID", 0) or _owner_id() or 0)))
 
     CYCLE.set_notifier(notify)
 
@@ -534,6 +518,9 @@ async def main():
 
         # ===== Insider safety (Owner only) =====
         if cmd_word == "/excluded":
+            if not _is_owner(sender):
+                await event.reply("❌ Not permitted (Owner only).")
+                return
             await event.reply(CYCLE.list_exclusions())
             return
 
@@ -566,6 +553,14 @@ async def main():
                 await event.reply("🛑 PANIC done: paused + disengaged + close-all attempted.")
             else:
                 await event.reply("🛑 PANIC done: paused + disengaged; one or more close actions failed.")
+            return
+
+        if cmd_word == "/restart":
+            if not _is_owner(sender):
+                await event.reply("❌ Not permitted (Owner only).")
+                return
+            await event.reply("♻️ Restart requested...")
+            await _restart_bot_process(event)
             return
 
         if cmd_word == "/resetday":
@@ -627,14 +622,9 @@ async def main():
                 access = data["access_token"]
                 set_env_value("KITE_ACCESS_TOKEN", access)
                 os.environ["KITE_ACCESS_TOKEN"] = access
-                await event.reply("✅ Access token accepted by Zerodha and saved. Checking restart...")
-                ok, detail = await _auto_restart_trident_service()
-                if ok:
-                    await event.reply("✅ Access token updated. Service restarted automatically.")
-                    append_log("INFO", "BOT", "Auto restart succeeded after /token")
-                else:
-                    await event.reply("✅ Access token updated, but auto-restart failed. Run: sudo systemctl restart trident")
-                    append_log("ERROR", "BOT", f"Auto restart failed after /token: {detail}")
+                await event.reply("✅ Access token accepted by Zerodha and saved.")
+                append_log("INFO", "BOT", "Token updated; requesting bot restart")
+                await _restart_bot_process(event)
             except Exception as e:
                 await event.reply("❌ Token update failed: %s" % e)
             return

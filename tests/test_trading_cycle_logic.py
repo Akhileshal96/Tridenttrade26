@@ -108,3 +108,16 @@ def test_can_open_new_trade_uses_full_notional(monkeypatch):
     assert tc._can_open_new_trade("ABC", 100.0, qty=6) is False
     # entry*qty = 400 <= 500 should pass (assuming no other blockers)
     assert tc._can_open_new_trade("ABC", 100.0, qty=4) is True
+
+
+def test_reentry_block_allows_positive_momentum(monkeypatch):
+    reset_state()
+    tc.STATE["wallet_available_inr"] = 10000.0
+    tc.STATE["wallet_net_inr"] = 10000.0
+    tc.STATE["last_exit_ts"] = {"ABC": tc.datetime.now(tc.IST)}
+
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tc.CFG, "REENTRY_BLOCK_MINUTES", 30, raising=False)
+
+    assert tc._can_open_new_trade("ABC", 100.0, qty=1, momentum_positive=False) is False
+    assert tc._can_open_new_trade("ABC", 100.0, qty=1, momentum_positive=True) is True

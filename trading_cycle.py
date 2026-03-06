@@ -10,6 +10,8 @@ from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
 from strategy_engine import generate_signal
+from research_engine import get_trading_universe
+from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -653,7 +655,7 @@ def _within_entry_window():
     return start <= now <= end
 
 
-def _can_open_new_trade(sym, entry, qty=1):
+def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
     sym = sym.strip().upper()
     now = datetime.now(IST)
 
@@ -668,8 +670,10 @@ def _can_open_new_trade(sym, entry, qty=1):
     last_exit = STATE.get("last_exit_ts", {}).get(sym)
     reentry_block = int(getattr(CFG, "REENTRY_BLOCK_MINUTES", 30))
     if last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
-        append_log("INFO", "SKIP", f"{sym} reason=reentry_block")
-        return False
+        if not momentum_positive:
+            append_log("INFO", "SKIP", f"{sym} reason=reentry_block")
+            return False
+        append_log("INFO", "SKIP", f"{sym} reentry_block bypassed reason=positive_momentum")
 
     if sym in _positions():
         append_log("INFO", "SKIP", f"{sym} reason=already_held")
@@ -705,13 +709,17 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "SKIP", f"{sym} reason=invalid_entry")
         return False
 
+    momentum_pct = float(sig.get("momentum_pct") or 0.0)
+    momentum_threshold = float(getattr(CFG, "REENTRY_MOMENTUM_MIN_PCT", 0.0))
+    momentum_positive = momentum_pct > momentum_threshold
+
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
         _apply_skip_cooldown(sym, "qty_zero")
         return False
 
-    if not _can_open_new_trade(sym, entry, qty):
+    if not _can_open_new_trade(sym, entry, qty, momentum_positive=momentum_positive):
         return False
 
     mode = "LIVE" if is_live_enabled() else "PAPER"
@@ -850,38 +858,30 @@ def tick():
         if _market_stable():
             promote_universe(reason="AUTO_STABLE")
 
-    _manage_open_trades(force_only=False)
+    ee_monitor_positions(
+        STATE,
+        _positions(),
+        get_ltp=lambda sym: _ltp(get_kite(), sym),
+        close_position=_close_position,
+        force_exit_check=_past_force_exit_time,
+    )
 
     if not _within_entry_window():
         return
 
-    universe = load_universe_trading()
+    rstate = get_trading_universe(force=False)
+    universe = list(rstate.get("trading_universe") or []) or load_universe_trading()
     if not universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
 
-    max_new_entries = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
-    opened = 0
-    blocked_this_tick = set()
-    while opened < max_new_entries:
-        held = set(_positions().keys())
-        candidates = [s for s in universe if s not in held and s not in blocked_this_tick]
-        if not candidates:
-            break
-
-        for s in candidates:
-            append_log("INFO", "SCAN", f"Scanning {s}")
-
-        sig = generate_signal(candidates)
-        if not sig:
-            break
-        if _maybe_enter_from_signal(sig):
-            opened += 1
-        else:
-            bsym = str(sig.get("symbol") or "").strip().upper()
-            if bsym:
-                blocked_this_tick.add(bsym)
-            continue
+    ee_process_entries(
+        universe,
+        _positions(),
+        signal_fn=generate_signal,
+        try_enter_fn=_maybe_enter_from_signal,
+        max_new=int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5")),
+    )
 
 
 def run_loop_forever():
