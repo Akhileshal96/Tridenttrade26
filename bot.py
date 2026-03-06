@@ -9,7 +9,7 @@ import night_research
 from telethon import TelegramClient, events
 from kiteconnect import KiteConnect
 
-from log_store import append_log, tail_text, export_all, LOG_FILE
+from log_store import append_log, tail_text, export_all, LOG_FILE, clear_logs
 from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
 from trade_notifier import notify, notification_worker, setup_loop
@@ -40,9 +40,12 @@ HELP_TEXT = (
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /trailstatus → trailing lock details\n"
-    "• /logs       → last 20 log lines\n"
+    "• /logs       → log menu (daily/20/30/all/reset)\n"
+    "• /logs20     → last 20 log lines\n"
+    "• /logs30     → last 30 log lines\n"
     "• /exportlog  → full log as txt\n"
     "• /dailylog   → today's log as txt\n"
+    "• /resetlogs  → truncate all logs (Owner)\n"
     "• /positions  → Zerodha net positions\n\n"
     "RESEARCH [Trader/Owner]:\n"
     "• /nightnow       → rebuild live universe now\n"
@@ -357,15 +360,27 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
 
     # ===== Logs (Viewer+) =====
     if cmd_word == "/logs":
+        await event.reply(
+            "📜 Log Options\n\n"
+            "• /dailylog -> today's logs\n"
+            "• /logs20 -> last 20 lines\n"
+            "• /logs30 -> last 30 lines\n"
+            "• /exportlog -> full log file\n"
+            "• /resetlogs -> truncate logs (owner)"
+        )
+        return True
+
+    if cmd_word in ("/logs20", "/logs30"):
+        n = 20 if cmd_word == "/logs20" else 30
         try:
-            txt = tail_text(20) or "(no logs)"
+            txt = tail_text(n) or "(no logs)"
             if len(txt) <= 3500:
                 await event.reply(txt)
             else:
                 for i in range(0, len(txt), 3500):
                     await event.reply(txt[i:i + 3500])
         except Exception as e:
-            append_log("ERROR", "BOT", f"/logs reply failed: {e}")
+            append_log("ERROR", "BOT", f"{cmd_word} reply failed: {e}")
             await event.reply("❌ Failed to send logs. Try /exportlog")
         return True
 
@@ -383,6 +398,14 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("(no logs for today)")
             return True
         await event.reply(file=fp, message="📅 Today's log export")
+        return True
+
+    if cmd_word == "/resetlogs":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        clear_logs()
+        await event.reply("✅ Logs cleared.")
         return True
 
     if cmd_word == "/positions":
@@ -407,30 +430,31 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     if cmd_word == "/nightreport":
-        rep = getattr(night_research, "last_report_summary", None)
-        txt = rep() if callable(rep) else "(night report summary unavailable)"
-        await event.reply("🧪 Night Report\n\n" + (txt or "(empty)"))
+        txt = night_research.last_report_summary()
+        if len(txt) <= 3500:
+            await event.reply("🧪 Night Report\n\n" + (txt or "(empty)"))
+        else:
+            for i in range(0, len(txt), 3500):
+                await event.reply(txt[i:i + 3500])
         return True
 
     if cmd_word == "/nightlog":
-        txt = _tail_night_lines(120)
+        txt = night_research.read_night_log_tail(120)
         if len(txt) <= 3500:
-            await event.reply("📝 NIGHT LOG\n\n" + txt)
+            await event.reply("📝 NIGHT RESEARCH LOG\n\n" + txt)
         else:
             for i in range(0, len(txt), 3500):
                 await event.reply(txt[i:i + 3500])
         return True
 
     if cmd_word == "/universe":
-        path = getattr(CFG, "UNIVERSE_PATH", os.path.join(os.getcwd(), "data", "universe.txt"))
-        syms = _read_universe(path, 50)
-        await event.reply("📦 TRADING Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
+        syms = CYCLE.load_universe_trading()
+        await event.reply("📦 TRADING Universe (%d)\n\n%s" % (len(syms), "\n".join(syms[:50]) if syms else "(empty)"))
         return True
 
     if cmd_word == "/universe_live":
-        live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(os.getcwd(), "data", "universe_live.txt"))
-        syms = _read_universe(live_path, 50)
-        await event.reply("📈 LIVE Universe (%d)\n\n%s" % (len(syms), "\n".join(syms) if syms else "(empty)"))
+        syms = CYCLE.load_universe_live()
+        await event.reply("📈 LIVE Universe (%d)\n\n%s" % (len(syms), "\n".join(syms[:50]) if syms else "(empty)"))
         return True
 
     # ===== Promote (Trader/Owner) =====
@@ -612,6 +636,11 @@ async def main():
         "status": _mk_panel_handler("status"),
         "trailstatus": _mk_panel_handler("trailstatus"),
         "logs": _mk_panel_handler("logs"),
+        "logs20": _mk_panel_handler("logs20"),
+        "logs30": _mk_panel_handler("logs30"),
+        "dailylog": _mk_panel_handler("dailylog"),
+        "exportlog": _mk_panel_handler("exportlog"),
+        "resetlogs": _mk_panel_handler("resetlogs"),
         "positions": _mk_panel_handler("positions"),
         "nightnow": _mk_panel_handler("nightnow"),
         "universe": _mk_panel_handler("universe"),

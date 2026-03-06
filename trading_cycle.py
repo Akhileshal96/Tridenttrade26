@@ -768,6 +768,20 @@ def _maybe_enter_from_signal(sig):
     return True
 
 
+def get_positions_text():
+    pos = _positions()
+    if not pos:
+        return "📍 Positions\n\nNo open positions."
+
+    rows = []
+    for sym, tr in sorted(pos.items()):
+        entry, qty = _trade_entry_qty(tr)
+        peak_pct = float(tr.get("peak_pct") or tr.get("peak") or 0.0)
+        rows.append(f"- {sym} qty={qty} entry={entry:.2f} peak%={peak_pct:.2f}")
+
+    return "📍 Positions\n\n" + "\n".join(rows)
+
+
 def get_status_text():
     _ensure_day_key()
     RISK.sync_wallet(STATE)

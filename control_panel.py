@@ -13,13 +13,14 @@ LIVE_TITLE = "🛡 **LIVE SAFETY PANEL**"
 EMERGENCY_TITLE = "🚨 **EMERGENCY PANEL**"
 ADMIN_TITLE = "⚙ **ADMIN PANEL**"
 HELP_TITLE = "🆘 **HELP PANEL**"
+LOGS_TITLE = "📜 **LOGS PANEL**"
 
 
 def _main_buttons():
     return [
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
-        [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:cmd:logs")],
+        [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
@@ -70,6 +71,15 @@ def _admin_buttons():
     ]
 
 
+
+def _logs_buttons():
+    return [
+        [Button.inline("📅 Daily Log", b"cp:cmd:dailylog"), Button.inline("📜 Last 20", b"cp:cmd:logs20")],
+        [Button.inline("📜 Last 30", b"cp:cmd:logs30"), Button.inline("📦 Export All", b"cp:cmd:exportlog")],
+        [Button.inline("🧹 Reset Logs", b"cp:cmd:resetlogs")],
+        [Button.inline("⬅ Back", b"cp:panel:main")],
+    ]
+
 def _help_buttons():
     return [
         [Button.inline("📘 Help", b"cp:cmd:help"), Button.inline("📋 Commands", b"cp:cmd:commands")],
@@ -85,6 +95,7 @@ _PANEL_MAP = {
     "emergency": (EMERGENCY_TITLE, _emergency_buttons),
     "admin": (ADMIN_TITLE, _admin_buttons),
     "help": (HELP_TITLE, _help_buttons),
+    "logs": (LOGS_TITLE, _logs_buttons),
 }
 
 _HINTS = {
