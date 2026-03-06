@@ -111,7 +111,8 @@ async def _safe_invoke(handler_name, event, handlers):
         await _popup(event, f"Handler not configured: {handler_name}")
         return
     try:
-        out = fn(event)
+        target_event = getattr(event, "message", event)
+        out = fn(target_event)
         if hasattr(out, "__await__"):
             await out
     except Exception as e:
