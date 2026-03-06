@@ -1,179 +1,195 @@
 import os
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 
 import config as CFG
-
-
-
-# TRIDENT_LIVE_WALLET_CAPS_V3
-def _apply_wallet_caps_from_kite():
-    try:
-        from broker_zerodha import get_kite
-        kite = get_kite()
-        m = kite.margins()
-        eq = (m or {}).get("equity", {})
-        net = float(eq.get("net") or 0.0)
-
-        loss_pct = float(getattr(CFG, "DAILY_LOSS_CAP_PCT", 2.0))
-        prof_pct = float(getattr(CFG, "DAILY_PROFIT_TARGET_PCT", 1.0))
-
-        if net > 0:
-            CFG.DAILY_LOSS_CAP_INR = net * loss_pct / 100.0
-            CFG.DAILY_PROFIT_TARGET_INR = net * prof_pct / 100.0
-            CFG.WALLET_NET_INR = net
-    except Exception:
-        pass
-
-# TRIDENT_AUTOCAPS_SIMPLE_V1
-# --- Compute wallet-based caps once at runtime ---
-def _apply_wallet_caps(cfg):
-    base = 0.0
-    for name in ("WALLET_INR","CAPITAL_INR","CAPITAL","MAX_CAPITAL","MAX_CAPITAL_INR"):
-        if hasattr(cfg, name):
-            try:
-                v = float(getattr(cfg, name))
-                if v > 0:
-                    base = v
-                    break
-            except:
-                pass
-
-    if base > 0:
-        try:
-            loss_pct = float(getattr(cfg, "DAILY_LOSS_CAP_PCT", 2.0))
-        except:
-            loss_pct = 2.0
-        try:
-            prof_pct = float(getattr(cfg, "DAILY_PROFIT_TARGET_PCT", 1.0))
-        except:
-            prof_pct = 1.0
-
-        cfg.DAILY_LOSS_CAP_INR = base * loss_pct / 100.0
-        cfg.DAILY_PROFIT_TARGET_INR = base * prof_pct / 100.0
-
-# Apply immediately
-_apply_wallet_caps(CFG)
-from log_store import append_log
-from strategy_engine import generate_signal
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
+from log_store import append_log
+from strategy_engine import generate_signal
 
+IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-
-EXCLUSIONS_FILE = os.path.join(DATA_DIR, "exclusions.txt")
+EXCLUSIONS_FILE = getattr(CFG, "EXCLUSIONS_PATH", os.path.join(DATA_DIR, "exclusions.txt"))
 
 STATE = {
     "paused": True,
     "initiated": False,
     "live_override": False,
-    "open_trade": None,
+    "positions": {},  # SYMBOL -> trade dict
     "today_pnl": 0.0,
-    "day_key": datetime.now().strftime("%Y-%m-%d"),
+    "day_key": datetime.now(IST).strftime("%Y-%m-%d"),
     "last_promote_ts": None,
     "last_promote_msg": "Never promoted",
-    "peak": None,
+    "wallet_net_inr": 0.0,
+    "wallet_available_inr": 0.0,
+    "last_wallet": float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0),
+    "daily_loss_cap_inr": float(getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0)),
+    "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0)),
+    "profit_milestone_hit": False,
+    "last_wallet_sync_ts": None,
+    "cooldown_until": None,
+    "last_exit_ts": {},
+    "skip_cooldown": {},
 }
+
+# backwards compatibility for any caller that still checks open_trades key
+STATE["open_trades"] = STATE["positions"]
+
 RUNTIME = {
-    "MAX_ENTRY_SLIPPAGE_PCT": float(os.getenv("MAX_ENTRY_SLIPPAGE_PCT", "0.30")),
+    "MAX_ENTRY_SLIPPAGE_PCT": float(getattr(CFG, "MAX_ENTRY_SLIPPAGE_PCT", 0.30)),
+    "BUCKET_MODE": str(getattr(CFG, "BUCKET_MODE", "PCT")).upper(),
+    "BUCKET_PCT": float(getattr(CFG, "BUCKET_PCT", 10.0)),
+    "BUCKET_INR": float(getattr(CFG, "BUCKET_INR", 1000.0)),
+    "BUCKET_MIN_INR": float(getattr(CFG, "BUCKET_MIN_INR", 1000.0)),
+    "BUCKET_MAX_INR": float(getattr(CFG, "BUCKET_MAX_INR", 5000.0)),
+    "MAX_EXPOSURE_PCT": float(getattr(CFG, "MAX_EXPOSURE_PCT", 60.0)),
+    "USE_BUCKET_SLABS": bool(getattr(CFG, "USE_BUCKET_SLABS", True)),
+    "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
 
-def _pnl_pct(entry: float, ltp: float, side: str) -> float:
-    """
-    Returns signed PnL% for the position.
-    BUY: (ltp-entry)/entry * 100
-    SELL: (entry-ltp)/entry * 100
-    """
-    if not entry:
-        return 0.0
-    side = (side or "BUY").upper()
-    if side == "SELL":
-        return ((entry - ltp) / entry) * 100.0
-    return ((ltp - entry) / entry) * 100.0
+_NOTIFIER = None
 
 
-def profit_lock_check_and_update(open_trade: dict, ltp: float, state: dict, cfg) -> tuple[bool, str]:
-    """
-    Uses STATE['peak'] (peak pnl%) to implement:
-      - activate after PROFIT_LOCK_ACTIVATE_PCT
-      - exit if pnl% <= peak - PROFIT_LOCK_TRAIL_PCT
-    Returns: (should_exit, reason)
-    """
+def set_notifier(fn):
+    global _NOTIFIER
+    _NOTIFIER = fn
+
+
+def _notify(msg: str):
+    if not _NOTIFIER:
+        return
     try:
-        activate = float(getattr(cfg, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
-        trail = float(getattr(cfg, "PROFIT_LOCK_TRAIL_PCT", 2.0))
-    except Exception:
-        activate, trail = 1.5, 2.0
+        _NOTIFIER(msg)
+    except Exception as e:
+        append_log("WARN", "NOTIFY", f"Notifier error: {e}")
 
-    # tolerate different trade dict keys
-    entry = float(open_trade.get("price") or open_trade.get("entry") or open_trade.get("entry_price") or 0.0)
-    side = open_trade.get("side") or open_trade.get("direction") or "BUY"
 
-    pnl = _pnl_pct(entry, float(ltp), str(side))
+def _positions():
+    pos = STATE.setdefault("positions", {})
 
-    # update peak once activated
-    peak = state.get("peak", None)
-    if pnl >= activate:
-        if peak is None or pnl > float(peak):
-            state["peak"] = float(pnl)
-            peak = state["peak"]
+    def _normalize_trade_dict(sym: str, tr: dict):
+        if not sym or not isinstance(tr, dict):
+            return None
+        entry = float(tr.get("entry") or tr.get("entry_price") or 0.0)
+        qty = int(tr.get("qty") or tr.get("quantity") or 1)
+        peak = float(tr.get("peak") or tr.get("peak_pct") or 0.0)
+        trail_active = bool(tr.get("trail_active", tr.get("trailing_active", False)))
+        return {
+            "entry": entry,
+            "entry_price": entry,
+            "qty": qty,
+            "quantity": qty,
+            "peak": peak,
+            "peak_pct": peak,
+            "trail_active": trail_active,
+            "trailing_active": trail_active,
+            "order_id": tr.get("order_id"),
+        }
 
-    # no exit until activated & peak exists
-    if peak is None:
-        return False, f"LOCK not active | pnl={pnl:.2f}%"
+    # backward compatibility: merge legacy multi-trade map if present
+    legacy_map = STATE.get("open_trades")
+    if isinstance(legacy_map, dict) and legacy_map is not pos:
+        migrated = 0
+        for raw_sym, tr in legacy_map.items():
+            sym = str(raw_sym or "").strip().upper()
+            if not sym or sym in pos:
+                continue
+            norm = _normalize_trade_dict(sym, tr)
+            if norm:
+                pos[sym] = norm
+                migrated += 1
+        if migrated:
+            append_log("INFO", "STATE", f"Merged {migrated} legacy open_trades into positions")
 
-    # trailing exit
-    if pnl <= (float(peak) - trail):
-        return True, f"LOCK exit | pnl={pnl:.2f}% peak={float(peak):.2f}% trail={trail:.2f}%"
+    # backward compatibility: migrate legacy single trade slot if present
+    legacy = STATE.get("open_trade")
+    if legacy and isinstance(legacy, dict):
+        sym = str(legacy.get("symbol") or "").strip().upper()
+        if sym and sym not in pos:
+            norm = _normalize_trade_dict(sym, legacy)
+            if norm:
+                pos[sym] = norm
+                append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
 
-    return False, f"LOCK ok | pnl={pnl:.2f}% peak={float(peak):.2f}%"
+    # keep alias aligned
+    STATE["open_trades"] = pos
+    return pos
+
+
+def _trade_entry_qty(trade: dict) -> tuple[float, int]:
+    entry = float((trade or {}).get("entry_price") or (trade or {}).get("entry") or 0.0)
+    qty = int((trade or {}).get("quantity") or (trade or {}).get("qty") or 0)
+    return entry, (qty if qty > 0 else 1)
+
 
 def _parse_hhmm(s):
     try:
-        hh, mm = s.strip().split(":")
+        hh, mm = str(s).strip().split(":")
         return int(hh), int(mm)
     except Exception:
         return 0, 0
 
+
+def _past_force_exit_time():
+    now = datetime.now(IST)
+    fh, fm = _parse_hhmm(getattr(CFG, "FORCE_EXIT", "15:10"))
+    cutoff = now.replace(hour=fh, minute=fm, second=0, microsecond=0)
+    return now >= cutoff
+
+
 def _ensure_day_key():
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(IST).strftime("%Y-%m-%d")
     if STATE.get("day_key") != today:
         STATE["day_key"] = today
         STATE["today_pnl"] = 0.0
-        STATE["open_trade"] = None
+        _positions().clear()
+        STATE["profit_milestone_hit"] = False
+        STATE["cooldown_until"] = None
         append_log("INFO", "DAY", f"Auto rollover reset for {today}")
+
 
 def set_runtime_param(key, value):
     RUNTIME[key] = value
 
+
 def manual_reset_day():
     STATE["today_pnl"] = 0.0
-    STATE["open_trade"] = None
-    STATE["day_key"] = datetime.now().strftime("%Y-%m-%d")
+    _positions().clear()
+    STATE["day_key"] = datetime.now(IST).strftime("%Y-%m-%d")
+    STATE["profit_milestone_hit"] = False
+    STATE["cooldown_until"] = None
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
+
 def is_live_enabled():
     return bool(STATE.get("initiated")) and bool(CFG.IS_LIVE or STATE.get("live_override"))
+
 
 def _load_exclusions_set():
     if not os.path.exists(EXCLUSIONS_FILE):
         return set()
     with open(EXCLUSIONS_FILE, "r") as f:
-        return set([ln.strip().upper() for ln in f if ln.strip()])
+        return {ln.strip().upper() for ln in f if ln.strip()}
+
 
 def _save_exclusions_set(s):
     with open(EXCLUSIONS_FILE, "w") as f:
         for sym in sorted(s):
             f.write(sym + "\n")
 
+
 def list_exclusions():
     s = _load_exclusions_set()
     if not s:
         return "✅ Excluded symbols: (none)"
     return "⛔ Excluded symbols:\n" + "\n".join(sorted(s))
+
 
 def exclude_symbol(sym):
     sym = sym.strip().upper()
@@ -184,6 +200,7 @@ def exclude_symbol(sym):
     _save_exclusions_set(s)
     append_log("WARN", "EXCL", f"Excluded {sym}")
     return f"⛔ {sym} excluded permanently. (/include {sym} to release)"
+
 
 def include_symbol(sym):
     sym = sym.strip().upper()
@@ -197,6 +214,7 @@ def include_symbol(sym):
         return f"✅ {sym} released from exclusions."
     return f"ℹ️ {sym} was not in exclusions."
 
+
 def _atomic_copy(src, dst):
     if not os.path.exists(src):
         return False
@@ -209,11 +227,13 @@ def _atomic_copy(src, dst):
     os.replace(tmp, dst)
     return True
 
+
 def _load_universe_from(path):
     if not path or not os.path.exists(path):
         return []
     with open(path, "r") as f:
         return [ln.strip().upper() for ln in f if ln.strip()]
+
 
 def load_universe_trading():
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
@@ -228,11 +248,11 @@ def load_universe_trading():
     syms = [s for s in syms if s not in excl]
 
     try:
-        maxn = int(getattr(CFG, "UNIVERSE_SIZE", 30))
-        syms = syms[:maxn]
+        syms = syms[: int(getattr(CFG, "UNIVERSE_SIZE", 30))]
     except Exception:
         pass
     return syms
+
 
 def load_universe_live():
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
@@ -240,46 +260,44 @@ def load_universe_live():
     excl = _load_exclusions_set()
     return [s for s in syms if s not in excl]
 
+
 def _parse_windows(win_str):
     windows = []
     if not win_str:
         return windows
-    parts = [p.strip() for p in win_str.split(",") if p.strip()]
-    for p in parts:
+    for p in [x.strip() for x in str(win_str).split(",") if x.strip()]:
         if "-" not in p:
             continue
         a, b = p.split("-", 1)
-        ah, am = _parse_hhmm(a)
-        bh, bm = _parse_hhmm(b)
-        windows.append(((ah, am), (bh, bm)))
+        windows.append((_parse_hhmm(a), _parse_hhmm(b)))
     return windows
 
+
 def _in_any_promote_window():
-    now = datetime.now()
-    w = _parse_windows(getattr(CFG, "PROMOTE_WINDOWS", ""))
-    if not w:
-        return False
-    for (ah, am), (bh, bm) in w:
+    now = datetime.now(IST)
+    for (ah, am), (bh, bm) in _parse_windows(getattr(CFG, "PROMOTE_WINDOWS", "")):
         start = now.replace(hour=ah, minute=am, second=0, microsecond=0)
         end = now.replace(hour=bh, minute=bm, second=0, microsecond=0)
         if start <= now <= end:
             return True
     return False
 
+
 def _cooldown_ok():
     cd_min = float(getattr(CFG, "PROMOTE_COOLDOWN_MIN", 60))
     last = STATE.get("last_promote_ts")
     if not last:
         return True
-    return (datetime.now() - last) >= timedelta(minutes=cd_min)
+    return (datetime.now(IST) - last) >= timedelta(minutes=cd_min)
+
 
 def _top10_overlap_ratio(a, b):
-    a10 = a[:10]
-    b10 = b[:10]
+    a10, b10 = a[:10], b[:10]
     if not a10 or not b10:
         return 0.0
     inter = len(set(a10).intersection(set(b10)))
     return float(inter) / float(min(len(a10), len(b10)))
+
 
 def _market_stable():
     try:
@@ -297,32 +315,24 @@ def _market_stable():
         tail = df.tail(10)
         if len(tail) < 8:
             return False
-
-        rng = (tail["high"] - tail["low"]).astype(float)
-        close = tail["close"].astype(float)
-        rng_pct = (rng / close) * 100.0
-        avg_rng_pct = float(rng_pct.mean())
-
-        max_ok = float(getattr(CFG, "STABILITY_ATR_PCT_MAX", 0.35))
-        return avg_rng_pct <= max_ok
+        rng_pct = ((tail["high"] - tail["low"]).astype(float) / tail["close"].astype(float)) * 100.0
+        return float(rng_pct.mean()) <= float(getattr(CFG, "STABILITY_ATR_PCT_MAX", 0.35))
     except Exception as e:
         append_log("WARN", "STABLE", f"Stability check failed: {e}")
         return False
 
+
 def promote_universe(reason="AUTO"):
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
     trade_path = getattr(CFG, "UNIVERSE_TRADING_PATH", os.path.join(DATA_DIR, "universe_trading.txt"))
-
     live = _load_universe_from(live_path)
     trade = _load_universe_from(trade_path)
-
     if not live:
         STATE["last_promote_msg"] = "No live universe available"
         return False
 
     min_overlap = float(getattr(CFG, "PROMOTE_TOP10_OVERLAP_MIN", 0.60))
     overlap = _top10_overlap_ratio(live, trade) if trade else 1.0
-
     if trade and overlap < min_overlap:
         STATE["last_promote_msg"] = f"Blocked (overlap {overlap:.2f} < {min_overlap:.2f})"
         append_log("INFO", "PROMOTE", STATE["last_promote_msg"])
@@ -330,60 +340,164 @@ def promote_universe(reason="AUTO"):
 
     ok = _atomic_copy(live_path, trade_path)
     if ok:
-        STATE["last_promote_ts"] = datetime.now()
+        STATE["last_promote_ts"] = datetime.now(IST)
         STATE["last_promote_msg"] = f"Promoted ({reason}) overlap={overlap:.2f}"
         append_log("INFO", "PROMOTE", STATE["last_promote_msg"])
-        return True
+    return ok
 
-    STATE["last_promote_msg"] = "Promote failed (copy)"
-    return False
 
-def get_status_text():
-    _ensure_day_key()
-    mode = "LIVE ✅" if is_live_enabled() else "PAPER 🟡"
-    uni_t = load_universe_trading()
-    uni_l = load_universe_live()
+def _is_market_hours(now: datetime) -> bool:
+    start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return start <= now <= end
 
-    return (
-        "📟 Trident Status\n\n"
-        f"Mode: {mode}\n"
-        f"Paused: {STATE.get('paused')}\n"
-        f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
-        f"Universe(trading): {len(uni_t)} symbols\n"
-        f"Universe(live): {len(uni_l)} symbols\n"
-        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n"
-        f"Open Trade: {STATE.get('open_trade')}\n\n"
-        "Caps:\n"
-        f"- Daily Loss Cap: {CFG.DAILY_LOSS_CAP_INR}\n"
-        f"- Daily Profit Target: {CFG.DAILY_PROFIT_TARGET_INR}\n"
-        f"- Stoploss %: {CFG.STOPLOSS_PCT}\n"
-        f"- Risk/Trade %: {CFG.RISK_PER_TRADE_PCT}\n"
-        f"- Tick Seconds: {CFG.TICK_SECONDS}\n"
-        f"- Max Slippage %: {RUNTIME.get('MAX_ENTRY_SLIPPAGE_PCT')}\n\n"
-        f"AutoPromote: {getattr(CFG, 'AUTO_PROMOTE_ENABLED', False)} | Last: {STATE.get('last_promote_msg')}\n"
-    )
 
-def _calc_qty(price):
-    capital = float(CFG.CAPITAL_INR)
-    risk_amt = capital * float(CFG.RISK_PER_TRADE_PCT) / 100.0
-    per_share_risk = price * float(CFG.STOPLOSS_PCT) / 100.0
-    if per_share_risk <= 0:
-        return 1
-    risk_qty = int(risk_amt / per_share_risk)
-    affordable_qty = int(capital / price) if price > 0 else 0
-    return max(1, min(risk_qty, affordable_qty))
+def _cached_wallet_value() -> float:
+    cached = float(STATE.get("last_wallet") or 0.0)
+    if cached > 0:
+        return cached
+    return float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+
+
+def _sync_wallet_and_caps(force=False):
+    now = datetime.now(IST)
+    last = STATE.get("last_wallet_sync_ts")
+
+    day_interval = int(getattr(CFG, "WALLET_SYNC_INTERVAL_SEC", 120))
+    night_interval = int(getattr(CFG, "WALLET_NIGHT_SYNC_INTERVAL_SEC", 900))
+    in_market = _is_market_hours(now)
+    min_interval = day_interval if in_market else night_interval
+
+    if not force and last and (now - last) < timedelta(seconds=min_interval):
+        if not in_market:
+            cached = _cached_wallet_value()
+            STATE["wallet_net_inr"] = max(0.0, cached)
+            STATE["wallet_available_inr"] = max(0.0, cached)
+            append_log("INFO", "WALLET", "Night skip → cached wallet used")
+        return
+
+    retries = max(1, int(getattr(CFG, "WALLET_SYNC_RETRIES", 3)))
+    backoff = float(getattr(CFG, "WALLET_RETRY_BASE_SEC", 1.5))
+
+    wallet_net = _cached_wallet_value()
+    wallet_avail = wallet_net
+    synced = False
+
+    for attempt in range(retries):
+        try:
+            m = get_kite().margins() or {}
+            eq = m.get("equity", {}) if isinstance(m, dict) else {}
+            wallet_net = float(eq.get("net") or wallet_net or 0.0)
+            avail = eq.get("available", {}) if isinstance(eq, dict) else {}
+            if isinstance(avail, dict):
+                wallet_avail = float(
+                    avail.get("live_balance") or avail.get("cash") or avail.get("opening_balance") or avail.get("adhoc_margin") or wallet_net
+                )
+            else:
+                wallet_avail = wallet_net
+            STATE["last_wallet"] = max(0.0, wallet_net)
+            append_log("INFO", "WALLET", f"Synced wallet={wallet_net:.2f}")
+            synced = True
+            break
+        except Exception as e:
+            append_log("WARNING", "WALLET", f"Attempt {attempt + 1} failed: {e}")
+            if attempt + 1 < retries:
+                append_log("WARNING", "WALLET", f"Retry {attempt + 2}/{retries}")
+                time.sleep(backoff * (attempt + 1))
+
+    if not synced:
+        wallet_net = _cached_wallet_value()
+        wallet_avail = wallet_net
+        append_log("WARNING", "WALLET", f"API failure → using cached wallet={wallet_net:.2f}")
+
+    if wallet_net <= 0:
+        wallet_net = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        wallet_avail = max(wallet_avail, wallet_net)
+        append_log("WARNING", "WALLET", f"API failed → using cached wallet={wallet_net:.2f}")
+
+    STATE["wallet_net_inr"] = max(0.0, wallet_net)
+    STATE["wallet_available_inr"] = max(0.0, wallet_avail if wallet_avail > 0 else wallet_net)
+
+    loss_pct = float(os.getenv("DAILY_LOSS_CAP_PCT", "2.0"))
+    prof_pct = float(os.getenv("DAILY_PROFIT_MILESTONE_PCT", os.getenv("DAILY_PROFIT_TARGET_PCT", "1.0")))
+    if STATE["wallet_net_inr"] > 0:
+        STATE["daily_loss_cap_inr"] = STATE["wallet_net_inr"] * loss_pct / 100.0
+        STATE["daily_profit_milestone_inr"] = STATE["wallet_net_inr"] * prof_pct / 100.0
+    else:
+        STATE["daily_loss_cap_inr"] = float(getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0))
+        STATE["daily_profit_milestone_inr"] = float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0))
+    STATE["last_wallet_sync_ts"] = now
+
+
+def _open_positions_count():
+    return len(_positions())
+
+
+def _current_exposure_inr():
+    total = 0.0
+    for t in _positions().values():
+        e, q = _trade_entry_qty(t)
+        total += e * q
+    return total
+
+
+def _max_exposure_inr():
+    base = float(STATE.get("wallet_net_inr") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    return base * float(RUNTIME.get("MAX_EXPOSURE_PCT", 60.0)) / 100.0
+
+
+def _bucket_inr(wallet_net: float) -> float:
+    if bool(RUNTIME.get("USE_BUCKET_SLABS", True)):
+        if wallet_net < 5000:
+            return 500.0
+        if wallet_net <= 15000:
+            return 5000.0
+        if wallet_net <= 30000:
+            return 7000.0
+        if wallet_net <= 60000:
+            return 10000.0
+        if wallet_net <= 100000:
+            return 15000.0
+        return 20000.0
+
+    mode = str(RUNTIME.get("BUCKET_MODE", "PCT")).upper()
+    if mode == "PCT":
+        bucket = wallet_net * float(RUNTIME.get("BUCKET_PCT", 10.0)) / 100.0
+    else:
+        bucket = float(RUNTIME.get("BUCKET_INR", 1000.0))
+    bmin = float(RUNTIME.get("BUCKET_MIN_INR", 1000.0))
+    bmax = float(RUNTIME.get("BUCKET_MAX_INR", 5000.0))
+    return max(bmin, min(bucket, bmax))
+
+
+def _calc_qty(symbol: str, price: float):
+    wallet = float(STATE.get("wallet_net_inr") or 0.0)
+    if wallet <= 0:
+        wallet = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        append_log("WARNING", "BUCKET", "Wallet unavailable → fallback capital used")
+    bucket = _bucket_inr(wallet)
+    risk_amt = bucket * float(getattr(CFG, "RISK_PER_TRADE_PCT", 1.0)) / 100.0
+    per_share_risk = price * float(getattr(CFG, "STOPLOSS_PCT", 2.0)) / 100.0
+    risk_qty = int(risk_amt / per_share_risk) if per_share_risk > 0 else 0
+    bucket_qty = int(bucket / price) if price > 0 else 0
+    raw_qty = min(bucket_qty, risk_qty)
+    qty = raw_qty if raw_qty >= 1 else 0
+    append_log("INFO", "BUCKET", f"wallet={wallet:.2f} slab_bucket={bucket:.2f} exposure={_current_exposure_inr():.2f}/{_max_exposure_inr():.2f}")
+    append_log("INFO", "SIZE", f"{symbol} price={price:.2f} qty={qty} bucket_qty={bucket_qty} risk_qty={risk_qty}")
+    return qty, bucket_qty, risk_qty
+
 
 def _ltp(kite, sym):
     try:
         ins = f"{CFG.EXCHANGE}:{sym}"
-        data = kite.ltp([ins])
-        return float(data[ins]["last_price"])
+        return float(kite.ltp([ins])[ins]["last_price"])
     except Exception:
         return None
 
+
 def _place_live_order(kite, sym, side, qty):
     try:
-        order_id = kite.place_order(
+        return kite.place_order(
             variety=kite.VARIETY_REGULAR,
             exchange=CFG.EXCHANGE,
             tradingsymbol=sym,
@@ -392,201 +506,389 @@ def _place_live_order(kite, sym, side, qty):
             product=CFG.PRODUCT,
             order_type=kite.ORDER_TYPE_MARKET,
         )
-        return order_id
     except Exception as e:
         append_log("ERROR", "ORDER", f"Order failed {sym} {side} qty={qty}: {e}")
         return None
 
-def _close_open_trade(reason="MANUAL"):
-    trade = STATE.get("open_trade")
+
+def _set_cooldown():
+    sec = int(getattr(CFG, "COOLDOWN_SECONDS", 120))
+    STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
+
+
+def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3):
+    sym = (sym or "").strip().upper()
+    if not sym:
+        return
+    until = datetime.now(IST) + timedelta(minutes=max(1, int(minutes)))
+    STATE.setdefault("skip_cooldown", {})[sym] = until
+    append_log("INFO", "SKIP", f"{sym} cooldown applied reason={reason}")
+
+
+def _skip_cooldown_active(sym: str) -> bool:
+    sym = (sym or "").strip().upper()
+    until = STATE.setdefault("skip_cooldown", {}).get(sym)
+    if not until:
+        return False
+    if datetime.now(IST) >= until:
+        STATE["skip_cooldown"].pop(sym, None)
+        return False
+    return True
+
+
+def _close_position(sym, reason="MANUAL", ltp_override=None):
+    sym = (sym or "").strip().upper()
+    trade = _positions().get(sym)
     if not trade:
         return False
-    sym = trade.get("symbol")
-    side = trade.get("side")
-    qty = int(trade.get("qty") or 0) or 1
-    exit_side = "SELL" if side == "BUY" else "BUY"
+    entry, qty = _trade_entry_qty(trade)
+    ltp = float(ltp_override) if ltp_override is not None else None
 
     if not is_live_enabled():
-        append_log("WARN", "EXIT", f"PAPER exit {sym} ({reason})")
-        STATE["open_trade"] = None
+        if ltp is None:
+            ltp = entry
+        pnl = (ltp - entry) * qty
+        pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+        STATE["today_pnl"] += pnl
+        _positions().pop(sym, None)
+        STATE["last_exit_ts"][sym] = datetime.now(IST)
+        _set_cooldown()
+        append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+        _notify(f"🔴 SELL PAPER\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
         return True
 
     kite = get_kite()
-    oid = _place_live_order(kite, sym, exit_side, qty)
-    if oid:
-        append_log("WARN", "EXIT", f"LIVE exit {sym} ({reason}) order_id={oid}")
-        STATE["open_trade"] = None
-        return True
-    return False
+    oid = None
+    for _ in range(3):
+        oid = _place_live_order(kite, sym, "SELL", qty)
+        if oid:
+            break
+        time.sleep(0.6)
+    if not oid:
+        return False
+    if ltp is None:
+        ltp = _ltp(kite, sym) or entry
+
+    pnl = (ltp - entry) * qty
+    pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+    STATE["today_pnl"] += pnl
+    _positions().pop(sym, None)
+    STATE["last_exit_ts"][sym] = datetime.now(IST)
+    _set_cooldown()
+    append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+    _notify(f"🔴 SELL LIVE\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
+    return True
+
+
+def _close_all_open_trades(reason="MANUAL"):
+    ok = True
+    for sym in list(_positions().keys()):
+        ok = _close_position(sym, reason=reason) and ok
+    return ok
+
+
+def _close_open_trade(reason="MANUAL"):
+    keys = list(_positions().keys())
+    if not keys:
+        return False
+    return _close_position(keys[0], reason=reason)
+
+
+def _manage_open_trades(force_only=False):
+    if not _positions():
+        return
+    for sym, trade in list(_positions().items()):
+        kite = None
+        try:
+            kite = get_kite()
+        except Exception:
+            kite = None
+        entry, _qty = _trade_entry_qty(trade)
+        ltp = _ltp(kite, sym) if kite else entry
+        if ltp is None:
+            append_log("WARN", "RISK", f"{sym} ltp unavailable")
+            continue
+
+        if _past_force_exit_time():
+            _close_position(sym, reason="TIME", ltp_override=ltp)
+            continue
+        if force_only:
+            continue
+
+        entry, _ = _trade_entry_qty(trade)
+        if entry <= 0:
+            continue
+        pnl_pct = ((ltp - entry) / entry) * 100.0
+        peak_pct = float(trade.get("peak_pct") or trade.get("peak") or pnl_pct)
+        if pnl_pct > peak_pct:
+            peak_pct = pnl_pct
+        trade["peak_pct"] = peak_pct
+        trade["peak"] = peak_pct
+
+        if pnl_pct >= float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5)):
+            trade["trailing_active"] = True
+            trade["trail_active"] = True
+
+        stoploss_pct = float(getattr(CFG, "STOPLOSS_PCT", 2.0))
+        if pnl_pct <= -abs(stoploss_pct):
+            _close_position(sym, reason="SL", ltp_override=ltp)
+            continue
+
+        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
+        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+        trailing_active = bool(trade.get("trailing_active", trade.get("trail_active", False)))
+        append_log("INFO", "RISK", f"{sym} pnl%={pnl_pct:.2f} peak%={peak_pct:.2f} trail_active={trailing_active}")
+
+        if trailing_active and pnl_pct <= (peak_pct - trail - buf):
+            _close_position(sym, reason="TRAIL", ltp_override=ltp)
+            continue
+
 
 def _within_entry_window():
-    now = datetime.now()
+    now = datetime.now(IST)
     sh, sm = _parse_hhmm(getattr(CFG, "ENTRY_START", "09:20"))
     eh, em = _parse_hhmm(getattr(CFG, "ENTRY_END", "14:30"))
     start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
     end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     return start <= now <= end
 
-def tick():
-    from log_store import append_log
-    append_log("INFO", "CYCLE", "tick() entered")
-    append_log("INFO", "TICK", "Tick running")
-    if STATE.get("paused"):
-        append_log("INFO", "TICK", "Paused=True (use /startloop)")
-        return
+
+def _can_open_new_trade(sym, entry, qty=1):
+    sym = sym.strip().upper()
+    now = datetime.now(IST)
+
+    if STATE.get("cooldown_until") and now < STATE["cooldown_until"]:
+        append_log("INFO", "SKIP", f"{sym} reason=cooldown")
+        return False
+
+    if _skip_cooldown_active(sym):
+        append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
+        return False
+
+    last_exit = STATE.get("last_exit_ts", {}).get(sym)
+    reentry_block = int(getattr(CFG, "REENTRY_BLOCK_MINUTES", 30))
+    if last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
+        append_log("INFO", "SKIP", f"{sym} reason=reentry_block")
+        return False
+
+    if sym in _positions():
+        append_log("INFO", "SKIP", f"{sym} reason=already_held")
+        return False
+
+    max_pos = int(os.getenv("MAX_OPEN_POSITIONS", "20"))
+    if _open_positions_count() >= max_pos:
+        append_log("INFO", "SKIP", f"{sym} reason=max_positions")
+        return False
+
+    required_value = float(entry) * max(1, int(qty or 1))
+    wallet_avail = float(STATE.get("wallet_available_inr") or 0.0)
+    if required_value > wallet_avail:
+        append_log("INFO", "SKIP", f"{sym} reason=insufficient_wallet need={required_value:.2f} avail={wallet_avail:.2f}")
+        return False
+
+    if (_current_exposure_inr() + required_value) > _max_exposure_inr():
+        append_log("INFO", "SKIP", f"{sym} reason=exposure next={(_current_exposure_inr() + required_value):.2f} max={_max_exposure_inr():.2f}")
+        _apply_skip_cooldown(sym, "exposure")
+        return False
+
+    return True
+
+
+def _maybe_enter_from_signal(sig):
+    if not sig:
+        return False
+    sym = sig["symbol"].strip().upper()
+    append_log("INFO", "SCAN", f"Scanning {sym}")
+
+    entry = float(sig.get("entry") or 0.0)
+    if entry <= 0:
+        append_log("INFO", "SKIP", f"{sym} reason=invalid_entry")
+        return False
+
+    qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
+    if qty <= 0:
+        append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
+        _apply_skip_cooldown(sym, "qty_zero")
+        return False
+
+    if not _can_open_new_trade(sym, entry, qty):
+        return False
+
+    mode = "LIVE" if is_live_enabled() else "PAPER"
+    oid = None
+    booked_entry = entry
+    if is_live_enabled():
+        kite = get_kite()
+        now_price = _ltp(kite, sym)
+        if now_price is not None:
+            max_slip = float(RUNTIME.get("MAX_ENTRY_SLIPPAGE_PCT", 0.30)) / 100.0
+            if now_price > entry * (1.0 + max_slip):
+                append_log("INFO", "SKIP", f"{sym} reason=slippage")
+                return False
+            booked_entry = now_price
+        oid = _place_live_order(kite, sym, "BUY", qty)
+        if not oid:
+            append_log("INFO", "SKIP", f"{sym} reason=order_failed")
+            return False
+
+    _positions()[sym] = {
+        "entry": booked_entry,
+        "entry_price": booked_entry,
+        "qty": qty,
+        "quantity": qty,
+        "peak": 0.0,
+        "peak_pct": 0.0,
+        "trail_active": False,
+        "trailing_active": False,
+        "order_id": oid,
+    }
+    _set_cooldown()
+    append_log("INFO", "SIG", f"BUY trigger {sym}")
+    append_log("INFO", "TRADE", f"{mode} BUY {sym} qty={qty}")
+    _notify(
+        f"🟢 BUY {mode}\n"
+        f"Symbol: {sym}\n"
+        f"Quantity: {qty}\n"
+        f"Entry: {booked_entry:.2f}\n"
+        f"Wallet: {float(STATE.get('wallet_net_inr') or 0.0):.2f}"
+    )
+    return True
+
+
+def get_status_text():
     _ensure_day_key()
+    _sync_wallet_and_caps(force=False)
+    mode = "LIVE ✅" if is_live_enabled() else "PAPER 🟡"
+    rows = []
+    for sym, p in sorted(_positions().items()):
+        e, q = _trade_entry_qty(p)
+        rows.append(f"- {sym} qty={q} entry={e:.2f}")
+    return (
+        "📟 Trident Status\n\n"
+        f"Mode: {mode}\n"
+        f"Paused: {STATE.get('paused')}\n"
+        f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
+        f"Universe(trading): {len(load_universe_trading())} symbols\n"
+        f"Universe(live): {len(load_universe_live())} symbols\n"
+        f"Open Positions: {_open_positions_count()}\n"
+        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n\n"
+        "Wallet/Caps:\n"
+        f"- Wallet Net: ₹{float(STATE.get('wallet_net_inr') or 0):.2f}\n"
+        f"- Wallet Available: ₹{float(STATE.get('wallet_available_inr') or 0):.2f}\n"
+        f"- Exposure: ₹{_current_exposure_inr():.2f} / ₹{_max_exposure_inr():.2f} ({RUNTIME.get('MAX_EXPOSURE_PCT')}%)\n"
+        f"- Daily Loss Cap (hard): ₹{float(STATE.get('daily_loss_cap_inr') or 0):.2f}\n"
+        f"- Profit Milestone (soft): ₹{float(STATE.get('daily_profit_milestone_inr') or 0):.2f}\n\n"
+        "Open Trades:\n"
+        + ("\n".join(rows) if rows else "(none)")
+        + "\n"
+    )
+
+
+
+
+def get_trailing_status_text():
+    _ensure_day_key()
+    rows = []
+    for sym, t in sorted(_positions().items()):
+        entry, qty = _trade_entry_qty(t)
+        if entry <= 0:
+            continue
+        kite = None
+        try:
+            kite = get_kite()
+        except Exception:
+            kite = None
+        ltp = _ltp(kite, sym) if kite else entry
+        if ltp is None:
+            ltp = entry
+        pnl_pct = ((ltp - entry) / entry) * 100.0 if entry > 0 else 0.0
+        peak_pct = float(t.get("peak_pct") or t.get("peak") or pnl_pct)
+        trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
+        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
+        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
+        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+        trigger = peak_pct - trail - buf
+        rows.append(
+            f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl%={pnl_pct:.2f} "
+            f"peak%={peak_pct:.2f} trail_active={trail_active} act@{activate:.2f}% trail_trigger<={trigger:.2f}%"
+        )
+
+    if not rows:
+        return "📉 Trailing Status\n\nNo open trades."
+
+    return "📉 Trailing Status\n\n" + "\n".join(rows)
+
+def tick():
+    _ensure_day_key()
+    _sync_wallet_and_caps(force=False)
+
+    if _past_force_exit_time() and _positions():
+        append_log("WARN", "TIME", "FORCE_EXIT triggered")
+        _close_all_open_trades(reason="TIME")
+        STATE["paused"] = True
+        _notify("Force exit executed. All trades closed.")
+
+    # even when paused, force-exit check above still runs
     if STATE.get("paused"):
         return
 
-    if STATE["today_pnl"] <= -abs(CFG.DAILY_LOSS_CAP_INR):
+    if float(STATE.get("daily_loss_cap_inr") or 0.0) > 0 and STATE["today_pnl"] <= -abs(float(STATE["daily_loss_cap_inr"])):
         append_log("WARN", "CAP", "Daily loss cap hit. Pausing loop.")
         STATE["paused"] = True
         return
 
-    if STATE["today_pnl"] >= abs(CFG.DAILY_PROFIT_TARGET_INR):
-        append_log("INFO", "CAP", "Daily profit target hit. Pausing loop.")
-        STATE["paused"] = True
-        return
+    prof_milestone = float(STATE.get("daily_profit_milestone_inr") or 0.0)
+    if prof_milestone > 0 and STATE["today_pnl"] >= prof_milestone and not STATE.get("profit_milestone_hit"):
+        STATE["profit_milestone_hit"] = True
+        append_log("INFO", "CAP", f"Profit milestone hit at ₹{STATE['today_pnl']:.2f}")
+        _notify(f"🎯 Profit milestone hit: ₹{STATE['today_pnl']:.2f}")
+        if not bool(RUNTIME.get("SOFT_PROFIT_TARGET", True)):
+            STATE["paused"] = True
+            return
 
-    if (
-        getattr(CFG, "AUTO_PROMOTE_ENABLED", False)
-        and STATE.get("open_trade") is None
-        and _in_any_promote_window()
-        and _cooldown_ok()
-    ):
+    if getattr(CFG, "AUTO_PROMOTE_ENABLED", False) and not _positions() and _in_any_promote_window() and _cooldown_ok():
         if _market_stable():
             promote_universe(reason="AUTO_STABLE")
-        else:
-            STATE["last_promote_msg"] = "Skipped promote: market not stable"
+
+    _manage_open_trades(force_only=False)
 
     if not _within_entry_window():
         return
 
-    if STATE.get("open_trade"):
-        return
-
     universe = load_universe_trading()
-
-    if universe is None:
-
-        universe = []
-
     if not universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
 
-    sig = generate_signal(universe)
-    if not sig:
-        return
+    max_new_entries = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
+    opened = 0
+    blocked_this_tick = set()
+    while opened < max_new_entries:
+        held = set(_positions().keys())
+        candidates = [s for s in universe if s not in held and s not in blocked_this_tick]
+        if not candidates:
+            break
 
-    sym = sig["symbol"].strip().upper()
-    entry = float(sig.get("entry") or 0.0)
-    if entry <= 0:
-        append_log("WARN", "TRADE", f"Invalid signal entry for {sym}: {entry}")
-        return
+        for s in candidates:
+            append_log("INFO", "SCAN", f"Scanning {s}")
 
-    qty = _calc_qty(entry)
-    sl_price = entry * (1.0 - float(CFG.STOPLOSS_PCT) / 100.0)
+        sig = generate_signal(candidates)
+        if not sig:
+            break
+        if _maybe_enter_from_signal(sig):
+            opened += 1
+        else:
+            bsym = str(sig.get("symbol") or "").strip().upper()
+            if bsym:
+                blocked_this_tick.add(bsym)
+            continue
 
-    if is_live_enabled():
-        kite = get_kite()
-        now_price = _ltp(kite, sym)
-        # TRIDENT_PROFITLOCK_CALL_v1 (auto-added)
-        try:
-            check_profit_lock(now_price)
-        except Exception as e:
-            try:
-                append_log('ERROR','LOCK',str(e))
-            except Exception:
-                pass
-
-        if now_price is not None:
-            sig_price = entry
-            if sig_price <= 0:
-                append_log("WARN", "SLIP", f"Skip {sym}: invalid sig price {sig_price}")
-                return
-            max_slip = float(RUNTIME.get("MAX_ENTRY_SLIPPAGE_PCT", 0.30)) / 100.0
-            if now_price > sig_price * (1.0 + max_slip):
-                append_log("WARN", "SLIP", f"Skip {sym}: slip too high now={now_price} sig={sig_price}")
-                return
-
-        oid = _place_live_order(kite, sym, "BUY", qty)
-        if not oid:
-            return
-
-        STATE["open_trade"] = {
-            "symbol": sym,
-            "side": "BUY",
-            "entry": entry,
-            "qty": qty,
-            "order_id": oid,
-            "sl_price": sl_price,
-            "peak": entry,
-        }
-        append_log("INFO", "TRADE", f"LIVE Entered {sym} qty={qty} entry={entry} sl={sl_price} oid={oid}")
-    else:
-        STATE["open_trade"] = {
-            "symbol": sym,
-            "side": "BUY",
-            "entry": entry,
-            "qty": qty,
-            "order_id": None,
-            "sl_price": sl_price,
-            "peak": entry,
-        }
-        append_log("INFO", "TRADE", f"PAPER Entered {sym} qty={qty} entry={entry} sl={sl_price}")
 
 def run_loop_forever():
     append_log("INFO", "LOOP", "Trading loop started")
     while True:
-        _apply_wallet_caps_from_kite()
-
         try:
             tick()
         except Exception as e:
             append_log("ERROR", "LOOP", str(e))
         time.sleep(int(CFG.TICK_SECONDS))
-
-def _check_restart_flag():
-    try:
-        flag_path = getattr(CFG, "RESTART_FLAG_PATH", "/home/ubuntu/trident-bot/RESTART_REQUIRED")
-        return os.path.exists(flag_path), flag_path
-    except Exception:
-        return False, "/home/ubuntu/trident-bot/RESTART_REQUIRED"
-
-
-# ==========================
-# Profit lock (trailing on peak PnL%)
-# ==========================
-def check_profit_lock(price: float):
-    trade = STATE.get("open_trade")
-    if not trade:
-        return
-
-    try:
-        entry = float(trade.get("price") or trade.get("entry") or 0.0)
-        if entry <= 0:
-            return
-        pnl_pct = (float(price) - entry) / entry * 100.0
-
-        if STATE.get("peak") is None:
-            STATE["peak"] = pnl_pct
-
-        # update peak
-        if pnl_pct > float(STATE["peak"]):
-            STATE["peak"] = pnl_pct
-
-        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
-        trail = float(getattr(CFG, "PROFIT_LOCK_TRAIL_PCT", 2.0))
-
-        # once peak >= activate, exit if pnl drops below (peak - trail)
-        if float(STATE["peak"]) >= activate:
-            floor = float(STATE["peak"]) - trail
-            if pnl_pct <= floor:
-                exit_trade(f"Profit lock: peak={STATE['peak']:.2f}% pnl={pnl_pct:.2f}%")
-    except Exception as e:
-        # keep loop alive, log if logger exists
-        try:
-            append_log("ERROR", "LOCK", f"profit-lock error: {e}")
-        except Exception:
-            pass
