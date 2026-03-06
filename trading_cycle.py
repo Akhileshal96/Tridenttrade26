@@ -10,13 +10,14 @@ from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
 from strategy_engine import generate_signal
+from excluded_store import load_excluded, add_symbol, remove_symbol
 from research_engine import get_trading_universe
-from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries
+from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
+import risk_engine as RISK
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-EXCLUSIONS_FILE = getattr(CFG, "EXCLUSIONS_PATH", os.path.join(DATA_DIR, "exclusions.txt"))
 
 STATE = {
     "paused": True,
@@ -37,6 +38,12 @@ STATE = {
     "cooldown_until": None,
     "last_exit_ts": {},
     "skip_cooldown": {},
+    "loss_streak": 0,
+    "reduce_size_factor": 1.0,
+    "pause_entries_until": None,
+    "halt_for_day": False,
+    "day_peak_pnl": 0.0,
+    "sector_map_cache": None,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -137,6 +144,38 @@ def _parse_hhmm(s):
         return 0, 0
 
 
+
+
+def _load_sector_map():
+    mp = {}
+    path = os.getenv("SECTOR_MAP_PATH", os.path.join(DATA_DIR, "sector_map.csv"))
+    if not os.path.exists(path):
+        return mp
+    try:
+        with open(path, "r") as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln or "," not in ln:
+                    continue
+                sym, sec = ln.split(",", 1)
+                sym = sym.strip().upper()
+                sec = sec.strip().upper()
+                if sym and sec:
+                    mp[sym] = sec
+    except Exception:
+        return {}
+    return mp
+
+
+def _sector_for_symbol(sym: str) -> str:
+    sym = (sym or "").strip().upper()
+    if not sym:
+        return "UNKNOWN"
+    mp = STATE.setdefault("sector_map_cache", None)
+    if mp is None:
+        mp = _load_sector_map()
+        STATE["sector_map_cache"] = mp
+    return mp.get(sym, "UNKNOWN")
 def _past_force_exit_time():
     now = datetime.now(IST)
     fh, fm = _parse_hhmm(getattr(CFG, "FORCE_EXIT", "15:10"))
@@ -152,6 +191,12 @@ def _ensure_day_key():
         _positions().clear()
         STATE["profit_milestone_hit"] = False
         STATE["cooldown_until"] = None
+        STATE["loss_streak"] = 0
+        STATE["reduce_size_factor"] = 1.0
+        STATE["pause_entries_until"] = None
+        STATE["halt_for_day"] = False
+        STATE["day_peak_pnl"] = 0.0
+        STATE["sector_map_cache"] = None
         append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -165,6 +210,12 @@ def manual_reset_day():
     STATE["day_key"] = datetime.now(IST).strftime("%Y-%m-%d")
     STATE["profit_milestone_hit"] = False
     STATE["cooldown_until"] = None
+    STATE["loss_streak"] = 0
+    STATE["reduce_size_factor"] = 1.0
+    STATE["pause_entries_until"] = None
+    STATE["halt_for_day"] = False
+    STATE["day_peak_pnl"] = 0.0
+    STATE["sector_map_cache"] = None
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -173,45 +224,31 @@ def is_live_enabled():
     return bool(STATE.get("initiated")) and bool(CFG.IS_LIVE or STATE.get("live_override"))
 
 
-def _load_exclusions_set():
-    if not os.path.exists(EXCLUSIONS_FILE):
-        return set()
-    with open(EXCLUSIONS_FILE, "r") as f:
-        return {ln.strip().upper() for ln in f if ln.strip()}
-
-
-def _save_exclusions_set(s):
-    with open(EXCLUSIONS_FILE, "w") as f:
-        for sym in sorted(s):
-            f.write(sym + "\n")
 
 
 def list_exclusions():
-    s = _load_exclusions_set()
+    s = load_excluded()
     if not s:
         return "✅ Excluded symbols: (none)"
     return "⛔ Excluded symbols:\n" + "\n".join(sorted(s))
 
 
 def exclude_symbol(sym):
-    sym = sym.strip().upper()
+    sym = (sym or "").strip().upper()
     if not sym:
         return "Usage: /exclude SYMBOL"
-    s = _load_exclusions_set()
-    s.add(sym)
-    _save_exclusions_set(s)
-    append_log("WARN", "EXCL", f"Excluded {sym}")
+    changed = add_symbol(sym)
+    if changed:
+        append_log("WARN", "EXCL", f"Excluded {sym}")
     return f"⛔ {sym} excluded permanently. (/include {sym} to release)"
 
 
 def include_symbol(sym):
-    sym = sym.strip().upper()
+    sym = (sym or "").strip().upper()
     if not sym:
         return "Usage: /include SYMBOL"
-    s = _load_exclusions_set()
-    if sym in s:
-        s.remove(sym)
-        _save_exclusions_set(s)
+    changed = remove_symbol(sym)
+    if changed:
         append_log("INFO", "EXCL", f"Included back {sym}")
         return f"✅ {sym} released from exclusions."
     return f"ℹ️ {sym} was not in exclusions."
@@ -246,7 +283,7 @@ def load_universe_trading():
         append_log("INFO", "PROMOTE", "Bootstrapped trading universe from live universe")
 
     syms = _load_universe_from(trade_path)
-    excl = _load_exclusions_set()
+    excl = load_excluded()
     syms = [s for s in syms if s not in excl]
 
     try:
@@ -259,7 +296,7 @@ def load_universe_trading():
 def load_universe_live():
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
     syms = _load_universe_from(live_path)
-    excl = _load_exclusions_set()
+    excl = load_excluded()
     return [s for s in syms if s not in excl]
 
 
@@ -477,13 +514,11 @@ def _calc_qty(symbol: str, price: float):
     if wallet <= 0:
         wallet = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
         append_log("WARNING", "BUCKET", "Wallet unavailable → fallback capital used")
-    bucket = _bucket_inr(wallet)
-    risk_amt = bucket * float(getattr(CFG, "RISK_PER_TRADE_PCT", 1.0)) / 100.0
-    per_share_risk = price * float(getattr(CFG, "STOPLOSS_PCT", 2.0)) / 100.0
-    risk_qty = int(risk_amt / per_share_risk) if per_share_risk > 0 else 0
-    bucket_qty = int(bucket / price) if price > 0 else 0
-    raw_qty = min(bucket_qty, risk_qty)
-    qty = raw_qty if raw_qty >= 1 else 0
+    qty, bucket, bucket_qty, risk_qty = RISK.get_position_size(price, wallet)
+    size_factor = float(STATE.get("reduce_size_factor") or 1.0)
+    if size_factor < 1.0:
+        qty = int(qty * max(0.1, size_factor))
+    qty = qty if qty >= 1 else 0
     append_log("INFO", "BUCKET", f"wallet={wallet:.2f} slab_bucket={bucket:.2f} exposure={_current_exposure_inr():.2f}/{_max_exposure_inr():.2f}")
     append_log("INFO", "SIZE", f"{symbol} price={price:.2f} qty={qty} bucket_qty={bucket_qty} risk_qty={risk_qty}")
     return qty, bucket_qty, risk_qty
@@ -552,6 +587,8 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         pnl = (ltp - entry) * qty
         pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
         STATE["today_pnl"] += pnl
+        RISK.update_loss_streak(STATE, pnl)
+        RISK.check_day_drawdown_guard(STATE)
         _positions().pop(sym, None)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
@@ -574,6 +611,8 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     pnl = (ltp - entry) * qty
     pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
     STATE["today_pnl"] += pnl
+    RISK.update_loss_streak(STATE, pnl)
+    RISK.check_day_drawdown_guard(STATE)
     _positions().pop(sym, None)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
@@ -583,67 +622,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
 
 
 def _close_all_open_trades(reason="MANUAL"):
-    ok = True
-    for sym in list(_positions().keys()):
-        ok = _close_position(sym, reason=reason) and ok
-    return ok
-
-
-def _close_open_trade(reason="MANUAL"):
-    keys = list(_positions().keys())
-    if not keys:
-        return False
-    return _close_position(keys[0], reason=reason)
-
-
-def _manage_open_trades(force_only=False):
-    if not _positions():
-        return
-    for sym, trade in list(_positions().items()):
-        kite = None
-        try:
-            kite = get_kite()
-        except Exception:
-            kite = None
-        entry, _qty = _trade_entry_qty(trade)
-        ltp = _ltp(kite, sym) if kite else entry
-        if ltp is None:
-            append_log("WARN", "RISK", f"{sym} ltp unavailable")
-            continue
-
-        if _past_force_exit_time():
-            _close_position(sym, reason="TIME", ltp_override=ltp)
-            continue
-        if force_only:
-            continue
-
-        entry, _ = _trade_entry_qty(trade)
-        if entry <= 0:
-            continue
-        pnl_pct = ((ltp - entry) / entry) * 100.0
-        peak_pct = float(trade.get("peak_pct") or trade.get("peak") or pnl_pct)
-        if pnl_pct > peak_pct:
-            peak_pct = pnl_pct
-        trade["peak_pct"] = peak_pct
-        trade["peak"] = peak_pct
-
-        if pnl_pct >= float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5)):
-            trade["trailing_active"] = True
-            trade["trail_active"] = True
-
-        stoploss_pct = float(getattr(CFG, "STOPLOSS_PCT", 2.0))
-        if pnl_pct <= -abs(stoploss_pct):
-            _close_position(sym, reason="SL", ltp_override=ltp)
-            continue
-
-        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
-        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
-        trailing_active = bool(trade.get("trailing_active", trade.get("trail_active", False)))
-        append_log("INFO", "RISK", f"{sym} pnl%={pnl_pct:.2f} peak%={peak_pct:.2f} trail_active={trailing_active}")
-
-        if trailing_active and pnl_pct <= (peak_pct - trail - buf):
-            _close_position(sym, reason="TRAIL", ltp_override=ltp)
-            continue
+    return ee_force_exit_all(_positions(), _close_position, reason=reason)
 
 
 def _within_entry_window():
@@ -675,6 +654,15 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
             return False
         append_log("INFO", "SKIP", f"{sym} reentry_block bypassed reason=positive_momentum")
 
+    if STATE.get("halt_for_day"):
+        append_log("INFO", "SKIP", f"{sym} reason=halt_for_day")
+        return False
+
+    pause_until = STATE.get("pause_entries_until")
+    if pause_until and now < pause_until:
+        append_log("INFO", "SKIP", f"{sym} reason=pause_entries")
+        return False
+
     if sym in _positions():
         append_log("INFO", "SKIP", f"{sym} reason=already_held")
         return False
@@ -690,13 +678,30 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=insufficient_wallet need={required_value:.2f} avail={wallet_avail:.2f}")
         return False
 
-    if (_current_exposure_inr() + required_value) > _max_exposure_inr():
-        append_log("INFO", "SKIP", f"{sym} reason=exposure next={(_current_exposure_inr() + required_value):.2f} max={_max_exposure_inr():.2f}")
-        _apply_skip_cooldown(sym, "exposure")
+    if not RISK.can_enter_trade(sym, float(entry), _positions(), float(STATE.get("wallet_net_inr") or 0.0), int(qty), sector=_sector_for_symbol(sym)):
+        _apply_skip_cooldown(sym, "risk_guard")
         return False
 
     return True
 
+
+
+
+def _compute_symbol_momentum_pct(sym: str) -> float:
+    try:
+        token = token_for_symbol(sym)
+        kite = get_kite()
+        data = kite.historical_data(token, pd.Timestamp.now() - pd.Timedelta(days=2), pd.Timestamp.now(), "15minute")
+        df = pd.DataFrame(data)
+        if df.empty or "close" not in df.columns or len(df) < 2:
+            return 0.0
+        last = float(df["close"].iloc[-1])
+        prev = float(df["close"].iloc[-2])
+        if prev <= 0:
+            return 0.0
+        return ((last - prev) / prev) * 100.0
+    except Exception:
+        return 0.0
 
 def _maybe_enter_from_signal(sig):
     if not sig:
@@ -709,7 +714,7 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "SKIP", f"{sym} reason=invalid_entry")
         return False
 
-    momentum_pct = float(sig.get("momentum_pct") or 0.0)
+    momentum_pct = float(sig.get("momentum_pct") or _compute_symbol_momentum_pct(sym) or 0.0)
     momentum_threshold = float(getattr(CFG, "REENTRY_MOMENTUM_MIN_PCT", 0.0))
     momentum_positive = momentum_pct > momentum_threshold
 
@@ -749,6 +754,7 @@ def _maybe_enter_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
+        "sector": _sector_for_symbol(sym),
     }
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
@@ -765,6 +771,7 @@ def _maybe_enter_from_signal(sig):
 
 def get_status_text():
     _ensure_day_key()
+    RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
     mode = "LIVE ✅" if is_live_enabled() else "PAPER 🟡"
     rows = []
@@ -828,16 +835,23 @@ def get_trailing_status_text():
 
 def tick():
     _ensure_day_key()
+    RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
+    RISK.check_day_drawdown_guard(STATE)
 
     if _past_force_exit_time() and _positions():
         append_log("WARN", "TIME", "FORCE_EXIT triggered")
-        _close_all_open_trades(reason="TIME")
+        ee_force_exit_all(_positions(), _close_position, reason="TIME")
         STATE["paused"] = True
         _notify("Force exit executed. All trades closed.")
 
     # even when paused, force-exit check above still runs
     if STATE.get("paused"):
+        return
+
+    if STATE.get("halt_for_day"):
+        append_log("WARN", "RISK", "halt_for_day active. Pausing loop.")
+        STATE["paused"] = True
         return
 
     if float(STATE.get("daily_loss_cap_inr") or 0.0) > 0 and STATE["today_pnl"] <= -abs(float(STATE["daily_loss_cap_inr"])):

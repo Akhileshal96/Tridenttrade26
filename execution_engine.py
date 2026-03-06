@@ -1,9 +1,36 @@
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 import config as CFG
 from log_store import append_log
 
-IST = ZoneInfo("Asia/Kolkata")
+
+def check_time_exit(force_exit_check) -> bool:
+    return bool(force_exit_check())
+
+
+def check_stoploss(pnl_pct: float) -> bool:
+    return pnl_pct <= -abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0)))
+
+
+def check_trailing(trade: dict, pnl_pct: float) -> bool:
+    peak = float(trade.get("peak") or trade.get("peak_pct") or pnl_pct)
+    trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
+    trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
+    buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+    return trail_active and pnl_pct <= (peak - trail - buf)
+
+
+def place_live_order(place_order_fn, sym: str, side: str, qty: int):
+    return place_order_fn(sym, side, qty)
+
+
+def close_position(close_position_fn, sym: str, reason: str, ltp_override=None):
+    return close_position_fn(sym, reason=reason, ltp_override=ltp_override)
+
+
+def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
+    ok = True
+    for sym in list((positions or {}).keys()):
+        ok = bool(close_position(close_position_fn, sym, reason=reason)) and ok
+    return ok
 
 
 def monitor_positions(state: dict, positions: dict, get_ltp, close_position, force_exit_check):
@@ -17,7 +44,8 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             ltp = None
         if ltp is None:
             continue
-        if force_exit_check():
+
+        if check_time_exit(force_exit_check):
             close_position(sym, reason="TIME", ltp_override=ltp)
             continue
 
@@ -32,15 +60,13 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             trade["trail_active"] = True
             trade["trailing_active"] = True
 
-        if pnl_pct <= -abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0))):
+        if check_stoploss(pnl_pct):
             close_position(sym, reason="SL", ltp_override=ltp)
             continue
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
-        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
-        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
         append_log("INFO", "RISK", f"{sym} pnl%={pnl_pct:.2f} peak%={peak:.2f} trail_active={trail_active}")
-        if trail_active and pnl_pct <= (peak - trail - buf):
+        if check_trailing(trade, pnl_pct):
             close_position(sym, reason="TRAIL", ltp_override=ltp)
 
 

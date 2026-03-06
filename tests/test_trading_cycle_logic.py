@@ -15,6 +15,11 @@ def reset_state():
     tc.STATE["paused"] = False
     tc.STATE["initiated"] = False
     tc.STATE["live_override"] = False
+    tc.STATE["loss_streak"] = 0
+    tc.STATE["reduce_size_factor"] = 1.0
+    tc.STATE["pause_entries_until"] = None
+    tc.STATE["halt_for_day"] = False
+    tc.STATE["day_peak_pnl"] = 0.0
 
 
 def test_close_position_paper_updates_pnl_and_removes_position(monkeypatch):
@@ -33,14 +38,12 @@ def test_close_position_paper_updates_pnl_and_removes_position(monkeypatch):
     assert "ABC" in tc.STATE["last_exit_ts"]
 
 
-def test_manage_open_trades_hits_stoploss_and_sells(monkeypatch):
+def test_monitor_positions_hits_stoploss_and_sells(monkeypatch):
     reset_state()
     tc.STATE["positions"]["ABC"] = {"entry_price": 100.0, "quantity": 10, "peak_pct": 0.0, "trailing_active": False}
 
     monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
     monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
-
-    tc._manage_open_trades = tc._manage_open_trades  # explicit use for lint clarity
 
     # Force LTP down to -2% threshold breach
     monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 98.0)
@@ -57,13 +60,19 @@ def test_manage_open_trades_hits_stoploss_and_sells(monkeypatch):
 
     monkeypatch.setattr(tc, "_close_position", fake_close)
 
-    tc._manage_open_trades(force_only=False)
+    tc.ee_monitor_positions(
+        tc.STATE,
+        tc.STATE["positions"],
+        get_ltp=lambda sym: tc._ltp(tc.get_kite(), sym),
+        close_position=tc._close_position,
+        force_exit_check=tc._past_force_exit_time,
+    )
 
     assert closed["called"] is True
     assert closed["reason"] == "SL"
 
 
-def test_manage_open_trades_trailing_exit(monkeypatch):
+def test_monitor_positions_trailing_exit(monkeypatch):
     reset_state()
     tc.STATE["positions"]["ABC"] = {
         "entry_price": 100.0,
@@ -91,7 +100,13 @@ def test_manage_open_trades_trailing_exit(monkeypatch):
 
     monkeypatch.setattr(tc, "_close_position", fake_close)
 
-    tc._manage_open_trades(force_only=False)
+    tc.ee_monitor_positions(
+        tc.STATE,
+        tc.STATE["positions"],
+        get_ltp=lambda sym: tc._ltp(tc.get_kite(), sym),
+        close_position=tc._close_position,
+        force_exit_check=tc._past_force_exit_time,
+    )
 
     assert closed["reason"] == "TRAIL"
 
@@ -103,6 +118,7 @@ def test_can_open_new_trade_uses_full_notional(monkeypatch):
     tc.RUNTIME["MAX_EXPOSURE_PCT"] = 100.0
 
     monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tc.CFG, "MAX_EXPOSURE_PCT", 100.0, raising=False)
 
     # entry*qty = 100*6 = 600 > 500 should block
     assert tc._can_open_new_trade("ABC", 100.0, qty=6) is False

@@ -622,9 +622,9 @@ async def main():
                 access = data["access_token"]
                 set_env_value("KITE_ACCESS_TOKEN", access)
                 os.environ["KITE_ACCESS_TOKEN"] = access
-                await event.reply("✅ Access token accepted by Zerodha and saved.")
-                append_log("INFO", "BOT", "Token updated; requesting bot restart")
-                await _restart_bot_process(event)
+                await event.reply("✅ Token updated. Restarting bot.")
+                append_log("INFO", "BOT", "Token updated; restarting bot process")
+                os._exit(0)
             except Exception as e:
                 await event.reply("❌ Token update failed: %s" % e)
             return
