@@ -11,10 +11,10 @@ def check_stoploss(pnl_pct: float) -> bool:
 
 
 def check_trailing(trade: dict, pnl_pct: float) -> bool:
-    peak = float(trade.get("peak") or trade.get("peak_pct") or pnl_pct)
+    peak = float(trade.get("peak") or trade.get("peak_pct") or 0.0)
     trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
-    trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
-    buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+    trail = float(getattr(CFG, "TRAIL_PCT", 0.4))
+    buf = float(getattr(CFG, "BUFFER_PCT", 0.05))
     return trail_active and pnl_pct <= (peak - trail - buf)
 
 
@@ -34,6 +34,10 @@ def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
 
 
 def monitor_positions(state: dict, positions: dict, get_ltp, close_position, force_exit_check):
+    activate_pct = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 0.8))
+    trail_pct = float(getattr(CFG, "TRAIL_PCT", 0.4))
+    buf_pct = float(getattr(CFG, "BUFFER_PCT", 0.05))
+
     for sym, trade in list((positions or {}).items()):
         entry = float(trade.get("entry") or trade.get("entry_price") or 0.0)
         if entry <= 0:
@@ -50,22 +54,31 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             continue
 
         pnl_pct = ((ltp - entry) / entry) * 100.0
-        peak = float(trade.get("peak") or trade.get("peak_pct") or pnl_pct)
-        if pnl_pct > peak:
-            peak = pnl_pct
+
+        existing_peak = float(trade.get("peak_pct") or trade.get("peak") or 0.0)
+        peak = max(existing_peak, pnl_pct)
         trade["peak"] = peak
         trade["peak_pct"] = peak
 
-        if pnl_pct >= float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5)):
+        trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
+        if (not trail_active) and pnl_pct >= activate_pct:
+            trail_active = True
             trade["trail_active"] = True
             trade["trailing_active"] = True
+            append_log("INFO", "TRAIL", f"{sym} activated at pnl%={pnl_pct:.2f}")
+
+        trigger_pct = peak - trail_pct - buf_pct
 
         if check_stoploss(pnl_pct):
             close_position(sym, reason="SL", ltp_override=ltp)
             continue
 
-        trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
-        append_log("INFO", "RISK", f"{sym} pnl%={pnl_pct:.2f} peak%={peak:.2f} trail_active={trail_active}")
+        append_log(
+            "INFO",
+            "RISK",
+            f"{sym} pnl%={pnl_pct:.2f} peak%={peak:.2f} trail_active={trail_active} trigger<={trigger_pct:.2f}",
+        )
+
         if check_trailing(trade, pnl_pct):
             close_position(sym, reason="TRAIL", ltp_override=ltp)
 

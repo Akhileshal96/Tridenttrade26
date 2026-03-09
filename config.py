@@ -60,9 +60,9 @@ RISK_PER_TRADE_PCT = _get_float("RISK_PER_TRADE_PCT", "1")
 STOPLOSS_PCT = _get_float("STOPLOSS_PCT", "2")
 
 # ===== TRAILING / EXIT DEFAULTS =====
-PROFIT_LOCK_ACTIVATE_PCT = _get_float("PROFIT_LOCK_ACTIVATE_PCT", "1.5")
-TRAIL_PCT = _get_float("TRAIL_PCT", "0.6")
-BUFFER_PCT = _get_float("BUFFER_PCT", "0.1")
+PROFIT_LOCK_ACTIVATE_PCT = _get_float("PROFIT_LOCK_ACTIVATE_PCT", "0.8")
+TRAIL_PCT = _get_float("TRAIL_PCT", "0.4")
+BUFFER_PCT = _get_float("BUFFER_PCT", "0.05")
 
 # ===== BUCKET / EXPOSURE =====
 BUCKET_MODE = _get_str("BUCKET_MODE", "PCT").upper()

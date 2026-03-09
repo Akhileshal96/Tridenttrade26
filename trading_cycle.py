@@ -832,9 +832,9 @@ def get_trailing_status_text():
         pnl_pct = ((ltp - entry) / entry) * 100.0 if entry > 0 else 0.0
         peak_pct = float(t.get("peak_pct") or t.get("peak") or pnl_pct)
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
-        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 1.5))
-        trail = float(getattr(CFG, "TRAIL_PCT", 0.6))
-        buf = float(getattr(CFG, "BUFFER_PCT", 0.1))
+        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 0.8))
+        trail = float(getattr(CFG, "TRAIL_PCT", 0.4))
+        buf = float(getattr(CFG, "BUFFER_PCT", 0.05))
         trigger = peak_pct - trail - buf
         rows.append(
             f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl%={pnl_pct:.2f} "
