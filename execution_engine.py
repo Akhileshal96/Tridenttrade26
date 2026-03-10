@@ -10,12 +10,9 @@ def check_stoploss(pnl_pct: float) -> bool:
     return pnl_pct <= -abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0)))
 
 
-def check_trailing(trade: dict, pnl_pct: float) -> bool:
-    peak = float(trade.get("peak") or trade.get("peak_pct") or 0.0)
+def check_trailing(trade: dict, pnl_inr: float, trigger_inr: float) -> bool:
     trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
-    trail = float(getattr(CFG, "TRAIL_PCT", 0.4))
-    buf = float(getattr(CFG, "BUFFER_PCT", 0.05))
-    return trail_active and pnl_pct <= (peak - trail - buf)
+    return trail_active and pnl_inr <= trigger_inr
 
 
 def place_live_order(place_order_fn, sym: str, side: str, qty: int):
@@ -34,14 +31,17 @@ def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
 
 
 def monitor_positions(state: dict, positions: dict, get_ltp, close_position, force_exit_check):
-    activate_pct = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 0.8))
-    trail_pct = float(getattr(CFG, "TRAIL_PCT", 0.4))
-    buf_pct = float(getattr(CFG, "BUFFER_PCT", 0.05))
+    min_activate_inr = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 8.0))
+    activate_pct_of_position = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4))
+    trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
+    trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
 
     for sym, trade in list((positions or {}).items()):
         entry = float(trade.get("entry") or trade.get("entry_price") or 0.0)
+        qty = int(trade.get("qty") or trade.get("quantity") or 1)
         if entry <= 0:
             continue
+
         try:
             ltp = get_ltp(sym)
         except Exception:
@@ -54,20 +54,29 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             continue
 
         pnl_pct = ((ltp - entry) / entry) * 100.0
+        pnl_inr = (ltp - entry) * qty
+        position_value = entry * qty
 
-        existing_peak = float(trade.get("peak_pct") or trade.get("peak") or 0.0)
-        peak = max(existing_peak, pnl_pct)
-        trade["peak"] = peak
-        trade["peak_pct"] = peak
+        peak_pnl_inr = float(trade.get("peak_pnl_inr") or 0.0)
+        peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
+        trade["peak_pnl_inr"] = peak_pnl_inr
+
+        # Keep legacy peak% fields updated for compatibility/debug visibility.
+        existing_peak_pct = float(trade.get("peak_pct") or trade.get("peak") or 0.0)
+        peak_pct = max(existing_peak_pct, pnl_pct)
+        trade["peak_pct"] = peak_pct
+        trade["peak"] = peak_pct
+
+        activate_inr = max(min_activate_inr, position_value * activate_pct_of_position / 100.0)
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
-        if (not trail_active) and pnl_pct >= activate_pct:
+        if (not trail_active) and pnl_inr >= activate_inr:
             trail_active = True
             trade["trail_active"] = True
             trade["trailing_active"] = True
-            append_log("INFO", "TRAIL", f"{sym} activated at pnl%={pnl_pct:.2f}")
+            append_log("INFO", "TRAIL", f"{sym} activated pnl_inr={pnl_inr:.2f} activate_inr={activate_inr:.2f}")
 
-        trigger_pct = peak - trail_pct - buf_pct
+        trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
 
         if check_stoploss(pnl_pct):
             close_position(sym, reason="SL", ltp_override=ltp)
@@ -76,10 +85,17 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         append_log(
             "INFO",
             "RISK",
-            f"{sym} pnl%={pnl_pct:.2f} peak%={peak:.2f} trail_active={trail_active} trigger<={trigger_pct:.2f}",
+            f"{sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
+            f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} "
+            f"activate_inr={activate_inr:.2f} trigger_inr={trigger_inr:.2f}",
         )
 
-        if check_trailing(trade, pnl_pct):
+        if check_trailing(trade, pnl_inr, trigger_inr):
+            append_log(
+                "WARN",
+                "EXIT",
+                f"{sym} reason=TRAIL pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} trigger_inr={trigger_inr:.2f}",
+            )
             close_position(sym, reason="TRAIL", ltp_override=ltp)
 
 

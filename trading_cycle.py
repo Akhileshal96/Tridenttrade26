@@ -88,6 +88,7 @@ def _positions():
         qty = int(tr.get("qty") or tr.get("quantity") or 1)
         peak = float(tr.get("peak") or tr.get("peak_pct") or 0.0)
         trail_active = bool(tr.get("trail_active", tr.get("trailing_active", False)))
+        peak_pnl_inr = float(tr.get("peak_pnl_inr") or 0.0)
         return {
             "entry": entry,
             "entry_price": entry,
@@ -95,6 +96,7 @@ def _positions():
             "quantity": qty,
             "peak": peak,
             "peak_pct": peak,
+            "peak_pnl_inr": peak_pnl_inr,
             "trail_active": trail_active,
             "trailing_active": trail_active,
             "order_id": tr.get("order_id"),
@@ -124,6 +126,14 @@ def _positions():
             if norm:
                 pos[sym] = norm
                 append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
+
+    # ensure trailing keys exist for current runtime positions
+    for tr in pos.values():
+        if not isinstance(tr, dict):
+            continue
+        tr.setdefault("peak_pnl_inr", 0.0)
+        tr.setdefault("trail_active", bool(tr.get("trailing_active", False)))
+        tr.setdefault("trailing_active", bool(tr.get("trail_active", False)))
 
     # keep alias aligned
     STATE["open_trades"] = pos
@@ -750,6 +760,7 @@ def _maybe_enter_from_signal(sig):
         "quantity": qty,
         "peak": 0.0,
         "peak_pct": 0.0,
+        "peak_pnl_inr": 0.0,
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
@@ -782,6 +793,32 @@ def get_positions_text():
     return "📍 Positions\n\n" + "\n".join(rows)
 
 
+def _current_open_pnl_breakdown():
+    """Returns tuple: (profit_inr, loss_inr_abs) for currently open positions."""
+    profit_inr = 0.0
+    loss_inr_abs = 0.0
+    kite = None
+    try:
+        kite = get_kite()
+    except Exception:
+        kite = None
+
+    for sym, tr in sorted(_positions().items()):
+        entry, qty = _trade_entry_qty(tr)
+        if entry <= 0:
+            continue
+        ltp = _ltp(kite, sym) if kite else entry
+        if ltp is None:
+            ltp = entry
+        pnl = (ltp - entry) * qty
+        if pnl >= 0:
+            profit_inr += pnl
+        else:
+            loss_inr_abs += abs(pnl)
+
+    return float(profit_inr), float(loss_inr_abs)
+
+
 def get_status_text():
     _ensure_day_key()
     RISK.sync_wallet(STATE)
@@ -791,6 +828,7 @@ def get_status_text():
     for sym, p in sorted(_positions().items()):
         e, q = _trade_entry_qty(p)
         rows.append(f"- {sym} qty={q} entry={e:.2f}")
+    current_profit, current_loss = _current_open_pnl_breakdown()
     return (
         "📟 Trident Status\n\n"
         f"Mode: {mode}\n"
@@ -799,7 +837,9 @@ def get_status_text():
         f"Universe(trading): {len(load_universe_trading())} symbols\n"
         f"Universe(live): {len(load_universe_live())} symbols\n"
         f"Open Positions: {_open_positions_count()}\n"
-        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n\n"
+        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n"
+        f"Current Profit (open): ₹{current_profit:.2f}\n"
+        f"Current Loss (open): ₹{current_loss:.2f}\n\n"
         "Wallet/Caps:\n"
         f"- Wallet Net: ₹{float(STATE.get('wallet_net_inr') or 0):.2f}\n"
         f"- Wallet Available: ₹{float(STATE.get('wallet_available_inr') or 0):.2f}\n"
@@ -829,22 +869,32 @@ def get_trailing_status_text():
         ltp = _ltp(kite, sym) if kite else entry
         if ltp is None:
             ltp = entry
-        pnl_pct = ((ltp - entry) / entry) * 100.0 if entry > 0 else 0.0
-        peak_pct = float(t.get("peak_pct") or t.get("peak") or pnl_pct)
+
+        value = entry * qty
+        pnl_inr = (ltp - entry) * qty
+        peak_pnl_inr = float(t.get("peak_pnl_inr") or 0.0)
+        peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
+
+        min_activate_inr = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 8.0))
+        activate_pct_of_position = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4))
+        trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
+        trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
+
+        activate_inr = max(min_activate_inr, value * activate_pct_of_position / 100.0)
+        trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
-        activate = float(getattr(CFG, "PROFIT_LOCK_ACTIVATE_PCT", 0.8))
-        trail = float(getattr(CFG, "TRAIL_PCT", 0.4))
-        buf = float(getattr(CFG, "BUFFER_PCT", 0.05))
-        trigger = peak_pct - trail - buf
+
         rows.append(
-            f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl%={pnl_pct:.2f} "
-            f"peak%={peak_pct:.2f} trail_active={trail_active} act@{activate:.2f}% trail_trigger<={trigger:.2f}%"
+            f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} value={value:.2f} "
+            f"pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} "
+            f"trail_active={trail_active} activate@₹{activate_inr:.2f} trigger<=₹{trigger_inr:.2f}"
         )
 
     if not rows:
         return "📉 Trailing Status\n\nNo open trades."
 
     return "📉 Trailing Status\n\n" + "\n".join(rows)
+
 
 def tick():
     _ensure_day_key()
@@ -854,9 +904,19 @@ def tick():
 
     if _past_force_exit_time() and _positions():
         append_log("WARN", "TIME", "FORCE_EXIT triggered")
+        positions_before = _open_positions_count()
         ee_force_exit_all(_positions(), _close_position, reason="TIME")
         STATE["paused"] = True
-        _notify("Force exit executed. All trades closed.")
+        day_pnl = float(STATE.get("today_pnl") or 0.0)
+        pnl_label = "Profit" if day_pnl >= 0 else "Loss"
+        _notify(
+            "🧾 Trading Day Brief\n"
+            f"- Positions Closed (TIME): {positions_before}\n"
+            f"- Day {pnl_label}: ₹{abs(day_pnl):.2f}\n"
+            f"- Net Day PnL: ₹{day_pnl:.2f}\n"
+            f"- Open Positions Now: {_open_positions_count()}"
+        )
+
 
     # even when paused, force-exit check above still runs
     if STATE.get("paused"):

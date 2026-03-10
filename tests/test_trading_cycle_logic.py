@@ -77,19 +77,18 @@ def test_monitor_positions_trailing_exit(monkeypatch):
     tc.STATE["positions"]["ABC"] = {
         "entry_price": 100.0,
         "quantity": 10,
-        "peak_pct": 2.0,
+        "peak_pnl_inr": 20.0,
         "trailing_active": True,
     }
 
     monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
     monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
-    monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 101.0)  # +1%
+    monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 100.2)  # pnl_inr = 2.0
     monkeypatch.setattr(tc, "is_live_enabled", lambda: True)
     monkeypatch.setattr(tc, "get_kite", lambda: object())
 
-    # trail threshold = peak(2.0) - trail(0.6) - buffer(0.1) = 1.3; pnl=1.0 should trigger
-    monkeypatch.setattr(tc.CFG, "TRAIL_PCT", 0.6, raising=False)
-    monkeypatch.setattr(tc.CFG, "BUFFER_PCT", 0.1, raising=False)
+    monkeypatch.setattr(tc.CFG, "TRAIL_LOCK_RATIO", 0.5, raising=False)
+    monkeypatch.setattr(tc.CFG, "TRAIL_BUFFER_INR", 1.0, raising=False)
 
     closed = {"reason": None}
 
