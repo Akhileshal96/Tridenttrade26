@@ -184,32 +184,27 @@ async def night_scheduler():
         append_log("INFO", "NIGHT", "Night scheduler disabled")
         return
 
-    ns = os.getenv("NIGHT_START", "18:30")
+    # Full night research should run once per day (default 23:00 IST).
+    ns = os.getenv("NIGHT_START", "23:00")
     ih, im = [int(x) for x in ns.split(":")]
-    start_t = dtime(ih, im)
 
-    es = os.getenv("ENTRY_START", "09:20")
-    eh, em = [int(x) for x in es.split(":")]
-    offset = int(os.getenv("NIGHT_END_OFFSET_MIN", "5"))
-    end_dt = (datetime.now().replace(hour=eh, minute=em, second=0, microsecond=0) - timedelta(minutes=offset))
-    end_t = end_dt.time()
-
-    interval_min = int(os.getenv("NIGHT_INTERVAL_MIN", "90"))
-
-    append_log("INFO", "NIGHT", "Night scheduler active")
+    append_log("INFO", "NIGHT", "Night scheduler active (once per day)")
 
     while True:
         try:
             now = datetime.now()
-            if _in_time_range(now.time(), start_t, end_t):
-                append_log("INFO", "NIGHT", "Auto scheduler triggering night research")
+            run_key = now.strftime("%Y-%m-%d")
+            target = now.replace(hour=ih, minute=im, second=0, microsecond=0)
+
+            already = str(CYCLE.STATE.get("last_night_research_day") or "") == run_key
+            if (now >= target) and (not already):
+                append_log("INFO", "NIGHT", "Auto scheduler triggering nightly maintenance")
                 await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE)
-                await asyncio.sleep(interval_min * 60)
-            else:
-                await asyncio.sleep(10 * 60)
+
+            await asyncio.sleep(60)
         except Exception as e:
             append_log("ERROR", "NIGHT", "Scheduler error: %s" % e)
-            await asyncio.sleep(10 * 60)
+            await asyncio.sleep(60)
 
 
 def _update_id_list_env(key, user_id, add=True):

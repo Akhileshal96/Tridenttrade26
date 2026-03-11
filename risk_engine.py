@@ -131,14 +131,14 @@ def update_loss_streak(state: dict, result: float):
 
     if streak >= 4:
         state["halt_for_day"] = True
-        append_log("WARN", "RISK", "Loss streak 4: trading halted for day")
+        append_log("WARN", "RISK", "loss_streak=4 → stopping new trades for the day")
     elif streak >= 3:
         state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
         state["reduce_size_factor"] = 0.5
-        append_log("WARN", "RISK", "Loss streak 3: entries paused for 30 minutes")
+        append_log("WARN", "RISK", "loss_streak=3 → pausing new entries for 30 min")
     elif streak >= 2:
         state["reduce_size_factor"] = 0.5
-        append_log("WARN", "RISK", "Loss streak 2: reducing size")
+        append_log("WARN", "RISK", "loss_streak=2 → reducing entry aggressiveness")
     else:
         state["reduce_size_factor"] = 1.0
 
@@ -149,16 +149,25 @@ def check_day_drawdown_guard(state: dict):
     if pnl > peak:
         peak = pnl
         state["day_peak_pnl"] = peak
+        append_log("INFO", "DAY", f"peak_pnl={peak:.2f}")
 
     if peak <= 0:
         return True
 
-    drawdown_pct = float(os.getenv("DAY_DRAWDOWN_GUARD_PCT", "35"))
     drop = peak - pnl
-    limit_drop = peak * drawdown_pct / 100.0
-    if drop >= limit_drop:
+    dd_pct = (drop / peak) * 100.0 if peak > 0 else 0.0
+
+    # 25% -> reduce size, 40% -> pause entries, 60% -> halt for day
+    if dd_pct >= 60.0:
+        state["halt_for_day"] = True
+        append_log("WARN", "DAY", "drawdown guard triggered → stopping new trades for day")
+        return False
+    if dd_pct >= 40.0:
         state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
         state["reduce_size_factor"] = 0.5
-        append_log("WARN", "RISK", f"Drawdown guard: peak={peak:.2f} pnl={pnl:.2f} drop={drop:.2f}")
+        append_log("WARN", "DAY", "drawdown guard triggered → pausing entries")
         return False
+    if dd_pct >= 25.0:
+        state["reduce_size_factor"] = 0.5
+        append_log("WARN", "DAY", "drawdown guard triggered → reducing size")
     return True
