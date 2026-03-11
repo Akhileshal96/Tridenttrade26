@@ -1,6 +1,7 @@
 import asyncio
 import os
 from datetime import datetime, timedelta, time as dtime
+from zoneinfo import ZoneInfo
 
 import config as CFG
 import trading_cycle as CYCLE
@@ -15,6 +16,8 @@ from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
 from trade_notifier import notify, notification_worker, setup_loop
 from control_panel import register_control_panel
+
+IST = ZoneInfo("Asia/Kolkata")
 
 HELP_TEXT = (
     "🤖 TRIDENT BOT – COMMANDS\n\n"
@@ -192,7 +195,7 @@ async def night_scheduler():
 
     while True:
         try:
-            now = datetime.now()
+            now = datetime.now(IST)
             run_key = now.strftime("%Y-%m-%d")
             target = now.replace(hour=ih, minute=im, second=0, microsecond=0)
 
@@ -602,7 +605,7 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
 
 
 def _time_greeting(now=None):
-    now = now or datetime.now()
+    now = now or datetime.now(IST)
     h = int(now.hour)
     if h < 12:
         return "Good morning"
