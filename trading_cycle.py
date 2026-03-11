@@ -14,6 +14,7 @@ from excluded_store import load_excluded, add_symbol, remove_symbol
 from research_engine import get_trading_universe
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
+from universe_builder import is_market_regime_ok
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -44,6 +45,7 @@ STATE = {
     "halt_for_day": False,
     "day_peak_pnl": 0.0,
     "sector_map_cache": None,
+    "dynamic_universe": [],
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -712,11 +714,30 @@ def _compute_symbol_momentum_pct(sym: str) -> float:
     except Exception:
         return 0.0
 
+
+def _active_trade_universe() -> list:
+    dyn = [str(x).strip().upper() for x in (STATE.get("dynamic_universe") or []) if str(x).strip()]
+    if 10 <= len(dyn) <= 25:
+        return dyn
+    return []
+
+
 def _maybe_enter_from_signal(sig):
     if not sig:
         return False
     sym = sig["symbol"].strip().upper()
     append_log("INFO", "SCAN", f"Scanning {sym}")
+
+    # 1) Market regime check (requested before buy gating)
+    if not is_market_regime_ok():
+        append_log("WARN", "MARKET", "market weak skipping entry")
+        return False
+
+    # 2) Universe membership check against active dynamic universe (if available)
+    active_dyn = _active_trade_universe()
+    if active_dyn and sym not in set(active_dyn):
+        append_log("INFO", "UNIV", f"{sym} not in dynamic universe -> skip")
+        return False
 
     entry = float(sig.get("entry") or 0.0)
     if entry <= 0:
@@ -956,8 +977,15 @@ def tick():
     if not _within_entry_window():
         return
 
-    rstate = get_trading_universe(force=False)
-    universe = list(rstate.get("trading_universe") or []) or load_universe_trading()
+    dynamic_universe = _active_trade_universe()
+    if dynamic_universe:
+        universe = dynamic_universe
+        append_log("INFO", "UNIV", f"Using dynamic universe size={len(universe)}")
+    else:
+        rstate = get_trading_universe(force=False)
+        universe = list(rstate.get("trading_universe") or []) or load_universe_trading()
+        if universe:
+            append_log("INFO", "UNIV", f"Dynamic universe unavailable -> fallback static size={len(universe)}")
     if not universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return

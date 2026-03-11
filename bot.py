@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, time as dtime
 import config as CFG
 import trading_cycle as CYCLE
 import night_research
+from night_scheduler import run_nightly_maintenance
 
 from telethon import TelegramClient, events
 from kiteconnect import KiteConnect
@@ -202,7 +203,7 @@ async def night_scheduler():
             now = datetime.now()
             if _in_time_range(now.time(), start_t, end_t):
                 append_log("INFO", "NIGHT", "Auto scheduler triggering night research")
-                await asyncio.to_thread(night_research.run_night_job)
+                await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE)
                 await asyncio.sleep(interval_min * 60)
             else:
                 await asyncio.sleep(10 * 60)
@@ -423,7 +424,7 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             return True
         await event.reply("🌙 Running night research now...")
         try:
-            await asyncio.to_thread(night_research.run_night_job)
+            await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE)
             await event.reply("✅ Night research done.")
         except Exception as e:
             await event.reply("❌ Night research failed: %s" % e)
@@ -605,6 +606,35 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
     return False
 
 
+def _time_greeting(now=None):
+    now = now or datetime.now()
+    h = int(now.hour)
+    if h < 12:
+        return "Good morning"
+    if h < 17:
+        return "Good afternoon"
+    return "Good evening"
+
+
+async def _send_startup_trade_message(client):
+    owner = int(getattr(CFG, "ADMIN_USER_ID", 0) or _owner_id() or 0)
+    if owner <= 0:
+        append_log("WARN", "BOT", "Startup greeting skipped: owner/admin id missing")
+        return
+    try:
+        ent = await client.get_entity(owner)
+        name = (getattr(ent, "first_name", None) or getattr(ent, "username", None) or "there").strip()
+        msg = (
+            f"👋 Hi {name},\n"
+            f"{_time_greeting()}\n"
+            "We're starting with the trade."
+        )
+        await client.send_message(owner, msg)
+        append_log("INFO", "BOT", f"Startup greeting sent to {owner}")
+    except Exception as e:
+        append_log("WARN", "BOT", f"Startup greeting failed: {e}")
+
+
 async def main():
     api_id = int(getattr(CFG, "TELEGRAM_API_ID", 9888950))
     api_hash = getattr(CFG, "TELEGRAM_API_HASH", "ecfa673e2c85b4ef16743acf0ba0d1c1")
@@ -620,6 +650,7 @@ async def main():
     asyncio.create_task(notification_worker(client, lambda: int(getattr(CFG, "ADMIN_USER_ID", 0) or _owner_id() or 0)))
 
     CYCLE.set_notifier(notify)
+    await _send_startup_trade_message(client)
 
     def _mk_panel_handler(command_name):
         async def _run(message_event):
