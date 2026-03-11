@@ -14,7 +14,7 @@ from excluded_store import load_excluded, add_symbol, remove_symbol
 from research_engine import get_trading_universe
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
-from universe_builder import is_market_regime_ok
+from universe_builder import is_market_regime_ok, SECTOR_MAP
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -45,7 +45,7 @@ STATE = {
     "halt_for_day": False,
     "day_peak_pnl": 0.0,
     "sector_map_cache": None,
-    "dynamic_universe": [],
+    "research_universe": [],
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -716,11 +716,26 @@ def _compute_symbol_momentum_pct(sym: str) -> float:
 
 
 def _active_trade_universe() -> list:
-    dyn = [str(x).strip().upper() for x in (STATE.get("dynamic_universe") or []) if str(x).strip()]
+    dyn = [str(x).strip().upper() for x in (STATE.get("research_universe") or []) if str(x).strip()]
     if 10 <= len(dyn) <= 25:
         return dyn
     return []
 
+
+
+def _passes_sector_entry_filter(sym: str) -> bool:
+    """Explicit sector filter step before risk checks (separate from exposure guard)."""
+    sec = str(SECTOR_MAP.get(sym, "OTHER") or "OTHER").upper()
+    limit = int(getattr(CFG, "SECTOR_MAX_IN_UNIVERSE", 3) or 3)
+    held = 0
+    for hs, tr in _positions().items():
+        hsec = str((tr or {}).get("sector") or SECTOR_MAP.get(str(hs).upper(), "OTHER") or "OTHER").upper()
+        if hsec == sec:
+            held += 1
+    if held >= limit:
+        append_log("INFO", "SECTOR", f"{sym} sector={sec} cap reached ({held}/{limit}) -> skip")
+        return False
+    return True
 
 def _maybe_enter_from_signal(sig):
     if not sig:
@@ -736,7 +751,11 @@ def _maybe_enter_from_signal(sig):
     # 2) Universe membership check against active dynamic universe (if available)
     active_dyn = _active_trade_universe()
     if active_dyn and sym not in set(active_dyn):
-        append_log("INFO", "UNIV", f"{sym} not in dynamic universe -> skip")
+        append_log("INFO", "UNIV", f"{sym} not in research universe -> skip")
+        return False
+
+    # 3) Sector filter / cap
+    if not _passes_sector_entry_filter(sym):
         return False
 
     entry = float(sig.get("entry") or 0.0)
@@ -977,15 +996,15 @@ def tick():
     if not _within_entry_window():
         return
 
-    dynamic_universe = _active_trade_universe()
-    if dynamic_universe:
-        universe = dynamic_universe
-        append_log("INFO", "UNIV", f"Using dynamic universe size={len(universe)}")
+    research_universe = _active_trade_universe()
+    if research_universe:
+        universe = research_universe
+        append_log("INFO", "UNIV", f"Using research universe size={len(universe)}")
     else:
         rstate = get_trading_universe(force=False)
         universe = list(rstate.get("trading_universe") or []) or load_universe_trading()
         if universe:
-            append_log("INFO", "UNIV", f"Dynamic universe unavailable -> fallback static size={len(universe)}")
+            append_log("INFO", "UNIV", f"Research universe unavailable -> fallback static size={len(universe)}")
     if not universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
