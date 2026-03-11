@@ -1,5 +1,4 @@
 import os
-import time
 from datetime import datetime
 
 import pandas as pd
@@ -7,6 +6,7 @@ import yfinance as yf
 
 import config as CFG
 from log_store import append_log
+from universe_builder import build_dynamic_universe_details, save_universe
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
 LOG_DIR = os.path.join(os.getcwd(), "logs")
@@ -110,8 +110,6 @@ def run_night_job():
     _night_log("Criteria: score = (Close / SMA200) * 100, minimum candles=220, timeframe=1D, lookback=10y")
     _night_log(f"Candidates loaded: {len(candidates_all)} | Excluded: {len(excluded)} | To scan: {len(candidates)}")
 
-    scored = []
-    errors = 0
 
     for sym in candidates:
         try:
@@ -141,11 +139,19 @@ def run_night_job():
             _night_log(f"{sym}: ERROR {e}")
             continue
 
-    scored.sort(key=lambda x: x[1], reverse=True)
-    pd.DataFrame(scored, columns=["symbol", "score"]).to_csv(NIGHT_SCORES_CSV, index=False)
 
-    top_n = int(getattr(CFG, "UNIVERSE_SIZE", 30))
-    top_syms = [s for s, _ in scored[:top_n]]
+def run_night_job():
+    append_log("INFO", "NIGHT", "Night research started")
+    details = build_dynamic_universe_details(target_size=int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20)))
+
+    candidates_loaded = int(details.get("candidates_loaded") or 0)
+    excluded = int(details.get("excluded") or 0)
+    to_scan = int(details.get("to_scan") or 0)
+    scored = int(details.get("scored") or 0)
+    errors = int(details.get("errors") or 0)
+    selected = list(details.get("selected") or [])
+    sector_leaders = list(details.get("sector_leaders") or [])
+    top_ranked = list(details.get("top_ranked") or [])
 
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
     os.makedirs(os.path.dirname(live_path), exist_ok=True)
