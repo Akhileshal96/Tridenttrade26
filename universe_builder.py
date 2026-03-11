@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 import config as CFG
+from excluded_store import load_excluded
 from instrument_store import INSTR_PATH, refresh_instruments
 from log_store import append_log
 from market_regime import get_market_regime_snapshot
@@ -21,7 +22,6 @@ SECTOR_MAP: Dict[str, str] = {
     "HAL": "DEFENCE", "BEL": "DEFENCE", "BEML": "DEFENCE",
 }
 
-# 100-symbol NIFTY100-like candidate basket
 NIFTY100_SYMBOLS = [
     "ABB", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIGREEN", "ADANIPORTS", "ADANIPOWER", "AMBUJACEM", "APOLLOHOSP",
     "APOLLOTYRE", "ASHOKLEY", "ASIANPAINT", "ASTRAL", "ATGL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO", "BAJAJFINSV",
@@ -35,18 +35,16 @@ NIFTY100_SYMBOLS = [
     "POLYCAB", "POWERGRID", "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHRIRAMFIN", "SIEMENS",
 ]
 
-
 _DOWNLOAD_CACHE = {}
 
 
 def _cache_get(key):
     ttl = int(getattr(CFG, "UNIVERSE_CACHE_TTL_SEC", 600) or 600)
-    now = time.time()
     rec = _DOWNLOAD_CACHE.get(key)
     if not rec:
         return None
     ts, data = rec
-    if (now - ts) > max(1, ttl):
+    if (time.time() - ts) > max(1, ttl):
         _DOWNLOAD_CACHE.pop(key, None)
         return None
     return data
@@ -60,7 +58,6 @@ def _download_cached(symbols: List[str], period="6mo", interval="1d") -> pd.Data
     key = (tuple(symbols), str(period), str(interval))
     cached = _cache_get(key)
     if isinstance(cached, pd.DataFrame):
-        append_log("INFO", "UNIV", f"download cache hit symbols={len(symbols)} period={period} interval={interval}")
         return cached
     df = _download(symbols, period=period, interval=interval)
     if isinstance(df, pd.DataFrame) and not df.empty:
@@ -105,97 +102,37 @@ def _persist_candidates(path: str, symbols: List[str]) -> None:
         append_log("WARN", "UNIV", f"could not persist candidates: {e}")
 
 
-def _discover_market_candidates() -> List[str]:
-    max_pool = int(getattr(CFG, "CANDIDATE_DISCOVERY_MAX", 300) or 300)
-    target = int(getattr(CFG, "CANDIDATE_DISCOVERY_TARGET", 120) or 120)
-
-    try:
-        if os.path.exists(INSTR_PATH):
-            idf = pd.read_csv(INSTR_PATH)
-        else:
-            idf = refresh_instruments()
-    except Exception as e:
-        append_log("WARN", "UNIV", f"candidate discovery skipped (instruments): {e}")
-        return []
-
-    if not isinstance(idf, pd.DataFrame) or idf.empty or "tradingsymbol" not in idf.columns:
-        return []
-
-    # Focus on listed equities only (exclude ETFs/indices/rights/preferred series)
-    df = idf.copy()
-    if "instrument_type" in df.columns:
-        df = df[df["instrument_type"].astype(str).str.upper().isin(["EQ"]) ]
-    syms = _normalize_symbols(df["tradingsymbol"].astype(str).tolist())
-    syms = [x for x in syms if x.isalnum() and len(x) <= 15 and not x.endswith(("BE", "BZ", "SM", "PP"))]
-    if len(syms) > max_pool:
-        syms = syms[:max_pool]
-
-    if not syms:
-        return []
-
-    try:
-        hist = _download_cached(syms, period="2mo", interval="1d")
-    except Exception as e:
-        append_log("WARN", "UNIV", f"candidate discovery skipped (download): {e}")
-        return []
-
-    if hist.empty:
-        return []
-
-    rows = []
-    for sym in syms:
-        try:
-            sdf = hist.get(sym)
-            if not isinstance(sdf, pd.DataFrame) or sdf.empty:
-                continue
-            if "Close" not in sdf.columns or "Volume" not in sdf.columns:
-                continue
-            close = sdf["Close"].astype(float)
-            vol = sdf["Volume"].astype(float)
-            if len(close) < 20 or len(vol) < 20:
-                continue
-            avg_turnover = float((close.tail(20) * vol.tail(20)).mean())
-            if avg_turnover <= 0:
-                continue
-            ret20 = float((close.iloc[-1] - close.iloc[-20]) / close.iloc[-20]) if close.iloc[-20] > 0 else 0.0
-            rows.append({"symbol": sym, "turnover": avg_turnover, "ret20": ret20})
-        except Exception:
-            continue
-
-    if not rows:
-        return []
-
-    # market-adaptive basket: liquid names + recent momentum
-    ranked = sorted(rows, key=lambda r: (r["turnover"], r["ret20"]), reverse=True)
-    out = [r["symbol"] for r in ranked[:target]]
-    append_log("INFO", "UNIV", f"Candidates auto-discovered from market: {len(out)}")
-    return out
+def _load_nifty100_from_repo() -> List[str]:
+    path = os.path.join(os.getcwd(), "data", "nifty100.txt")
+    syms = _symbols_from_candidates_file(path)
+    if len(syms) >= 90:
+        return syms
+    return []
 
 
 def load_nifty100_symbols() -> List[str]:
-    # Priority: explicit env CSV -> market auto-discovery -> candidates file -> bundled fallback basket
+    # Always prefer NIFTY100 broad pool. Env/file override allowed only if broad enough.
+    repo_syms = _load_nifty100_from_repo()
+    base = repo_syms if repo_syms else _normalize_symbols(NIFTY100_SYMBOLS)
+
     env_csv = str(getattr(CFG, "CANDIDATE_SYMBOLS", "") or "").strip()
     if env_csv:
-        syms = _normalize_symbols(env_csv.split(","))
-        append_log("INFO", "UNIV", f"Candidates loaded from env: {len(syms)}")
-        return syms
+        env_syms = _normalize_symbols(env_csv.split(","))
+        if len(env_syms) >= 50:
+            append_log("INFO", "UNIV", f"Candidates loaded from env: {len(env_syms)}")
+            return env_syms
+        append_log("WARN", "UNIV", f"Ignoring narrow env candidates ({len(env_syms)}); using NIFTY100")
 
     file_path = str(getattr(CFG, "CANDIDATES_PATH", "") or "").strip()
-
-    if bool(getattr(CFG, "AUTO_CANDIDATE_DISCOVERY", True)):
-        discovered = _discover_market_candidates()
-        if discovered:
-            _persist_candidates(file_path, discovered)
-            return discovered
-
     file_syms = _symbols_from_candidates_file(file_path)
-    if file_syms:
+    if len(file_syms) >= 50:
         append_log("INFO", "UNIV", f"Candidates loaded from file: {len(file_syms)} ({file_path})")
         return file_syms
+    if file_syms:
+        append_log("WARN", "UNIV", f"Ignoring narrow file candidates ({len(file_syms)}); using NIFTY100")
 
-    syms = _normalize_symbols(NIFTY100_SYMBOLS)
-    append_log("INFO", "UNIV", f"Candidates loaded from fallback list: {len(syms)}")
-    return syms
+    append_log("INFO", "UNIV", f"Candidates loaded: {len(base)}")
+    return base
 
 
 def _download(symbols: List[str], period="6mo", interval="1d") -> pd.DataFrame:
@@ -222,7 +159,6 @@ def _stock_metrics(sym: str, sdf: pd.DataFrame, nifty_20d_return: float) -> dict
         avg_vol_20 = float(vol.tail(20).mean())
         vol_today = float(vol.iloc[-1])
 
-        # Liquidity + momentum gate
         if avg_vol_20 <= 1_000_000 or price <= 100:
             return None
         if not (price > ema20 and vol_today > 1.5 * avg_vol_20):
@@ -274,13 +210,29 @@ def _sector_rotation_scores(rows: List[dict]) -> Dict[str, float]:
     return sector_scores
 
 
-def build_dynamic_universe(target_size: int = None) -> List[str]:
+def build_dynamic_universe_details(target_size: int = None) -> dict:
     target_size = int(target_size or getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20))
-    candidates = load_nifty100_symbols()
+    candidates_all = load_nifty100_symbols()
+    excluded = set(load_excluded())
+    candidates = [s for s in candidates_all if s not in excluded]
+
+    append_log("INFO", "UNIV", f"Excluded symbols: {len(excluded)}")
+    append_log("INFO", "UNIV", f"To scan: {len(candidates)}")
+
     hist = _download_cached(candidates)
     if hist.empty:
         append_log("WARN", "UNIV", "dynamic universe fetch failed")
-        return []
+        return {
+            "candidates_loaded": len(candidates_all),
+            "excluded": len(excluded),
+            "to_scan": len(candidates),
+            "scored": 0,
+            "errors": 0,
+            "selected": [],
+            "sector_leaders": [],
+            "top_ranked": [],
+            "write_path": "",
+        }
 
     nifty = _download_nifty_cached(period="3mo", interval="1d")
     nifty_close = nifty["Close"].astype(float) if isinstance(nifty, pd.DataFrame) and "Close" in nifty.columns and not nifty.empty else pd.Series(dtype=float)
@@ -290,21 +242,34 @@ def build_dynamic_universe(target_size: int = None) -> List[str]:
         c1 = float(nifty_close.iloc[-1])
         nifty_20d_return = ((c1 - c0) / c0) if c0 > 0 else 0.0
 
-    rows = []
+    rows, errors = [], 0
+    lvl0 = set(hist.columns.get_level_values(0)) if isinstance(hist.columns, pd.MultiIndex) else set()
     for sym in candidates:
         tk = f"{sym}.NS"
         try:
-            if tk not in hist.columns.get_level_values(0):
+            if tk not in lvl0:
                 continue
             met = _stock_metrics(sym, hist[tk], nifty_20d_return)
             if met:
                 rows.append(met)
         except Exception:
+            errors += 1
             continue
 
     append_log("INFO", "UNIV", f"Stocks scored: {len(rows)}")
+    append_log("INFO", "UNIV", f"Errors: {errors}")
     if not rows:
-        return []
+        return {
+            "candidates_loaded": len(candidates_all),
+            "excluded": len(excluded),
+            "to_scan": len(candidates),
+            "scored": 0,
+            "errors": errors,
+            "selected": [],
+            "sector_leaders": [],
+            "top_ranked": [],
+            "write_path": "",
+        }
 
     sector_scores = _sector_rotation_scores(rows)
 
@@ -331,17 +296,29 @@ def build_dynamic_universe(target_size: int = None) -> List[str]:
         if len(selected) >= target_size:
             break
 
-    append_log("INFO", "UNIV", "top movers selected")
-    for r in selected[:10]:
+    append_log("INFO", "UNIV", "Top ranked stocks:")
+    for r in rows[:10]:
         append_log("INFO", "UNIV", f"{r['symbol']} score={r['final_score']:.3f}")
 
     syms = [r["symbol"] for r in selected]
-    if len(syms) < 10:
-        append_log("WARN", "UNIV", f"Selected universe too small ({len(syms)}), fallback required")
-        return []
+    live_path = save_universe(syms, getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(os.getcwd(), "data", "universe_live.txt"))) if syms else ""
+    append_log("INFO", "UNIV", f"Selected universe size: {len(syms)}")
 
-    append_log("INFO", "UNIV", f"dynamic universe built size={len(syms)}")
-    return syms
+    return {
+        "candidates_loaded": len(candidates_all),
+        "excluded": len(excluded),
+        "to_scan": len(candidates),
+        "scored": len(rows),
+        "errors": errors,
+        "selected": syms,
+        "sector_leaders": sorted(sector_scores.items(), key=lambda x: x[1], reverse=True)[:5],
+        "top_ranked": rows[:10],
+        "write_path": live_path,
+    }
+
+
+def build_dynamic_universe(target_size: int = None) -> List[str]:
+    return list(build_dynamic_universe_details(target_size=target_size).get("selected") or [])
 
 
 def save_universe(symbols: List[str], path: str = None) -> str:
