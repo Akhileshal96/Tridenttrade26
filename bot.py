@@ -285,7 +285,10 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     # ===== Owner user management =====
-    if cmd_word == "/addtrader" and _is_owner(sender):
+    if cmd_word == "/addtrader":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
         uid = cmd_arg
         if uid.isdigit():
             newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=True)
@@ -294,7 +297,10 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("Usage: /addtrader 123456789")
         return True
 
-    if cmd_word == "/removetrader" and _is_owner(sender):
+    if cmd_word == "/removetrader":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
         uid = cmd_arg
         if uid.isdigit():
             newv = _update_id_list_env("TRADER_USER_IDS", int(uid), add=False)
@@ -303,7 +309,10 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("Usage: /removetrader 123456789")
         return True
 
-    if cmd_word == "/addviewer" and _is_owner(sender):
+    if cmd_word == "/addviewer":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
         uid = cmd_arg
         if uid.isdigit():
             newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=True)
@@ -312,7 +321,10 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("Usage: /addviewer 123456789")
         return True
 
-    if cmd_word == "/removeviewer" and _is_owner(sender):
+    if cmd_word == "/removeviewer":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
         uid = cmd_arg
         if uid.isdigit():
             newv = _update_id_list_env("VIEWER_USER_IDS", int(uid), add=False)

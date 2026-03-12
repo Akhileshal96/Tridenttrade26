@@ -1,12 +1,9 @@
 import os
 from datetime import datetime
 
-import pandas as pd
-import yfinance as yf
-
 import config as CFG
 from log_store import append_log
-from universe_builder import build_dynamic_universe_details, save_universe
+from universe_builder import build_dynamic_universe, save_universe
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
 LOG_DIR = os.path.join(os.getcwd(), "logs")
