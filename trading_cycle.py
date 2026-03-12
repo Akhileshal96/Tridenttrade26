@@ -11,7 +11,6 @@ from instrument_store import token_for_symbol
 from log_store import append_log
 from strategy_engine import generate_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
-from research_engine import get_trading_universe
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
 from universe_builder import is_market_regime_ok, SECTOR_MAP
@@ -717,10 +716,48 @@ def _compute_symbol_momentum_pct(sym: str) -> float:
 
 def _active_trade_universe() -> list:
     dyn = [str(x).strip().upper() for x in (STATE.get("research_universe") or []) if str(x).strip()]
-    if 10 <= len(dyn) <= 25:
-        return dyn
-    return []
+    excl = set(load_excluded())
+    out, seen = [], set()
+    for s in dyn:
+        if s in excl or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    try:
+        limit = int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20) or 20)
+        if limit > 0:
+            out = out[:limit]
+    except Exception:
+        pass
+    return out
 
+
+def _load_research_universe_from_file() -> list:
+    live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
+    syms = _load_universe_from(live_path)
+    excl = set(load_excluded())
+    syms = [s for s in syms if s not in excl]
+    if syms:
+        STATE["research_universe"] = list(syms)
+        append_log("INFO", "UNIV", f"Loaded from file size={len(syms)}")
+    return syms
+
+
+def _resolve_trade_universe() -> list:
+    dyn = _active_trade_universe()
+    if dyn:
+        append_log("INFO", "UNIV", f"Research universe loaded size={len(dyn)}")
+        return dyn
+
+    from_file = _load_research_universe_from_file()
+    if from_file:
+        append_log("INFO", "UNIV", f"Research universe loaded size={len(from_file)}")
+        return from_file
+
+    fallback = load_universe_trading()
+    if fallback:
+        append_log("INFO", "UNIV", f"Fallback static size={len(fallback)}")
+    return fallback
 
 
 def _passes_sector_entry_filter(sym: str) -> bool:
@@ -743,9 +780,16 @@ def _maybe_enter_from_signal(sig):
     sym = sig["symbol"].strip().upper()
     append_log("INFO", "SCAN", f"Scanning {sym}")
 
+    if _skip_cooldown_active(sym):
+        append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
+        return False
+
     # 1) Market regime check (requested before buy gating)
     if not is_market_regime_ok():
         append_log("WARN", "MARKET", "market weak skipping entry")
+        weak_cd = int(getattr(CFG, "MARKET_WEAK_COOLDOWN_MIN", 3) or 3)
+        weak_cd = max(2, min(5, weak_cd))
+        _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
         return False
 
     # 2) Universe membership check against active dynamic universe (if available)
@@ -996,15 +1040,7 @@ def tick():
     if not _within_entry_window():
         return
 
-    research_universe = _active_trade_universe()
-    if research_universe:
-        universe = research_universe
-        append_log("INFO", "UNIV", f"Using research universe size={len(universe)}")
-    else:
-        rstate = get_trading_universe(force=False)
-        universe = list(rstate.get("trading_universe") or []) or load_universe_trading()
-        if universe:
-            append_log("INFO", "UNIV", f"Research universe unavailable -> fallback static size={len(universe)}")
+    universe = _resolve_trade_universe()
     if not universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
@@ -1020,6 +1056,8 @@ def tick():
 
 def run_loop_forever():
     append_log("INFO", "LOOP", "Trading loop started")
+    if not _active_trade_universe():
+        _load_research_universe_from_file()
     while True:
         try:
             tick()
