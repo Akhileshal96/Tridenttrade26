@@ -141,40 +141,54 @@ def _download(symbols: List[str], period="1y", interval="1d") -> pd.DataFrame:
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
 
 
-def _stock_metrics(sym: str, sdf: pd.DataFrame, nifty_20d_return: float) -> dict | None:
+def _is_valid_num(x) -> bool:
     try:
-        close = sdf["Close"].astype(float)
-        high = sdf["High"].astype(float)
-        low = sdf["Low"].astype(float)
-        vol = sdf["Volume"].astype(float)
-        if len(close) < 220 or len(vol) < 25:
-            return None
+        v = float(x)
+        return pd.notna(v) and v == v and abs(v) != float("inf")
+    except Exception:
+        return False
 
-        price = float(close.iloc[-1])
+
+def _stock_metrics(sym: str, sdf: pd.DataFrame, nifty_20d_return: float | None) -> tuple[dict | None, str | None]:
+    try:
+        close = sdf["Close"].astype(float) if "Close" in sdf else pd.Series(dtype=float)
+        high = sdf["High"].astype(float) if "High" in sdf else pd.Series(dtype=float)
+        low = sdf["Low"].astype(float) if "Low" in sdf else pd.Series(dtype=float)
+        vol = sdf["Volume"].astype(float) if "Volume" in sdf else pd.Series(dtype=float)
+
+        if len(close) < 200:
+            return None, "insufficient candles"
+
+        price = float(close.iloc[-1]) if len(close) else 0.0
         prev_close = float(close.iloc[-2]) if len(close) > 1 else price
-        close_20d = float(close.iloc[-21]) if len(close) > 20 else prev_close
-        sma200 = float(close.rolling(200).mean().iloc[-1])
-        ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+        close_20d = float(close.iloc[-21]) if len(close) > 20 else None
 
-        avg_vol_20 = float(vol.tail(20).mean())
-        vol_today = float(vol.iloc[-1])
+        sma200_s = close.rolling(200).mean() if len(close) >= 200 else pd.Series(dtype=float)
+        sma200 = float(sma200_s.iloc[-1]) if len(sma200_s) else None
+        trend_score = (price / sma200) if (_is_valid_num(price) and _is_valid_num(sma200) and float(sma200) > 0) else None
+        if trend_score is None:
+            return None, "missing SMA200"
 
-        if avg_vol_20 <= 1_000_000 or price <= 100:
-            return None
-        if not (price > ema20 and vol_today > 1.5 * avg_vol_20):
-            return None
+        rs_score = None
+        if close_20d is not None and _is_valid_num(close_20d) and float(close_20d) > 0 and _is_valid_num(nifty_20d_return):
+            stock_return_20d = (price - close_20d) / close_20d
+            rs_score = stock_return_20d - float(nifty_20d_return)
 
-        trend_score = (price / sma200) if sma200 > 0 else 0.0
-        stock_return_20d = ((price - close_20d) / close_20d) if close_20d > 0 else 0.0
-        rs_score = stock_return_20d - nifty_20d_return
-        volume_score = (vol_today / avg_vol_20) if avg_vol_20 > 0 else 0.0
+        volume_score = None
+        if len(vol) >= 20:
+            avg_vol_20 = float(vol.tail(20).mean())
+            vol_today = float(vol.iloc[-1])
+            if _is_valid_num(avg_vol_20) and avg_vol_20 > 0 and _is_valid_num(vol_today):
+                volume_score = (vol_today / avg_vol_20)
 
-        tr = (high - low).abs()
-        atr14 = float(tr.tail(14).mean()) if len(tr) >= 14 else float(tr.mean())
-        atr_score = (atr14 / price) if price > 0 else 0.0
+        atr_score = None
+        if len(high) >= 14 and len(low) >= 14 and _is_valid_num(price) and price > 0:
+            tr = (high - low).abs()
+            atr14 = float(tr.tail(14).mean()) if len(tr) >= 14 else float(tr.mean())
+            if _is_valid_num(atr14):
+                atr_score = atr14 / price
 
-        pct_change = ((price - prev_close) / prev_close) if prev_close > 0 else 0.0
-
+        pct_change = ((price - prev_close) / prev_close) if (_is_valid_num(prev_close) and prev_close > 0) else 0.0
         sector = SECTOR_MAP.get(sym, "OTHER")
         return {
             "symbol": sym,
@@ -185,9 +199,9 @@ def _stock_metrics(sym: str, sdf: pd.DataFrame, nifty_20d_return: float) -> dict
             "rs_score": rs_score,
             "volume_score": volume_score,
             "atr_score": atr_score,
-        }
+        }, None
     except Exception:
-        return None
+        return None, "insufficient candles"
 
 
 def _sector_rotation_scores(rows: List[dict]) -> Dict[str, float]:
@@ -195,11 +209,15 @@ def _sector_rotation_scores(rows: List[dict]) -> Dict[str, float]:
     for r in rows:
         bucket[r["sector"]].append(r)
 
+    def _avg_valid(arr, key):
+        vals = [float(x.get(key)) for x in arr if _is_valid_num(x.get(key))]
+        return float(sum(vals) / len(vals)) if vals else 0.0
+
     sector_scores = {}
     for sec, arr in bucket.items():
-        avg_rs = float(sum(x["rs_score"] for x in arr) / max(1, len(arr)))
-        avg_vol = float(sum(x["volume_score"] for x in arr) / max(1, len(arr)))
-        avg_5d = float(sum(x["pct_change"] for x in arr) / max(1, len(arr)))
+        avg_rs = _avg_valid(arr, "rs_score")
+        avg_vol = _avg_valid(arr, "volume_score")
+        avg_5d = _avg_valid(arr, "pct_change")
         sector_scores[sec] = (0.45 * avg_5d) + (0.35 * avg_rs) + (0.20 * avg_vol)
 
     ranked = sorted(sector_scores.items(), key=lambda x: x[1], reverse=True)
@@ -219,6 +237,16 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
     append_log("INFO", "UNIV", f"Excluded symbols: {len(excluded)}")
     append_log("INFO", "UNIV", f"To scan: {len(candidates)}")
 
+    skip_counts = {
+        "insufficient candles": 0,
+        "missing SMA200": 0,
+        "missing ATR": 0,
+        "missing relative strength": 0,
+        "missing volume expansion": 0,
+        "missing sector score": 0,
+        "invalid final score": 0,
+    }
+
     lookback_period = str(getattr(CFG, "UNIVERSE_LOOKBACK_PERIOD", "1y") or "1y")
     hist = _download_cached(candidates, period=lookback_period, interval="1d")
     if hist.empty:
@@ -233,15 +261,17 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
             "sector_leaders": [],
             "top_ranked": [],
             "write_path": "",
+            "scoring_mode": "TREND_ONLY",
         }
 
     nifty = _download_nifty_cached(period="3mo", interval="1d")
     nifty_close = nifty["Close"].astype(float) if isinstance(nifty, pd.DataFrame) and "Close" in nifty.columns and not nifty.empty else pd.Series(dtype=float)
-    nifty_20d_return = 0.0
+    nifty_20d_return = None
     if len(nifty_close) > 20:
         c0 = float(nifty_close.iloc[-21])
         c1 = float(nifty_close.iloc[-1])
-        nifty_20d_return = ((c1 - c0) / c0) if c0 > 0 else 0.0
+        if _is_valid_num(c0) and c0 > 0 and _is_valid_num(c1):
+            nifty_20d_return = ((c1 - c0) / c0)
 
     rows, errors = [], 0
     lvl0 = set(hist.columns.get_level_values(0)) if isinstance(hist.columns, pd.MultiIndex) else set()
@@ -249,17 +279,26 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
         tk = f"{sym}.NS"
         try:
             if tk not in lvl0:
+                skip_counts["insufficient candles"] += 1
                 continue
-            met = _stock_metrics(sym, hist[tk], nifty_20d_return)
+            met, reason = _stock_metrics(sym, hist[tk], nifty_20d_return)
             if met:
                 rows.append(met)
+            elif reason in skip_counts:
+                skip_counts[reason] += 1
         except Exception:
             errors += 1
+            skip_counts["insufficient candles"] += 1
             continue
 
-    append_log("INFO", "UNIV", f"Stocks scored: {len(rows)}")
-    append_log("INFO", "UNIV", f"Errors: {errors}")
     if not rows:
+        append_log("INFO", "UNIV", f"Stocks scored: 0")
+        append_log("INFO", "UNIV", f"Errors: {errors}")
+        append_log("INFO", "UNIV", f"Skipped due to candles: {skip_counts['insufficient candles']}")
+        append_log("INFO", "UNIV", f"Skipped due to ATR missing: {skip_counts['missing ATR']}")
+        append_log("INFO", "UNIV", f"Skipped due to RS missing: {skip_counts['missing relative strength']}")
+        append_log("INFO", "UNIV", f"Skipped due to invalid final score: {skip_counts['invalid final score']}")
+        append_log("INFO", "UNIV", "Scoring mode used: TREND_ONLY")
         return {
             "candidates_loaded": len(candidates_all),
             "excluded": len(excluded),
@@ -270,25 +309,81 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
             "sector_leaders": [],
             "top_ranked": [],
             "write_path": "",
+            "scoring_mode": "TREND_ONLY",
         }
 
     sector_scores = _sector_rotation_scores(rows)
 
+    scored_rows = []
+    mode_counts = {"FULL": 0, "PARTIAL": 0, "TREND_ONLY": 0}
     for r in rows:
-        sec_score = float(sector_scores.get(r["sector"], 0.0))
-        r["final_score"] = (
-            0.35 * r["trend_score"] +
-            0.25 * r["rs_score"] +
-            0.20 * r["volume_score"] +
-            0.10 * r["atr_score"] +
-            0.10 * sec_score
-        )
+        trend = r.get("trend_score")
+        rs = r.get("rs_score")
+        vol = r.get("volume_score")
+        atr = r.get("atr_score")
+        sec_score = sector_scores.get(r.get("sector"))
 
-    rows.sort(key=lambda x: x["final_score"], reverse=True)
+        final = None
+        mode = None
+        full_ok = all(_is_valid_num(x) for x in [trend, rs, vol, atr, sec_score])
+        if full_ok:
+            mode = "FULL"
+            final = 0.35 * float(trend) + 0.25 * float(rs) + 0.20 * float(vol) + 0.10 * float(atr) + 0.10 * float(sec_score)
+        elif _is_valid_num(trend) and _is_valid_num(rs):
+            mode = "PARTIAL"
+            final = 0.65 * float(trend) + 0.35 * float(rs)
+            if not _is_valid_num(vol):
+                skip_counts["missing volume expansion"] += 1
+            if not _is_valid_num(atr):
+                skip_counts["missing ATR"] += 1
+            if not _is_valid_num(sec_score):
+                skip_counts["missing sector score"] += 1
+        elif _is_valid_num(trend):
+            mode = "TREND_ONLY"
+            final = float(trend)
+            if not _is_valid_num(rs):
+                skip_counts["missing relative strength"] += 1
+        else:
+            skip_counts["missing SMA200"] += 1
+            continue
+
+        if not _is_valid_num(final):
+            skip_counts["invalid final score"] += 1
+            continue
+
+        r2 = dict(r)
+        r2["final_score"] = float(final)
+        r2["score_mode"] = mode
+        mode_counts[mode] += 1
+        scored_rows.append(r2)
+
+    # If too few scored names, fallback to trend-only ranking from available trend metrics.
+    scoring_mode_used = "FULL"
+    if len(scored_rows) < 10:
+        trend_rows = []
+        for r in rows:
+            tr = r.get("trend_score")
+            if _is_valid_num(tr):
+                x = dict(r)
+                x["final_score"] = float(tr)
+                x["score_mode"] = "TREND_ONLY"
+                trend_rows.append(x)
+        if trend_rows:
+            scored_rows = trend_rows
+            mode_counts = {"FULL": 0, "PARTIAL": 0, "TREND_ONLY": len(scored_rows)}
+            scoring_mode_used = "TREND_ONLY"
+
+    if scoring_mode_used != "TREND_ONLY":
+        if mode_counts["PARTIAL"] > 0 or mode_counts["TREND_ONLY"] > 0:
+            scoring_mode_used = "PARTIAL"
+        else:
+            scoring_mode_used = "FULL"
+
+    scored_rows.sort(key=lambda x: x["final_score"], reverse=True)
 
     sector_count = defaultdict(int)
     selected = []
-    for r in rows:
+    for r in scored_rows:
         sec = r["sector"]
         if sector_count[sec] >= int(getattr(CFG, "SECTOR_MAX_IN_UNIVERSE", 3)):
             continue
@@ -297,8 +392,16 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
         if len(selected) >= target_size:
             break
 
+    append_log("INFO", "UNIV", f"Stocks scored: {len(scored_rows)}")
+    append_log("INFO", "UNIV", f"Errors: {errors}")
+    append_log("INFO", "UNIV", f"Skipped due to candles: {skip_counts['insufficient candles']}")
+    append_log("INFO", "UNIV", f"Skipped due to ATR missing: {skip_counts['missing ATR']}")
+    append_log("INFO", "UNIV", f"Skipped due to RS missing: {skip_counts['missing relative strength']}")
+    append_log("INFO", "UNIV", f"Skipped due to invalid final score: {skip_counts['invalid final score']}")
+    append_log("INFO", "UNIV", f"Scoring mode used: {scoring_mode_used}")
+
     append_log("INFO", "UNIV", "Top ranked stocks:")
-    for r in rows[:10]:
+    for r in scored_rows[:10]:
         append_log("INFO", "UNIV", f"{r['symbol']} score={r['final_score']:.3f}")
 
     syms = [r["symbol"] for r in selected]
@@ -309,12 +412,13 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
         "candidates_loaded": len(candidates_all),
         "excluded": len(excluded),
         "to_scan": len(candidates),
-        "scored": len(rows),
+        "scored": len(scored_rows),
         "errors": errors,
         "selected": syms,
         "sector_leaders": sorted(sector_scores.items(), key=lambda x: x[1], reverse=True)[:5],
-        "top_ranked": rows[:10],
+        "top_ranked": scored_rows[:10],
         "write_path": live_path,
+        "scoring_mode": scoring_mode_used,
     }
 
 
@@ -335,15 +439,29 @@ def save_universe(symbols: List[str], path: str = None) -> str:
 
 
 def is_market_regime_ok() -> bool:
-    snap = get_market_regime_snapshot()
-    regime = snap.get("regime", "WEAK")
-    append_log(
-        "INFO",
-        "MARKET",
-        f"regime={regime} nifty={snap.get('nifty',0):.2f} ema20={snap.get('ema20',0):.2f} "
-        f"change1d={snap.get('chg1',0):.2f}% change5d={snap.get('chg5',0):.2f}%",
-    )
+    snap = get_market_regime_snapshot() or {}
+    regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    valid = bool(snap.get("valid_data", False))
+
+    if not valid:
+        append_log("WARN", "MARKET", "NIFTY data unavailable")
+        if regime == "UNKNOWN":
+            append_log("WARN", "MARKET", "regime=UNKNOWN using fallback")
+    else:
+        append_log(
+            "INFO",
+            "MARKET",
+            f"regime={regime} nifty={snap.get('nifty',0):.2f} ema20={snap.get('ema20',0):.2f} "
+            f"change1d={snap.get('chg1',0):.2f}% change5d={snap.get('chg5',0):.2f}%",
+        )
+
     if regime == "WEAK":
         append_log("WARN", "MARKET", "regime=WEAK → skipping new BUY entries")
         return False
+
+    if regime == "UNKNOWN":
+        block_on_unknown = bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False))
+        if block_on_unknown:
+            append_log("WARN", "MARKET", "regime=UNKNOWN and BLOCK_ON_UNKNOWN_MARKET_REGIME=true → skipping new BUY entries")
+            return False
     return True

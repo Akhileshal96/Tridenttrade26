@@ -1,23 +1,34 @@
 import pandas as pd
 import yfinance as yf
 
+_LAST_VALID_SNAPSHOT = None
+
+
+def _is_valid_close(close: pd.Series) -> bool:
+    if close is None or close.empty:
+        return False
+    close = close.dropna().astype(float)
+    if close.empty:
+        return False
+    if float(close.iloc[-1]) <= 0:
+        return False
+    return len(close) >= 25
+
 
 def detect_market_regime(df: pd.DataFrame) -> str:
     """Classify market regime from OHLCV DataFrame (expects columns Close/High/Low)."""
     if df is None or df.empty or "Close" not in df.columns:
-        return "WEAK"
+        return "UNKNOWN"
 
     close = df["Close"].astype(float)
-    if len(close) < 25:
-        return "WEAK"
+    if not _is_valid_close(close):
+        return "UNKNOWN"
 
     nifty = float(close.iloc[-1])
     prev1 = float(close.iloc[-2]) if len(close) > 1 else nifty
-    prev5 = float(close.iloc[-6]) if len(close) > 5 else prev1
     ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
 
     chg1 = ((nifty - prev1) / prev1) * 100.0 if prev1 > 0 else 0.0
-    chg5 = ((nifty - prev5) / prev5) * 100.0 if prev5 > 0 else 0.0
 
     regime = "SIDEWAYS"
     if nifty > ema20 and chg1 > -0.3:
@@ -38,12 +49,24 @@ def detect_market_regime(df: pd.DataFrame) -> str:
 
 
 def get_market_regime_snapshot() -> dict:
+    global _LAST_VALID_SNAPSHOT
     try:
         df = yf.download("^NSEI", period="3mo", interval="1d", auto_adjust=False, progress=False, threads=False)
         if df is None or df.empty or "Close" not in df.columns:
-            return {"regime": "WEAK", "nifty": 0.0, "ema20": 0.0, "chg1": 0.0, "chg5": 0.0, "atr_pct": 0.0}
+            if isinstance(_LAST_VALID_SNAPSHOT, dict):
+                snap = dict(_LAST_VALID_SNAPSHOT)
+                snap.update({"valid_data": False, "fallback_used": True, "fallback_source": "last_valid"})
+                return snap
+            return {"regime": "UNKNOWN", "valid_data": False, "fallback_used": True, "fallback_source": "none"}
 
         close = df["Close"].astype(float)
+        if not _is_valid_close(close):
+            if isinstance(_LAST_VALID_SNAPSHOT, dict):
+                snap = dict(_LAST_VALID_SNAPSHOT)
+                snap.update({"valid_data": False, "fallback_used": True, "fallback_source": "last_valid"})
+                return snap
+            return {"regime": "UNKNOWN", "valid_data": False, "fallback_used": True, "fallback_source": "none"}
+
         nifty = float(close.iloc[-1])
         prev1 = float(close.iloc[-2]) if len(close) > 1 else nifty
         prev5 = float(close.iloc[-6]) if len(close) > 5 else prev1
@@ -59,13 +82,22 @@ def get_market_regime_snapshot() -> dict:
             atr_pct = float(tr_pct.tail(14).mean()) if not tr_pct.empty else 0.0
 
         regime = detect_market_regime(df)
-        return {
+        snap = {
             "regime": regime,
             "nifty": nifty,
             "ema20": ema20,
             "chg1": chg1,
             "chg5": chg5,
             "atr_pct": atr_pct,
+            "valid_data": True,
+            "fallback_used": False,
+            "fallback_source": "none",
         }
+        _LAST_VALID_SNAPSHOT = dict(snap)
+        return snap
     except Exception:
-        return {"regime": "WEAK", "nifty": 0.0, "ema20": 0.0, "chg1": 0.0, "chg5": 0.0, "atr_pct": 0.0}
+        if isinstance(_LAST_VALID_SNAPSHOT, dict):
+            snap = dict(_LAST_VALID_SNAPSHOT)
+            snap.update({"valid_data": False, "fallback_used": True, "fallback_source": "last_valid"})
+            return snap
+        return {"regime": "UNKNOWN", "valid_data": False, "fallback_used": True, "fallback_source": "none"}
