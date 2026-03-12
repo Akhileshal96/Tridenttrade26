@@ -202,7 +202,7 @@ async def night_scheduler():
             already = str(CYCLE.STATE.get("last_night_research_day") or "") == run_key
             if (now >= target) and (not already):
                 append_log("INFO", "NIGHT", "Auto scheduler triggering nightly maintenance")
-                await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE)
+                await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE, True)
 
             await asyncio.sleep(60)
         except Exception as e:
@@ -434,7 +434,7 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             return True
         await event.reply("🌙 Running night research now...")
         try:
-            await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE)
+            await asyncio.to_thread(run_nightly_maintenance, CYCLE.STATE, True)
             await event.reply("✅ Night research done.")
         except Exception as e:
             await event.reply("❌ Night research failed: %s" % e)

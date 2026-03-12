@@ -62,3 +62,25 @@ def test_run_nightly_maintenance_skips_when_marker_already_set(monkeypatch, tmp_
 
     assert called["night_job"] == 0
     assert state.get("last_night_research_day") == run_key
+
+
+def test_run_nightly_maintenance_force_bypasses_marker(monkeypatch, tmp_path):
+    marker = tmp_path / "night_research_day.txt"
+    run_key = datetime.now(ns.IST).strftime("%Y-%m-%d")
+    marker.write_text(run_key, encoding="utf-8")
+    monkeypatch.setattr(ns, "RUN_MARKER", str(marker))
+
+    called = {"night_job": 0}
+
+    def fake_night_job():
+        called["night_job"] += 1
+        return {"selected": ["ABC"], "details": {}}
+
+    monkeypatch.setattr(ns.night_research, "run_night_job", fake_night_job)
+    monkeypatch.setattr(ns.research_engine, "apply_night_universe", lambda *a, **k: {})
+    monkeypatch.setattr(ns, "save_universe", lambda *a, **k: "x")
+
+    state = {}
+    ns.run_nightly_maintenance(state, force=True)
+
+    assert called["night_job"] == 1

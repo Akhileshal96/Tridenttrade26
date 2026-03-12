@@ -31,19 +31,19 @@ def _write_marker_day(day: str) -> None:
         append_log("WARN", "NIGHT", f"marker write failed: {e}")
 
 
-def run_nightly_maintenance(state=None):
+def run_nightly_maintenance(state=None, force: bool = False):
     """Run nightly research once per day, then build/store research universe."""
     now = datetime.now(IST)
     run_key = now.strftime("%Y-%m-%d")
 
     marker_day = _read_marker_day()
-    if marker_day == run_key:
+    if (not force) and marker_day == run_key:
         append_log("INFO", "UNIV", "Night research already completed today (marker); skipping rebuild")
         if isinstance(state, dict):
             state["last_night_research_day"] = run_key
         return
 
-    if isinstance(state, dict) and state.get("last_night_research_day") == run_key:
+    if (not force) and isinstance(state, dict) and state.get("last_night_research_day") == run_key:
         append_log("INFO", "UNIV", "Night research already completed today; skipping rebuild")
         _write_marker_day(run_key)
         return
