@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from datetime import datetime, timedelta
@@ -13,7 +14,9 @@ from strategy_engine import generate_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
-from universe_builder import is_market_regime_ok, SECTOR_MAP
+import research_engine as RE
+from universe_builder import SECTOR_MAP
+from market_regime import get_market_regime_snapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -774,6 +777,113 @@ def _passes_sector_entry_filter(sym: str) -> bool:
         return False
     return True
 
+
+
+def get_research_rank(symbol: str, research_universe: list) -> int:
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return -1
+    for idx, s in enumerate(research_universe or [], start=1):
+        if str(s).strip().upper() == sym:
+            return idx
+    return -1
+
+
+def is_top_ranked_symbol(symbol: str, research_universe: list, top_n: int) -> bool:
+    rank = get_research_rank(symbol, research_universe)
+    return rank > 0 and rank <= max(1, int(top_n or 1))
+
+
+def _research_score_for_symbol(symbol: str):
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+
+    reports = []
+    if isinstance(STATE.get("research_last_report"), dict):
+        reports.append(STATE.get("research_last_report"))
+    if isinstance(getattr(RE, "research_state", {}).get("last_report"), dict):
+        reports.append(getattr(RE, "research_state", {}).get("last_report"))
+
+    for report in reports:
+        for r in list(report.get("top_ranked") or []):
+            if str((r or {}).get("symbol") or "").strip().upper() == sym:
+                try:
+                    return float(r.get("final_score"))
+                except Exception:
+                    continue
+    return None
+
+
+def _weak_market_quality_metrics(symbol: str) -> dict:
+    try:
+        token = token_for_symbol(symbol)
+        kite = get_kite()
+        data = kite.historical_data(token, pd.Timestamp.now() - pd.Timedelta(days=45), pd.Timestamp.now(), "day")
+        df = pd.DataFrame(data)
+        if df.empty or "close" not in df.columns or "volume" not in df.columns or len(df) < 22:
+            return {"ok": False, "reason": "weak_momentum"}
+
+        close = df["close"].astype(float)
+        vol = df["volume"].astype(float)
+        sma20 = close.rolling(20).mean()
+        if len(sma20.dropna()) < 2:
+            return {"ok": False, "reason": "weak_momentum"}
+
+        price = float(close.iloc[-1])
+        sma_curr = float(sma20.iloc[-1])
+        sma_prev = float(sma20.iloc[-2])
+        vol_score = float(vol.iloc[-1]) / float(vol.tail(20).mean()) if float(vol.tail(20).mean()) > 0 else 0.0
+
+        price_gt_sma = price > sma_curr
+        slope_pos = sma_curr > sma_prev
+        vol_ok = vol_score > float(getattr(CFG, "WEAK_MARKET_MIN_VOLUME_SCORE", 1.2) or 1.2)
+
+        if not (price_gt_sma and slope_pos and vol_ok):
+            return {
+                "ok": False,
+                "reason": "weak_momentum",
+                "price_gt_sma20": price_gt_sma,
+                "sma20_slope_pos": slope_pos,
+                "volume_score": vol_score,
+            }
+
+        return {
+            "ok": True,
+            "price_gt_sma20": price_gt_sma,
+            "sma20_slope_pos": slope_pos,
+            "volume_score": vol_score,
+        }
+    except Exception:
+        return {"ok": False, "reason": "weak_momentum"}
+
+
+def passes_weak_market_filter(symbol: str, research_universe: list) -> tuple[bool, str, dict]:
+    sym = (symbol or "").strip().upper()
+    top_n = int(getattr(CFG, "WEAK_MARKET_TOP_N", 5) or 5)
+    if not is_top_ranked_symbol(sym, research_universe, top_n):
+        return False, "not_top_ranked", {}
+
+    score = _research_score_for_symbol(sym)
+    min_score = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 1.10) or 1.10)
+    if score is None or score < min_score:
+        return False, "score_too_low", {"score": score}
+
+    q = _weak_market_quality_metrics(sym)
+    if not q.get("ok"):
+        return False, str(q.get("reason") or "weak_momentum"), q
+
+    meta = {"rank": get_research_rank(sym, research_universe), "score": score}
+    meta.update(q)
+    return True, "allowed", meta
+
+
+def is_market_entry_allowed(symbol: str, regime: str, research_universe: list) -> tuple[bool, str, dict]:
+    rg = str(regime or "UNKNOWN").upper()
+    if rg == "WEAK":
+        return passes_weak_market_filter(symbol, research_universe)
+    return True, "allowed", {}
+
 def _maybe_enter_from_signal(sig):
     if not sig:
         return False
@@ -785,11 +895,21 @@ def _maybe_enter_from_signal(sig):
         return False
 
     # 1) Market regime check (requested before buy gating)
-    if not is_market_regime_ok():
-        append_log("WARN", "MARKET", "market weak skipping entry")
-        weak_cd = int(getattr(CFG, "MARKET_WEAK_COOLDOWN_MIN", 3) or 3)
-        weak_cd = max(2, min(5, weak_cd))
-        _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
+    snap = get_market_regime_snapshot() or {}
+    regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    research_universe = _active_trade_universe()
+    allowed, reason, meta = is_market_entry_allowed(sym, regime, research_universe)
+
+    if regime == "WEAK":
+        if not allowed:
+            append_log("WARN", "MARKET", f"regime=WEAK → blocked {sym} reason={reason}")
+            weak_cd = int(getattr(CFG, "MARKET_WEAK_COOLDOWN_MIN", 3) or 3)
+            weak_cd = max(2, min(5, weak_cd))
+            _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
+            return False
+        append_log("INFO", "MARKET", f"regime=WEAK → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
+    elif regime == "UNKNOWN" and bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False)):
+        append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
 
     # 2) Universe membership check against active dynamic universe (if available)
@@ -812,6 +932,13 @@ def _maybe_enter_from_signal(sig):
     momentum_positive = momentum_pct > momentum_threshold
 
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
+    if regime == "WEAK":
+        mult = float(getattr(CFG, "WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
+        if mult > 0:
+            reduced = max(1, int(math.floor(qty * mult)))
+            if reduced < qty:
+                qty = reduced
+                append_log("INFO", "MARKET", f"regime=WEAK → size reduced multiplier={mult}")
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
         _apply_skip_cooldown(sym, "qty_zero")

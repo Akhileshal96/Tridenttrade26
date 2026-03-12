@@ -44,7 +44,8 @@ def test_market_weak_applies_symbol_skip_cooldown(monkeypatch):
     tc.STATE["skip_cooldown"] = {}
     tc.STATE["positions"] = {}
 
-    monkeypatch.setattr(tc, "is_market_regime_ok", lambda: False)
+    monkeypatch.setattr(tc, "get_market_regime_snapshot", lambda: {"regime": "WEAK"})
+    monkeypatch.setattr(tc, "is_market_entry_allowed", lambda *a, **k: (False, "weak_momentum", {}))
     monkeypatch.setattr(tc, "_passes_sector_entry_filter", lambda _sym: True)
     monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
 
