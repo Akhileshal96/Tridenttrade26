@@ -69,6 +69,19 @@ def run_night_research():
     return research_state
 
 
+def apply_night_universe(universe, details=None):
+    uni = list(universe or [])
+    now = datetime.now(IST)
+    research_state["research_universe"] = list(uni)
+    research_state["trading_universe"] = list(uni[: int(getattr(CFG, "UNIVERSE_SIZE", 20))])
+    research_state["last_night_research"] = now
+    research_state["last_refresh"] = now
+    research_state["last_heavy_refresh"] = now
+    if isinstance(details, dict):
+        research_state["last_report"] = dict(details)
+    return research_state
+
+
 def refresh_top_movers_from_research():
     target = int(getattr(CFG, "UNIVERSE_SIZE", 20))
     base = list(research_state.get("research_universe") or [])

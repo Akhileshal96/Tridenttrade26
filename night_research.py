@@ -3,6 +3,7 @@ from datetime import datetime
 
 import config as CFG
 from log_store import append_log
+import universe_builder as UB
 from universe_builder import build_dynamic_universe, save_universe
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -39,8 +40,12 @@ def read_night_log_tail(n=120):
 
 def run_night_job():
     append_log("INFO", "NIGHT", "Night research started")
-    selected = list(build_dynamic_universe(target_size=int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20))) or [])
-    details = {"selected": selected}
+    details_fn = getattr(UB, "build_dynamic_universe_details", None)
+    if callable(details_fn):
+        details = details_fn(target_size=int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20))) or {}
+    else:
+        selected = list(build_dynamic_universe(target_size=int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 20))) or [])
+        details = {"selected": selected}
 
     candidates_loaded = int(details.get("candidates_loaded") or 0)
     excluded = int(details.get("excluded") or 0)
@@ -90,3 +95,8 @@ def run_night_job():
         f.write("\n".join(report) + "\n")
 
     append_log("INFO", "NIGHT", f"Universe live updated: {len(selected)} | scored={scored} | errors={errors}")
+    return {
+        "selected": list(selected),
+        "details": dict(details),
+        "write_path": write_path,
+    }

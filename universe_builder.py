@@ -54,7 +54,7 @@ def _cache_put(key, data):
     _DOWNLOAD_CACHE[key] = (time.time(), data)
 
 
-def _download_cached(symbols: List[str], period="6mo", interval="1d") -> pd.DataFrame:
+def _download_cached(symbols: List[str], period="1y", interval="1d") -> pd.DataFrame:
     key = (tuple(symbols), str(period), str(interval))
     cached = _cache_get(key)
     if isinstance(cached, pd.DataFrame):
@@ -135,7 +135,7 @@ def load_nifty100_symbols() -> List[str]:
     return base
 
 
-def _download(symbols: List[str], period="6mo", interval="1d") -> pd.DataFrame:
+def _download(symbols: List[str], period="1y", interval="1d") -> pd.DataFrame:
     tickers = [f"{s}.NS" for s in symbols]
     df = yf.download(tickers=tickers, period=period, interval=interval, auto_adjust=False, progress=False, threads=False, group_by="ticker")
     return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
@@ -219,7 +219,8 @@ def build_dynamic_universe_details(target_size: int = None) -> dict:
     append_log("INFO", "UNIV", f"Excluded symbols: {len(excluded)}")
     append_log("INFO", "UNIV", f"To scan: {len(candidates)}")
 
-    hist = _download_cached(candidates)
+    lookback_period = str(getattr(CFG, "UNIVERSE_LOOKBACK_PERIOD", "1y") or "1y")
+    hist = _download_cached(candidates, period=lookback_period, interval="1d")
     if hist.empty:
         append_log("WARN", "UNIV", "dynamic universe fetch failed")
         return {

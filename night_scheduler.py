@@ -49,11 +49,12 @@ def run_nightly_maintenance(state=None):
         return
 
     append_log("INFO", "UNIV", "=== NIGHT RESEARCH START ===")
-    night_research.run_night_job()
-    rstate = research_engine.run_night_research()
-    universe = list(rstate.get("research_universe") or [])
+    result = night_research.run_night_job() or {}
+    details = result.get("details") if isinstance(result, dict) else {}
+    universe = list((result.get("selected") if isinstance(result, dict) else None) or [])
 
     if universe:
+        research_engine.apply_night_universe(universe, details=details if isinstance(details, dict) else None)
         if isinstance(state, dict):
             state["research_universe"] = list(universe)
             state["last_night_research_day"] = run_key
