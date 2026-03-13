@@ -837,7 +837,7 @@ def _weak_market_quality_metrics(symbol: str) -> dict:
 
         price_gt_sma = price > sma_curr
         slope_pos = sma_curr > sma_prev
-        vol_ok = vol_score > float(getattr(CFG, "WEAK_MARKET_MIN_VOLUME_SCORE", 1.2) or 1.2)
+        vol_ok = vol_score > float(getattr(CFG, "WEAK_MARKET_MIN_VOLUME_SCORE", 1.0) or 1.0)
 
         if not (price_gt_sma and slope_pos and vol_ok):
             return {
@@ -860,12 +860,12 @@ def _weak_market_quality_metrics(symbol: str) -> dict:
 
 def passes_weak_market_filter(symbol: str, research_universe: list) -> tuple[bool, str, dict]:
     sym = (symbol or "").strip().upper()
-    top_n = int(getattr(CFG, "WEAK_MARKET_TOP_N", 5) or 5)
+    top_n = int(getattr(CFG, "WEAK_MARKET_TOP_N", 10) or 10)
     if not is_top_ranked_symbol(sym, research_universe, top_n):
         return False, "not_top_ranked", {}
 
     score = _research_score_for_symbol(sym)
-    min_score = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 1.10) or 1.10)
+    min_score = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 0.90) or 0.90)
     if score is None or score < min_score:
         return False, "score_too_low", {"score": score}
 
@@ -1183,6 +1183,13 @@ def tick():
 
 def run_loop_forever():
     append_log("INFO", "LOOP", "Trading loop started")
+    append_log(
+        "INFO",
+        "MARKET",
+        f"weak mode config top_n={int(getattr(CFG, 'WEAK_MARKET_TOP_N', 10) or 10)} "
+        f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.90) or 0.90):.2f} "
+        f"size_multiplier={float(getattr(CFG, 'WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+    )
     if not _active_trade_universe():
         _load_research_universe_from_file()
     while True:
