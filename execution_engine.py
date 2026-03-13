@@ -6,8 +6,13 @@ def check_time_exit(force_exit_check) -> bool:
     return bool(force_exit_check())
 
 
-def check_stoploss(pnl_pct: float) -> bool:
-    return pnl_pct <= -abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0)))
+def check_stoploss(pnl_pct: float, side: str = "LONG") -> bool:
+    s = str(side or "LONG").upper()
+    if s == "SHORT":
+        lim = abs(float(getattr(CFG, "SHORT_STOPLOSS_PCT", 1.2)))
+    else:
+        lim = abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0)))
+    return pnl_pct <= -lim
 
 
 def check_trailing(trade: dict, pnl_inr: float, trigger_inr: float) -> bool:
@@ -53,8 +58,13 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             close_position(sym, reason="TIME", ltp_override=ltp)
             continue
 
-        pnl_pct = ((ltp - entry) / entry) * 100.0
-        pnl_inr = (ltp - entry) * qty
+        side = str(trade.get("side") or "LONG").upper()
+        if side == "SHORT":
+            pnl_pct = ((entry - ltp) / entry) * 100.0
+            pnl_inr = (entry - ltp) * qty
+        else:
+            pnl_pct = ((ltp - entry) / entry) * 100.0
+            pnl_inr = (ltp - entry) * qty
         position_value = entry * qty
 
         peak_pnl_inr = float(trade.get("peak_pnl_inr") or 0.0)
@@ -78,7 +88,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
 
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
 
-        if check_stoploss(pnl_pct):
+        if check_stoploss(pnl_pct, side=side):
             close_position(sym, reason="SL", ltp_override=ltp)
             continue
 

@@ -101,3 +101,16 @@ def get_market_regime_snapshot() -> dict:
             snap.update({"valid_data": False, "fallback_used": True, "fallback_source": "last_valid"})
             return snap
         return {"regime": "UNKNOWN", "valid_data": False, "fallback_used": True, "fallback_source": "none"}
+
+
+def get_regime_entry_mode(regime: str) -> str:
+    rg = str(regime or "UNKNOWN").upper()
+    if rg == "WEAK":
+        return "SHORT_PRIMARY"
+    if rg == "TRENDING":
+        return "LONG"
+    if rg == "SIDEWAYS":
+        return "SELECTIVE_LONG"
+    if rg == "VOLATILE":
+        return "RISK_REDUCED"
+    return "UNKNOWN"

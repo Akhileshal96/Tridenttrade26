@@ -136,3 +136,53 @@ def test_reentry_block_allows_positive_momentum(monkeypatch):
 
     assert tc._can_open_new_trade("ABC", 100.0, qty=1, momentum_positive=False) is False
     assert tc._can_open_new_trade("ABC", 100.0, qty=1, momentum_positive=True) is True
+
+
+def test_close_position_short_live_uses_buy_to_cover(monkeypatch):
+    reset_state()
+    tc.STATE["positions"]["ABC"] = {"entry_price": 100.0, "quantity": 2, "side": "SHORT"}
+
+    monkeypatch.setattr(tc, "is_live_enabled", lambda: True)
+    monkeypatch.setattr(tc, "get_kite", lambda: object())
+    monkeypatch.setattr(tc, "_ltp", lambda kite, sym: 95.0)
+    monkeypatch.setattr(tc, "_set_cooldown", lambda: None)
+    monkeypatch.setattr(tc, "append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tc, "_notify", lambda *args, **kwargs: None)
+
+    placed = {"side": None}
+
+    def fake_place(kite, sym, side, qty):
+        placed["side"] = side
+        return "OID1"
+
+    monkeypatch.setattr(tc, "_place_live_order", fake_place)
+
+    ok = tc._close_position("ABC", reason="TEST", ltp_override=95.0)
+
+    assert ok is True
+    assert placed["side"] == "BUY"
+
+
+def test_run_loop_forever_logs_current_weak_config(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(tc, "_active_trade_universe", lambda: [])
+    monkeypatch.setattr(tc, "_load_research_universe_from_file", lambda: [])
+
+    hit = {"n": 0}
+
+    def fake_tick():
+        hit["n"] += 1
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(tc, "tick", fake_tick)
+
+    try:
+        tc.run_loop_forever()
+    except KeyboardInterrupt:
+        pass
+
+    market_logs = [x for x in calls if len(x) >= 3 and x[1] == "MARKET"]
+    assert market_logs
+    assert "min_score=0.75" in market_logs[0][2]

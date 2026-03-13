@@ -22,6 +22,7 @@ def _base_patch(monkeypatch):
     monkeypatch.setattr(tc, "_set_cooldown", lambda: None)
     monkeypatch.setattr(tc, "_notify", lambda *a, **k: None)
     monkeypatch.setattr(tc, "_sector_for_symbol", lambda _sym: "OTHER")
+    monkeypatch.setattr(tc, "confirm_long_htf", lambda _sym: True)
 
 
 

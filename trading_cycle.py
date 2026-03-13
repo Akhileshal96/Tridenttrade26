@@ -16,7 +16,7 @@ from execution_engine import monitor_positions as ee_monitor_positions, process_
 import risk_engine as RISK
 import research_engine as RE
 from universe_builder import SECTOR_MAP
-from market_regime import get_market_regime_snapshot
+from market_regime import get_market_regime_snapshot, get_regime_entry_mode
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -48,6 +48,9 @@ STATE = {
     "day_peak_pnl": 0.0,
     "sector_map_cache": None,
     "research_universe": [],
+    "fallback_universe": [],
+    "no_entry_cycles": 0,
+    "fallback_mode_active": False,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -592,13 +595,13 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     if not trade:
         return False
     entry, qty = _trade_entry_qty(trade)
+    side = str(trade.get("side") or "LONG").upper()
     ltp = float(ltp_override) if ltp_override is not None else None
 
     if not is_live_enabled():
         if ltp is None:
             ltp = entry
-        pnl = (ltp - entry) * qty
-        pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+        pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
         STATE["today_pnl"] += pnl
         RISK.update_loss_streak(STATE, pnl)
         RISK.check_day_drawdown_guard(STATE)
@@ -606,13 +609,15 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
         append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
-        _notify(f"🔴 SELL PAPER\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
+        exit_side = "BUY" if side == "SHORT" else "SELL"
+        _notify(f"🔴 {exit_side} PAPER\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
         return True
 
     kite = get_kite()
     oid = None
+    close_side = "BUY" if side == "SHORT" else "SELL"
     for _ in range(3):
-        oid = _place_live_order(kite, sym, "SELL", qty)
+        oid = _place_live_order(kite, sym, close_side, qty)
         if oid:
             break
         time.sleep(0.6)
@@ -621,8 +626,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     if ltp is None:
         ltp = _ltp(kite, sym) or entry
 
-    pnl = (ltp - entry) * qty
-    pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+    pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
     STATE["today_pnl"] += pnl
     RISK.update_loss_streak(STATE, pnl)
     RISK.check_day_drawdown_guard(STATE)
@@ -630,7 +634,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
     append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
-    _notify(f"🔴 SELL LIVE\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
+    _notify(f"🔴 {close_side} LIVE\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
     return True
 
 
@@ -747,6 +751,8 @@ def _load_research_universe_from_file() -> list:
 
 
 def _resolve_trade_universe() -> list:
+    if isinstance(getattr(RE, "research_state", {}).get("last_report"), dict):
+        STATE["research_last_report"] = dict(getattr(RE, "research_state", {}).get("last_report"))
     dyn = _active_trade_universe()
     if dyn:
         append_log("INFO", "UNIV", f"Research universe loaded size={len(dyn)}")
@@ -884,6 +890,245 @@ def is_market_entry_allowed(symbol: str, regime: str, research_universe: list) -
         return passes_weak_market_filter(symbol, research_universe)
     return True, "allowed", {}
 
+
+
+def _open_short_positions_count() -> int:
+    c = 0
+    for _s, tr in _positions().items():
+        if str((tr or {}).get("side") or "LONG").upper() == "SHORT":
+            c += 1
+    return c
+
+
+def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[float, float]:
+    side_u = str(side or "LONG").upper()
+    if side_u == "SHORT":
+        pnl_inr = (entry - ltp) * qty
+        pnl_pct = ((entry - ltp) / entry * 100.0) if entry > 0 else 0.0
+    else:
+        pnl_inr = (ltp - entry) * qty
+        pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+    return float(pnl_inr), float(pnl_pct)
+
+
+def _htf_fetch(symbol: str, days: int = 20) -> pd.DataFrame:
+    try:
+        token = token_for_symbol(symbol)
+        data = get_kite().historical_data(
+            token,
+            pd.Timestamp.now() - pd.Timedelta(days=days),
+            pd.Timestamp.now(),
+            str(getattr(CFG, "HTF_INTERVAL", "15m") or "15m"),
+        )
+        return pd.DataFrame(data)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    c = close.astype(float)
+    delta = c.diff()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta.clip(upper=0.0))
+    avg_gain = gain.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0.0, float("nan"))
+    return (100.0 - (100.0 / (1.0 + rs))).astype(float).fillna(50.0)
+
+
+def _nifty_reference_return(days: int = 45, bars: int = 20) -> float | None:
+    ref_sym = str(getattr(CFG, "STABILITY_SYMBOL", "NIFTYBEES") or "NIFTYBEES").strip().upper()
+    ref_df = _htf_fetch(ref_sym, days=days)
+    if ref_df.empty or "close" not in ref_df.columns:
+        return None
+    ref_close = ref_df["close"].astype(float)
+    if len(ref_close) <= bars:
+        return None
+    base = float(ref_close.iloc[-(bars + 1)])
+    last = float(ref_close.iloc[-1])
+    if base <= 0:
+        return None
+    return ((last - base) / base) * 100.0
+
+
+def confirm_long_htf(symbol: str) -> bool:
+    if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
+        return True
+    df = _htf_fetch(symbol)
+    if df.empty or "close" not in df.columns:
+        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
+        return False
+    ma_n = int(getattr(CFG, "HTF_CONFIRM_MA", 20) or 20)
+    close = df["close"].astype(float)
+    ma = close.rolling(ma_n).mean().dropna()
+    if len(ma) < 2:
+        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
+        return False
+    ok = float(close.iloc[-1]) > float(ma.iloc[-1]) and float(ma.iloc[-1]) > float(ma.iloc[-2])
+    if ok and bool(getattr(CFG, "HTF_CONFIRM_RSI", False)):
+        rsi = _calc_rsi(close)
+        min_rsi = float(getattr(CFG, "HTF_LONG_MIN_RSI", 52.0) or 52.0)
+        ok = float(rsi.iloc[-1]) >= min_rsi
+    if not ok:
+        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
+    return ok
+
+
+def confirm_short_htf(symbol: str) -> bool:
+    if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
+        return True
+    df = _htf_fetch(symbol)
+    if df.empty or "close" not in df.columns:
+        append_log("INFO", "CONFIRM", f"SHORT blocked {symbol} reason=htf_not_bearish")
+        return False
+    ma_n = int(getattr(CFG, "HTF_CONFIRM_MA", 20) or 20)
+    close = df["close"].astype(float)
+    ma = close.rolling(ma_n).mean().dropna()
+    if len(ma) < 2:
+        append_log("INFO", "CONFIRM", f"SHORT blocked {symbol} reason=htf_not_bearish")
+        return False
+    ok = float(close.iloc[-1]) < float(ma.iloc[-1]) and float(ma.iloc[-1]) < float(ma.iloc[-2])
+    if ok and bool(getattr(CFG, "HTF_CONFIRM_RSI", False)):
+        rsi = _calc_rsi(close)
+        max_rsi = float(getattr(CFG, "HTF_SHORT_MAX_RSI", 48.0) or 48.0)
+        ok = float(rsi.iloc[-1]) <= max_rsi
+    if not ok:
+        append_log("INFO", "CONFIRM", f"SHORT blocked {symbol} reason=htf_not_bearish")
+    return ok
+
+
+def _quality_metrics(symbol: str) -> dict:
+    df = _htf_fetch(symbol, days=45)
+    if df.empty or "close" not in df.columns or "volume" not in df.columns or len(df) < 22:
+        return {"ok": False}
+    close = df["close"].astype(float)
+    vol = df["volume"].astype(float)
+    sma20 = close.rolling(20).mean().dropna()
+    if len(sma20) < 2:
+        return {"ok": False}
+    vol_score = float(vol.iloc[-1]) / float(vol.tail(20).mean()) if float(vol.tail(20).mean()) > 0 else 0.0
+    ret_20d = ((float(close.iloc[-1]) - float(close.iloc[-21])) / float(close.iloc[-21]) * 100.0) if float(close.iloc[-21]) > 0 else 0.0
+    nifty_20d = _nifty_reference_return(days=45, bars=20)
+    rs_vs_nifty = (ret_20d - nifty_20d) if nifty_20d is not None else None
+    return {
+        "ok": True,
+        "price": float(close.iloc[-1]),
+        "sma20": float(sma20.iloc[-1]),
+        "sma20_prev": float(sma20.iloc[-2]),
+        "vol_score": vol_score,
+        "ret_20d": ret_20d,
+        "rs_vs_nifty": rs_vs_nifty,
+    }
+
+
+def generate_short_signal(symbol: str):
+    sym = (symbol or "").strip().upper()
+    q = _quality_metrics(sym)
+    if not q.get("ok"):
+        return None
+    price = float(q["price"])
+    sma20 = float(q["sma20"])
+    sma20_prev = float(q["sma20_prev"])
+    vol_score = float(q["vol_score"])
+    rs_vs_nifty = q.get("rs_vs_nifty")
+    max_rs_short = float(getattr(CFG, "SHORT_RS_MAX_VS_NIFTY", -0.2) or -0.2)
+    rs_ok = (rs_vs_nifty is None) or (float(rs_vs_nifty) <= max_rs_short)
+    if not (price < sma20 and sma20 < sma20_prev and vol_score > float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2) and rs_ok):
+        return None
+    return {"symbol": sym, "entry": price, "side": "SHORT", "volume_score": vol_score, "rs_vs_nifty": rs_vs_nifty}
+
+
+def _fallback_candidate_score(symbol: str) -> float | None:
+    q = _quality_metrics(symbol)
+    if not q.get("ok"):
+        return None
+    price = float(q.get("price") or 0.0)
+    sma20 = float(q.get("sma20") or 0.0)
+    sma20_prev = float(q.get("sma20_prev") or 0.0)
+    if price <= 0 or sma20 <= 0:
+        return None
+    trend_component = 1.0 if (price > sma20 and sma20 >= sma20_prev) else 0.0
+    dist_component = max(-3.0, min(3.0, ((price - sma20) / sma20) * 100.0)) / 3.0
+    vol_component = max(0.0, min(2.0, float(q.get("vol_score") or 0.0))) / 2.0
+    rs = q.get("rs_vs_nifty")
+    rs_component = 0.0 if rs is None else max(-3.0, min(3.0, float(rs))) / 3.0
+    return (0.40 * trend_component) + (0.25 * dist_component) + (0.20 * vol_component) + (0.15 * rs_component)
+
+
+def build_fallback_universe() -> list:
+    base = load_universe_live() or load_universe_trading() or []
+    top_n = int(getattr(CFG, "FALLBACK_TOP_N", 10) or 10)
+    scored = []
+    for sym in list(dict.fromkeys([s for s in base if s])):
+        score = _fallback_candidate_score(sym)
+        if score is not None:
+            scored.append((sym, float(score)))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    out = [s for s, _ in scored[: max(10, top_n)]]
+    if not out:
+        out = list(dict.fromkeys([s for s in base if s]))[: max(10, top_n)]
+    STATE["fallback_universe"] = out
+    append_log("INFO", "UNIV", f"fallback universe built size={len(out)} scored={len(scored)}")
+    return out
+
+
+def _maybe_enter_short_from_signal(sig):
+    if not sig:
+        return False
+    sym = str(sig.get("symbol") or "").strip().upper()
+    entry = float(sig.get("entry") or 0.0)
+    if not sym or entry <= 0:
+        return False
+
+    if _open_short_positions_count() >= int(getattr(CFG, "MAX_SHORT_POSITIONS", 2) or 2):
+        append_log("WARN", "RISK", "max short positions reached")
+        return False
+
+    if not confirm_short_htf(sym):
+        return False
+
+    qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
+    mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
+    qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
+    if qty <= 0:
+        append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
+        return False
+
+    if not _can_open_new_trade(sym, entry, qty, momentum_positive=False):
+        return False
+
+    mode = "LIVE" if is_live_enabled() else "PAPER"
+    oid = None
+    booked_entry = entry
+    if is_live_enabled():
+        kite = get_kite()
+        now_price = _ltp(kite, sym)
+        if now_price is not None:
+            booked_entry = now_price
+        oid = _place_live_order(kite, sym, "SELL", qty)
+        if not oid:
+            append_log("INFO", "SKIP", f"{sym} reason=order_failed")
+            return False
+
+    _positions()[sym] = {
+        "side": "SHORT",
+        "entry": booked_entry,
+        "entry_price": booked_entry,
+        "qty": qty,
+        "quantity": qty,
+        "peak": 0.0,
+        "peak_pct": 0.0,
+        "peak_pnl_inr": 0.0,
+        "trail_active": False,
+        "trailing_active": False,
+        "order_id": oid,
+        "sector": _sector_for_symbol(sym),
+    }
+    _set_cooldown()
+    append_log("INFO", "ENTRY", f"SHORT {sym} qty={qty} entry={booked_entry:.2f}")
+    _notify(f"🟠 SHORT {mode}\nSymbol: {sym}\nQuantity: {qty}\nEntry: {booked_entry:.2f}")
+    return True
+
 def _maybe_enter_from_signal(sig):
     if not sig:
         return False
@@ -910,6 +1155,9 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "MARKET", f"regime=WEAK → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
     elif regime == "UNKNOWN" and bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False)):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
+        return False
+
+    if not confirm_long_htf(sym):
         return False
 
     # 2) Universe membership check against active dynamic universe (if available)
@@ -1021,7 +1269,8 @@ def _current_open_pnl_breakdown():
         ltp = _ltp(kite, sym) if kite else entry
         if ltp is None:
             ltp = entry
-        pnl = (ltp - entry) * qty
+        side = str((tr or {}).get("side") or "LONG").upper()
+        pnl, _ = _calc_pnl(entry, ltp, qty, side=side)
         if pnl >= 0:
             profit_inr += pnl
         else:
@@ -1082,7 +1331,8 @@ def get_trailing_status_text():
             ltp = entry
 
         value = entry * qty
-        pnl_inr = (ltp - entry) * qty
+        side = str((t or {}).get("side") or "LONG").upper()
+        pnl_inr, _ = _calc_pnl(entry, ltp, qty, side=side)
         peak_pnl_inr = float(t.get("peak_pnl_inr") or 0.0)
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
 
@@ -1106,6 +1356,34 @@ def get_trailing_status_text():
 
     return "📉 Trailing Status\n\n" + "\n".join(rows)
 
+
+
+
+def _scan_short_entries(universe: list, max_new: int) -> int:
+    opened = 0
+    held = set(_positions().keys())
+    for sym in [s for s in universe if s not in held][: max_new * 2]:
+        if opened >= max_new:
+            break
+        append_log("INFO", "SCAN", f"Scanning {sym}")
+        sig = generate_short_signal(sym)
+        if not sig:
+            continue
+        if _maybe_enter_short_from_signal(sig):
+            opened += 1
+    return opened
+
+
+def _scan_long_entries(universe: list, max_new: int) -> int:
+    before = _open_positions_count()
+    ee_process_entries(
+        universe,
+        _positions(),
+        signal_fn=generate_signal,
+        try_enter_fn=_maybe_enter_from_signal,
+        max_new=max_new,
+    )
+    return max(0, _open_positions_count() - before)
 
 def tick():
     _ensure_day_key()
@@ -1172,13 +1450,53 @@ def tick():
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
 
-    ee_process_entries(
-        universe,
-        _positions(),
-        signal_fn=generate_signal,
-        try_enter_fn=_maybe_enter_from_signal,
-        max_new=int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5")),
-    )
+    max_new = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
+    snap = get_market_regime_snapshot() or {}
+    regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    append_log("INFO", "MARKET", f"regime={regime} entry_mode={get_regime_entry_mode(regime)}")
+
+    opened = 0
+    if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+        append_log("INFO", "MARKET", "regime=WEAK → activating SHORT mode")
+        opened += _scan_short_entries(universe, max_new=max_new)
+        if opened < max_new:
+            opened += _scan_long_entries(universe, max_new=max_new - opened)
+    else:
+        opened += _scan_long_entries(universe, max_new=max_new)
+
+    if opened <= 0:
+        STATE["no_entry_cycles"] = int(STATE.get("no_entry_cycles") or 0) + 1
+    else:
+        STATE["no_entry_cycles"] = 0
+        STATE["fallback_mode_active"] = False
+
+    trigger_n = int(getattr(CFG, "FALLBACK_TRIGGER_CYCLES", 5) or 5)
+    if STATE.get("no_entry_cycles", 0) >= trigger_n:
+        if not STATE.get("fallback_mode_active"):
+            append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
+            build_fallback_universe()
+            STATE["fallback_mode_active"] = True
+
+    if STATE.get("fallback_mode_active"):
+        fb = list(STATE.get("fallback_universe") or [])
+        if fb:
+            append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)}")
+            fb_opened = 0
+            if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                fb_opened += _scan_short_entries(fb, max_new=max_new)
+                if fb_opened < max_new:
+                    fb_opened += _scan_long_entries(fb, max_new=max_new - fb_opened)
+            else:
+                fb_opened += _scan_long_entries(fb, max_new=max_new)
+            if fb_opened > 0:
+                append_log(
+                    "INFO",
+                    "UNIV",
+                    f"fallback entries allowed opened={fb_opened} size_multiplier={float(getattr(CFG, 'FALLBACK_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+                )
+                STATE["no_entry_cycles"] = 0
+            else:
+                append_log("INFO", "UNIV", "fallback scanned but no eligible entries this cycle")
 
 
 def run_loop_forever():
@@ -1187,7 +1505,7 @@ def run_loop_forever():
         "INFO",
         "MARKET",
         f"weak mode config top_n={int(getattr(CFG, 'WEAK_MARKET_TOP_N', 10) or 10)} "
-        f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.90) or 0.90):.2f} "
+        f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
         f"size_multiplier={float(getattr(CFG, 'WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
     if not _active_trade_universe():
