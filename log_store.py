@@ -71,3 +71,11 @@ def tail_today():
             if ln.startswith(today):
                 out.append(ln)
     return "".join(out) if out else "(no logs for today yet)"
+
+
+def clear_logs():
+    """Truncate main log file safely."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write("")
+    return LOG_FILE
