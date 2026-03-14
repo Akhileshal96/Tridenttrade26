@@ -14,6 +14,7 @@ EMERGENCY_TITLE = "🚨 **EMERGENCY PANEL**"
 ADMIN_TITLE = "⚙ **ADMIN PANEL**"
 HELP_TITLE = "🆘 **HELP PANEL**"
 LOGS_TITLE = "📜 **LOGS PANEL**"
+ANALYTICS_TITLE = "📊 **ANALYTICS PANEL**"
 
 
 def _main_buttons():
@@ -21,6 +22,7 @@ def _main_buttons():
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
+        [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
@@ -87,6 +89,15 @@ def _help_buttons():
     ]
 
 
+def _analytics_buttons():
+    return [
+        [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
+        [Button.inline("🏆 Best Strategy", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst Strategy", b"cp:cmd:worststrategy")],
+        [Button.inline("📈 Regime Report", b"cp:cmd:regimereport"), Button.inline("🏭 Sector Report", b"cp:cmd:sectorreport")],
+        [Button.inline("⬅ Back", b"cp:panel:main")],
+    ]
+
+
 _PANEL_MAP = {
     "main": (MAIN_TITLE, _main_buttons),
     "research": (RESEARCH_TITLE, _research_buttons),
@@ -96,6 +107,7 @@ _PANEL_MAP = {
     "admin": (ADMIN_TITLE, _admin_buttons),
     "help": (HELP_TITLE, _help_buttons),
     "logs": (LOGS_TITLE, _logs_buttons),
+    "analytics": (ANALYTICS_TITLE, _analytics_buttons),
 }
 
 _HINTS = {
