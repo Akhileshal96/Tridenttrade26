@@ -17,6 +17,7 @@ import risk_engine as RISK
 import research_engine as RE
 from universe_builder import SECTOR_MAP
 from market_regime import get_market_regime_snapshot, get_regime_entry_mode
+import strategy_analytics as SA
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -51,6 +52,7 @@ STATE = {
     "fallback_universe": [],
     "no_entry_cycles": 0,
     "fallback_mode_active": False,
+    "eod_report_sent_date": "",
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -569,13 +571,22 @@ def _set_cooldown():
     STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
 
 
-def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3):
+def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3, side: str = "BUY", signal_price: float | None = None, strategy_tag: str = ""):
     sym = (sym or "").strip().upper()
     if not sym:
         return
     until = datetime.now(IST) + timedelta(minutes=max(1, int(minutes)))
     STATE.setdefault("skip_cooldown", {})[sym] = until
     append_log("INFO", "SKIP", f"{sym} cooldown applied reason={reason}")
+    try:
+        rec = {"symbol": sym, "side": str(side or "BUY").upper(), "reason": reason}
+        if strategy_tag:
+            rec["strategy_tag"] = strategy_tag
+        if signal_price is not None:
+            rec["signal_price"] = float(signal_price)
+        SA.record_skipped_signal(rec)
+    except Exception:
+        pass
 
 
 def _skip_cooldown_active(sym: str) -> bool:
@@ -609,6 +620,23 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
         append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+        SA.record_trade_exit(
+            {
+                "entry_time": trade.get("entry_time") or "",
+                "symbol": sym,
+                "side": side,
+                "qty": qty,
+                "entry": entry,
+                "exit": ltp,
+                "pnl_inr": pnl,
+                "pnl_pct": pnl_pct,
+                "reason": reason,
+                "strategy_tag": trade.get("strategy_tag") or "unknown",
+                "market_regime": trade.get("market_regime") or "UNKNOWN",
+                "universe_source": trade.get("universe_source") or "primary",
+                "sector": trade.get("sector") or _sector_for_symbol(sym),
+            }
+        )
         exit_side = "BUY" if side == "SHORT" else "SELL"
         _notify(f"🔴 {exit_side} PAPER\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
         return True
@@ -634,8 +662,31 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
     append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+    SA.record_trade_exit(
+        {
+            "entry_time": trade.get("entry_time") or "",
+            "symbol": sym,
+            "side": side,
+            "qty": qty,
+            "entry": entry,
+            "exit": ltp,
+            "pnl_inr": pnl,
+            "pnl_pct": pnl_pct,
+            "reason": reason,
+            "strategy_tag": trade.get("strategy_tag") or "unknown",
+            "market_regime": trade.get("market_regime") or "UNKNOWN",
+            "universe_source": trade.get("universe_source") or "primary",
+            "sector": trade.get("sector") or _sector_for_symbol(sym),
+        }
+    )
     _notify(f"🔴 {close_side} LIVE\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
     return True
+
+
+def _apply_strategy_allocation(qty: int, strategy_tag: str) -> int:
+    mult, reason = SA.get_strategy_multiplier(strategy_tag, CFG)
+    append_log("INFO", "ALLOC", f"strategy={strategy_tag} multiplier={mult:.2f} reason={reason}")
+    return max(0, int(math.floor(max(0, qty) * max(0.0, mult))))
 
 
 def _close_all_open_trades(reason="MANUAL"):
@@ -1090,8 +1141,17 @@ def _maybe_enter_short_from_signal(sig):
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
     qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
+    strategy_tag = "short_breakdown"
+    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
+        strategy_tag = "mtf_confirmed_short"
+    qty = _apply_strategy_allocation(qty, strategy_tag)
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
+        try:
+            SA.record_skipped_signal({"symbol": sym, "side": "SHORT", "reason": "qty_zero", "strategy_tag": strategy_tag, "signal_price": entry})
+        except Exception:
+            pass
+        _apply_skip_cooldown(sym, "qty_zero")
         return False
 
     if not _can_open_new_trade(sym, entry, qty, momentum_positive=False):
@@ -1111,6 +1171,7 @@ def _maybe_enter_short_from_signal(sig):
             return False
 
     _positions()[sym] = {
+        "symbol": sym,
         "side": "SHORT",
         "entry": booked_entry,
         "entry_price": booked_entry,
@@ -1122,7 +1183,11 @@ def _maybe_enter_short_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
+        "strategy_tag": strategy_tag,
+        "market_regime": str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN"),
+        "universe_source": "primary",
         "sector": _sector_for_symbol(sym),
+        "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     }
     _set_cooldown()
     append_log("INFO", "ENTRY", f"SHORT {sym} qty={qty} entry={booked_entry:.2f}")
@@ -1150,6 +1215,19 @@ def _maybe_enter_from_signal(sig):
             append_log("WARN", "MARKET", f"regime=WEAK → blocked {sym} reason={reason}")
             weak_cd = int(getattr(CFG, "MARKET_WEAK_COOLDOWN_MIN", 3) or 3)
             weak_cd = max(2, min(5, weak_cd))
+            try:
+                SA.record_skipped_signal(
+                    {
+                        "symbol": sym,
+                        "side": "BUY",
+                        "reason": "market_weak",
+                        "strategy_tag": "weak_market_long",
+                        "signal_price": float(sig.get("entry") or 0.0),
+                        "market_regime": regime,
+                    }
+                )
+            except Exception:
+                pass
             _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
             return False
         append_log("INFO", "MARKET", f"regime=WEAK → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
@@ -1180,6 +1258,7 @@ def _maybe_enter_from_signal(sig):
     momentum_positive = momentum_pct > momentum_threshold
 
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
+    strategy_tag = "primary_long"
     if regime == "WEAK":
         mult = float(getattr(CFG, "WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
         if mult > 0:
@@ -1187,8 +1266,16 @@ def _maybe_enter_from_signal(sig):
             if reduced < qty:
                 qty = reduced
                 append_log("INFO", "MARKET", f"regime=WEAK → size reduced multiplier={mult}")
+        strategy_tag = "weak_market_long"
+    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
+        strategy_tag = "mtf_confirmed_long"
+    qty = _apply_strategy_allocation(qty, strategy_tag)
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
+        try:
+            SA.record_skipped_signal({"symbol": sym, "side": "BUY", "reason": "qty_zero", "strategy_tag": strategy_tag, "signal_price": entry, "market_regime": regime})
+        except Exception:
+            pass
         _apply_skip_cooldown(sym, "qty_zero")
         return False
 
@@ -1213,6 +1300,8 @@ def _maybe_enter_from_signal(sig):
             return False
 
     _positions()[sym] = {
+        "symbol": sym,
+        "side": "BUY",
         "entry": booked_entry,
         "entry_price": booked_entry,
         "qty": qty,
@@ -1223,7 +1312,11 @@ def _maybe_enter_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
+        "strategy_tag": strategy_tag,
+        "market_regime": regime,
+        "universe_source": "primary",
         "sector": _sector_for_symbol(sym),
+        "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     }
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
@@ -1287,7 +1380,10 @@ def get_status_text():
     rows = []
     for sym, p in sorted(_positions().items()):
         e, q = _trade_entry_qty(p)
-        rows.append(f"- {sym} qty={q} entry={e:.2f}")
+        rows.append(
+            f"- {sym} {str(p.get('side') or 'BUY').upper()} qty={q} entry={e:.2f} "
+            f"strategy={p.get('strategy_tag','-')} regime={p.get('market_regime','-')}"
+        )
     current_profit, current_loss = _current_open_pnl_breakdown()
     return (
         "📟 Trident Status\n\n"
@@ -1368,10 +1464,30 @@ def _scan_short_entries(universe: list, max_new: int) -> int:
         append_log("INFO", "SCAN", f"Scanning {sym}")
         sig = generate_short_signal(sym)
         if not sig:
+            SA.record_skipped_signal({"symbol": sym, "side": "SHORT", "reason": "no_short_signal", "strategy_tag": "short_breakdown"})
             continue
         if _maybe_enter_short_from_signal(sig):
             opened += 1
     return opened
+
+
+def _maybe_send_eod_report():
+    try:
+        now = datetime.now(IST)
+        hhmm = str(getattr(CFG, "EOD_REPORT_TIME", "15:16") or "15:16")
+        hh, mm = [int(x) for x in hhmm.split(":", 1)]
+        if now.hour < hh or (now.hour == hh and now.minute < mm):
+            return
+        day = now.strftime("%Y-%m-%d")
+        if str(STATE.get("eod_report_sent_date") or "") == day:
+            return
+        if _open_positions_count() > 0:
+            return
+        append_log("INFO", "EOD", "Sending Telegram report")
+        _notify(SA.generate_eod_report_text(STATE))
+        STATE["eod_report_sent_date"] = day
+    except Exception as e:
+        append_log("WARN", "EOD", f"report generation failed: {e}")
 
 
 def _scan_long_entries(universe: list, max_new: int) -> int:
@@ -1497,6 +1613,8 @@ def tick():
                 STATE["no_entry_cycles"] = 0
             else:
                 append_log("INFO", "UNIV", "fallback scanned but no eligible entries this cycle")
+
+    _maybe_send_eod_report()
 
 
 def run_loop_forever():

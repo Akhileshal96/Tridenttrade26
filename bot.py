@@ -16,6 +16,7 @@ from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
 from trade_notifier import notify, notification_worker, setup_loop
 from control_panel import register_control_panel
+import strategy_analytics as SA
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -44,6 +45,11 @@ HELP_TEXT = (
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /trailstatus → trailing lock details\n"
+    "• /strategyreport → strategy analytics summary\n"
+    "• /beststrategy → top strategy by net pnl\n"
+    "• /worststrategy → worst strategy by net pnl\n"
+    "• /regimereport → pnl/win by market regime\n"
+    "• /sectorreport → pnl/win by sector\n"
     "• /logs       → log menu (daily/20/30/all/reset)\n"
     "• /logs20     → last 20 log lines\n"
     "• /logs30     → last 30 log lines\n"
@@ -278,6 +284,28 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
 
     if cmd_word == "/trailstatus":
         await event.reply(CYCLE.get_trailing_status_text())
+        return True
+
+    if cmd_word == "/strategyreport":
+        await event.reply(SA.strategy_report_text())
+        return True
+
+    if cmd_word == "/beststrategy":
+        best, _ = SA.best_worst_strategy()
+        await event.reply(best)
+        return True
+
+    if cmd_word == "/worststrategy":
+        _, worst = SA.best_worst_strategy()
+        await event.reply(worst)
+        return True
+
+    if cmd_word == "/regimereport":
+        await event.reply(SA.regime_report_text())
+        return True
+
+    if cmd_word == "/sectorreport":
+        await event.reply(SA.sector_report_text())
         return True
 
     if cmd_word in ("/addtrader", "/removetrader", "/addviewer", "/removeviewer", "/setslip", "/exclude", "/include", "/token") and not cmd_arg:
