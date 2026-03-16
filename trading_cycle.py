@@ -30,6 +30,14 @@ STATE = {
     "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0)),
     "profit_milestone_hit": False,
     "last_wallet_sync_ts": None,
+    "research_universe": [],
+    "active_universe": [],
+    "active_universe_last_refresh": None,
+    "active_universe_scores": {},
+    "market_regime": "NORMAL",
+    "closed_trades": [],
+    "skipped_signals": [],
+    "eod_report_day": None,
 }
 
 RUNTIME = {
@@ -78,6 +86,9 @@ def _ensure_day_key():
         STATE["today_pnl"] = 0.0
         STATE["open_trades"] = {}
         STATE["profit_milestone_hit"] = False
+        STATE["closed_trades"] = []
+        STATE["skipped_signals"] = []
+        STATE["eod_report_day"] = None
         append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -90,6 +101,9 @@ def manual_reset_day():
     STATE["open_trades"] = {}
     STATE["day_key"] = datetime.now().strftime("%Y-%m-%d")
     STATE["profit_milestone_hit"] = False
+    STATE["closed_trades"] = []
+    STATE["skipped_signals"] = []
+    STATE["eod_report_day"] = None
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -187,6 +201,98 @@ def load_universe_live():
     syms = _load_universe_from(live_path)
     excl = _load_exclusions_set()
     return [s for s in syms if s not in excl]
+
+
+def _record_skip(symbol, reason):
+    STATE.setdefault("skipped_signals", []).append(
+        {
+            "symbol": (symbol or "").strip().upper(),
+            "reason": str(reason),
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
+def _score_symbol_intraday(sym):
+    try:
+        token = token_for_symbol(sym)
+        kite = get_kite()
+        to_dt = pd.Timestamp.now()
+        from_dt = to_dt - pd.Timedelta(days=3)
+        data = kite.historical_data(token, from_dt, to_dt, "15minute")
+        time.sleep(0.2)
+        df = pd.DataFrame(data)
+        if df.empty or not all(c in df.columns for c in ["close", "volume"]):
+            return None
+        if len(df) < 20:
+            return None
+        close = df["close"].astype(float)
+        volume = df["volume"].astype(float)
+        mom = float(close.iloc[-1] - close.iloc[-5])
+        volx = float(volume.iloc[-1] / max(1.0, volume.tail(20).mean()))
+        trend = float((close.iloc[-1] / max(0.01, close.iloc[-20]) - 1.0) * 100.0)
+        return mom + (volx * 0.8) + (trend * 0.5)
+    except Exception:
+        return None
+
+
+def _refresh_active_universe(force=False):
+    now = datetime.now()
+    last = STATE.get("active_universe_last_refresh")
+    refresh_min = int(getattr(CFG, "ACTIVE_UNIVERSE_REFRESH_MINUTES", 10))
+    if not force and last and (now - last) < timedelta(minutes=refresh_min):
+        return
+
+    research = load_universe_trading()
+    max_research = int(getattr(CFG, "RESEARCH_UNIVERSE_SIZE", 30))
+    research = research[:max_research]
+    STATE["research_universe"] = research
+
+    scores = {}
+    for sym in research:
+        sc = _score_symbol_intraday(sym)
+        if sc is not None:
+            scores[sym] = sc
+
+    ranked = sorted(research, key=lambda s: scores.get(s, -10**9), reverse=True)
+    active_size = int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8))
+    active = ranked[:active_size]
+    STATE["active_universe"] = active
+    STATE["active_universe_scores"] = scores
+    STATE["active_universe_last_refresh"] = now
+    append_log("INFO", "UNIV", f"Active universe refreshed size={len(active)}")
+
+
+def _market_regime():
+    try:
+        sym = getattr(CFG, "STABILITY_SYMBOL", "NIFTYBEES").strip().upper()
+        token = token_for_symbol(sym)
+        kite = get_kite()
+        to_dt = pd.Timestamp.now()
+        from_dt = to_dt - pd.Timedelta(days=10)
+        data = kite.historical_data(token, from_dt, to_dt, "15minute")
+        time.sleep(0.2)
+        df = pd.DataFrame(data)
+        if df.empty or "close" not in df.columns or len(df) < 30:
+            return "NORMAL"
+        close = df["close"].astype(float)
+        sma20 = close.rolling(20).mean()
+        slope = float(sma20.iloc[-1] - sma20.iloc[-2]) if len(sma20.dropna()) >= 2 else 0.0
+        weak = close.iloc[-1] < sma20.iloc[-1] and slope < 0
+        return "WEAK" if weak else "NORMAL"
+    except Exception:
+        return "NORMAL"
+
+
+def _scan_scopes():
+    active = [s for s in STATE.get("active_universe", []) if s]
+    research = [s for s in STATE.get("research_universe", []) if s]
+    fallback = [s for s in load_universe_live() if s]
+    return [
+        ("active", active),
+        ("research", research),
+        ("fallback", fallback),
+    ]
 
 
 def _parse_windows(win_str):
@@ -402,19 +508,21 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
 
     qty = int(trade.get("qty") or 0) or 1
     entry = float(trade.get("entry") or 0.0)
-    exit_side = "SELL"
+    side = (trade.get("side") or "BUY").upper()
+    exit_side = "BUY" if side == "SELL" else "SELL"
 
     ltp = float(ltp_override) if ltp_override is not None else None
 
     if not is_live_enabled():
         if ltp is None:
             ltp = entry
-        pnl = (ltp - entry) * qty
-        pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+        pnl = (ltp - entry) * qty if side == "BUY" else (entry - ltp) * qty
+        pnl_pct = (((ltp - entry) / entry) * 100.0) if side == "BUY" and entry > 0 else (((entry - ltp) / entry) * 100.0 if entry > 0 else 0.0)
         STATE["today_pnl"] += pnl
         STATE["open_trades"].pop(sym, None)
+        STATE.setdefault("closed_trades", []).append({"symbol": sym, "side": side, "entry": entry, "exit": ltp, "qty": qty, "pnl": pnl, "reason": reason})
         append_log("WARN", "EXIT", f"PAPER exit {sym} qty={qty} exit={ltp:.2f} pnl={pnl:.2f}({pnl_pct:.2f}%) reason={reason}")
-        _notify(f"🔴 SELL {'LIVE' if is_live_enabled() else 'PAPER'}\n{sym} qty={qty}\nExit={ltp:.2f}\nPnL ₹{pnl:.2f} ({pnl_pct:.2f}%)\nReason={reason}")
+        _notify(f"🔴 EXIT {'LIVE' if is_live_enabled() else 'PAPER'}\n{sym} qty={qty}\nExit={ltp:.2f}\nPnL ₹{pnl:.2f} ({pnl_pct:.2f}%)\nReason={reason}")
         return True
 
     kite = get_kite()
@@ -432,13 +540,14 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
 
     if ltp is None:
         ltp = _ltp(kite, sym) or entry
-    pnl = (ltp - entry) * qty
-    pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
+    pnl = (ltp - entry) * qty if side == "BUY" else (entry - ltp) * qty
+    pnl_pct = (((ltp - entry) / entry) * 100.0) if side == "BUY" and entry > 0 else (((entry - ltp) / entry) * 100.0 if entry > 0 else 0.0)
     STATE["today_pnl"] += pnl
     STATE["open_trades"].pop(sym, None)
+    STATE.setdefault("closed_trades", []).append({"symbol": sym, "side": side, "entry": entry, "exit": ltp, "qty": qty, "pnl": pnl, "reason": reason})
 
     append_log("WARN", "EXIT", f"LIVE exit {sym} qty={qty} exit={ltp:.2f} pnl={pnl:.2f}({pnl_pct:.2f}%) reason={reason} oid={oid}")
-    _notify(f"🔴 SELL {'LIVE' if is_live_enabled() else 'PAPER'}\n{sym} qty={qty}\nExit={ltp:.2f}\nPnL ₹{pnl:.2f} ({pnl_pct:.2f}%)\nReason={reason}")
+    _notify(f"🔴 EXIT {'LIVE' if is_live_enabled() else 'PAPER'}\n{sym} qty={qty}\nExit={ltp:.2f}\nPnL ₹{pnl:.2f} ({pnl_pct:.2f}%)\nReason={reason}")
     return True
 
 
@@ -477,15 +586,17 @@ def _manage_open_trades(force_only=False):
             continue
 
         sl_price = float(trade.get("sl_price") or 0.0)
-        if sl_price > 0 and ltp <= sl_price:
-            _close_position(sym, reason="SL", ltp_override=ltp)
-            continue
+        side = (trade.get("side") or "BUY").upper()
+        if sl_price > 0:
+            if (side == "BUY" and ltp <= sl_price) or (side == "SELL" and ltp >= sl_price):
+                _close_position(sym, reason="SL", ltp_override=ltp)
+                continue
 
         entry = float(trade.get("entry") or 0.0)
         if entry <= 0:
             continue
 
-        pnl_pct = ((ltp - entry) / entry) * 100.0
+        pnl_pct = (((ltp - entry) / entry) * 100.0) if side == "BUY" else (((entry - ltp) / entry) * 100.0)
         peak_pnl = float(trade.get("peak_pnl_pct") or pnl_pct)
         if pnl_pct > peak_pnl:
             peak_pnl = pnl_pct
@@ -515,22 +626,26 @@ def _within_entry_window():
 def _can_open_new_trade(sym, entry):
     if sym in STATE.get("open_trades", {}):
         append_log("INFO", "ENTRY", f"Skip {sym}: already open")
+        _record_skip(sym, "already_open")
         return False
 
     max_positions = int(os.getenv("MAX_OPEN_POSITIONS", "20"))
     if _open_positions_count() >= max_positions:
         append_log("INFO", "ENTRY", f"Skip {sym}: max open positions reached ({max_positions})")
+        _record_skip(sym, "max_positions")
         return False
 
     wallet = float(STATE.get("wallet_available_inr") or 0.0)
     if entry > wallet:
         append_log("INFO", "ENTRY", f"Skip {sym}: cannot buy 1 share entry={entry:.2f} wallet={wallet:.2f}")
+        _record_skip(sym, "wallet_insufficient")
         return False
 
     next_exp = _current_exposure_inr() + entry
     max_exp = _max_exposure_inr()
     if max_exp > 0 and next_exp > max_exp:
         append_log("WARN", "ENTRY", f"Skip {sym}: exposure guard hit next={next_exp:.2f} max={max_exp:.2f}")
+        _record_skip(sym, "exposure_guard")
         return False
 
     return True
@@ -541,16 +656,18 @@ def _maybe_enter_from_signal(sig):
         return False
 
     sym = sig["symbol"].strip().upper()
+    side = (sig.get("side") or "BUY").upper()
     entry = float(sig.get("entry") or 0.0)
     if entry <= 0:
         append_log("WARN", "TRADE", f"Invalid signal entry for {sym}: {entry}")
+        _record_skip(sym, "invalid_entry")
         return False
 
     if not _can_open_new_trade(sym, entry):
         return False
 
     qty = _calc_qty(entry)
-    sl_price = entry * (1.0 - float(CFG.STOPLOSS_PCT) / 100.0)
+    sl_price = entry * (1.0 - float(CFG.STOPLOSS_PCT) / 100.0) if side == "BUY" else entry * (1.0 + float(CFG.STOPLOSS_PCT) / 100.0)
 
     mode = "LIVE" if is_live_enabled() else "PAPER"
     oid = None
@@ -560,17 +677,23 @@ def _maybe_enter_from_signal(sig):
         now_price = _ltp(kite, sym)
         if now_price is not None:
             max_slip = float(RUNTIME.get("MAX_ENTRY_SLIPPAGE_PCT", 0.30)) / 100.0
-            if now_price > entry * (1.0 + max_slip):
-                append_log("WARN", "SLIP", f"Skip {sym}: slip too high now={now_price} sig={entry}")
+            if side == "BUY" and now_price > entry * (1.0 + max_slip):
+                append_log("WARN", "SLIP", f"Skip {sym}: buy slip too high now={now_price} sig={entry}")
+                _record_skip(sym, "slippage_guard")
+                return False
+            if side == "SELL" and now_price < entry * (1.0 - max_slip):
+                append_log("WARN", "SLIP", f"Skip {sym}: sell slip too high now={now_price} sig={entry}")
+                _record_skip(sym, "slippage_guard")
                 return False
 
-        oid = _place_live_order(kite, sym, "BUY", qty)
+        oid = _place_live_order(kite, sym, side, qty)
         if not oid:
+            _record_skip(sym, "order_failed")
             return False
 
     STATE["open_trades"][sym] = {
         "symbol": sym,
-        "side": "BUY",
+        "side": side,
         "entry": entry,
         "qty": qty,
         "order_id": oid,
@@ -579,8 +702,8 @@ def _maybe_enter_from_signal(sig):
         "opened_at": datetime.now().isoformat(timespec="seconds"),
     }
 
-    append_log("INFO", "TRADE", f"{mode} BUY {sym} qty={qty} entry={entry:.2f} sl={sl_price:.2f} oid={oid}")
-    _notify(f"🟢 BUY {mode}\n{sym} qty={qty}\nEntry={entry:.2f}")
+    append_log("INFO", "TRADE", f"{mode} {side} {sym} qty={qty} entry={entry:.2f} sl={sl_price:.2f} oid={oid}")
+    _notify(f"🟢 {side} {mode}\n{sym} qty={qty}\nEntry={entry:.2f}")
     return True
 
 
@@ -607,6 +730,8 @@ def get_status_text():
         f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
         f"Universe(trading): {len(uni_t)} symbols\n"
         f"Universe(live): {len(uni_l)} symbols\n"
+        f"Research Universe: {len(STATE.get('research_universe') or [])} symbols\n"
+        f"Active Universe: {len(STATE.get('active_universe') or [])} symbols\n"
         f"Open Positions: {_open_positions_count()}\n"
         f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n\n"
         "Wallet/Caps:\n"
@@ -623,9 +748,56 @@ def get_status_text():
     )
 
 
+def send_daily_report():
+    closed = STATE.get("closed_trades", [])
+    wins = [t for t in closed if float(t.get("pnl") or 0.0) > 0]
+    losses = [t for t in closed if float(t.get("pnl") or 0.0) < 0]
+    win_rate = (len(wins) / len(closed) * 100.0) if closed else 0.0
+    best = max(closed, key=lambda t: float(t.get("pnl") or 0.0), default=None)
+    worst = min(closed, key=lambda t: float(t.get("pnl") or 0.0), default=None)
+
+    skipped = STATE.get("skipped_signals", [])
+    reason_counts = {}
+    for s in skipped:
+        r = str(s.get("reason") or "unknown")
+        reason_counts[r] = reason_counts.get(r, 0) + 1
+    reason_rows = ", ".join([f"{k}:{v}" for k, v in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:5]]) or "none"
+
+    leaders = sorted(STATE.get("active_universe_scores", {}).items(), key=lambda x: x[1], reverse=True)[:5]
+    leader_rows = "\n".join([f"- {s}: {sc:.2f}" for s, sc in leaders]) if leaders else "(none)"
+
+    msg = (
+        "📘 EOD Daily Report\n"
+        f"Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        f"Trades Taken: {len(closed)}\n"
+        f"Win Rate: {win_rate:.1f}%\n"
+        f"Best Trade: {(best.get('symbol') + ' ₹' + format(float(best.get('pnl') or 0.0), '.2f')) if best else 'N/A'}\n"
+        f"Worst Trade: {(worst.get('symbol') + ' ₹' + format(float(worst.get('pnl') or 0.0), '.2f')) if worst else 'N/A'}\n"
+        f"Signals Skipped: {len(skipped)}\n"
+        f"Skipped Reasons: {reason_rows}\n\n"
+        "Top Universe Leaders:\n"
+        f"{leader_rows}\n"
+    )
+    _notify(msg)
+    append_log("INFO", "EOD", "daily report sent")
+
+
+def _maybe_send_eod_report():
+    now = datetime.now()
+    h, m = _parse_hhmm(getattr(CFG, "EOD_REPORT_TIME", "15:15"))
+    if now.hour < h or (now.hour == h and now.minute < m):
+        return
+    today = now.strftime("%Y-%m-%d")
+    if STATE.get("eod_report_day") == today:
+        return
+    send_daily_report()
+    STATE["eod_report_day"] = today
+
+
 def tick():
     _ensure_day_key()
     _sync_wallet_and_caps(force=False)
+    _maybe_send_eod_report()
 
     # Force-exit must run even when paused.
     if STATE.get("open_trades") and _past_force_exit_time():
@@ -635,6 +807,12 @@ def tick():
 
     if STATE.get("paused"):
         return
+
+    _refresh_active_universe(force=False)
+    regime = _market_regime()
+    STATE["market_regime"] = regime
+    if regime == "WEAK":
+        append_log("INFO", "MARKET", "weak regime → short mode enabled")
 
     daily_loss_cap = float(STATE.get("daily_loss_cap_inr") or 0.0)
     if daily_loss_cap > 0 and STATE["today_pnl"] <= -abs(daily_loss_cap):
@@ -668,8 +846,7 @@ def tick():
     if not _within_entry_window():
         return
 
-    universe = load_universe_trading()
-    if not universe:
+    if not STATE.get("research_universe"):
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
 
@@ -678,13 +855,23 @@ def tick():
     opened = 0
     while opened < max_new_entries_per_tick:
         blocked_syms = set(STATE.get("open_trades", {}).keys())
-        candidates = [s for s in universe if s not in blocked_syms]
-        if not candidates:
-            break
+        sig = None
+        scopes = _scan_scopes()
+        for idx, (scope_name, scope_syms) in enumerate(scopes):
+            candidates = [s for s in scope_syms if s not in blocked_syms]
+            if not candidates:
+                continue
+            if scope_name == "active":
+                append_log("INFO", "UNIV", f"scanning active universe size={len(candidates)}")
+            append_log("INFO", "SCAN", f"Scanning {scope_name} candidates={len(candidates)} open={_open_positions_count()}")
+            sig = generate_signal(candidates, allow_short=(regime == "WEAK"))
+            if sig:
+                break
+            if idx == 0:
+                append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
 
-        append_log("INFO", "SCAN", f"Scanning candidates={len(candidates)} open={_open_positions_count()}")
-        sig = generate_signal(candidates)
         if not sig:
+            _record_skip("*", "no_signal")
             break
 
         entered = _maybe_enter_from_signal(sig)
