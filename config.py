@@ -89,6 +89,9 @@ EXCLUSIONS_PATH = _get_str("EXCLUSIONS_PATH", "./data/exclusions.txt")
 # ===== Trident Upgrade: Universe + Auto Promote + Night Scheduler =====
 UNIVERSE_LIVE_PATH = _get_str("UNIVERSE_LIVE_PATH", os.path.join(os.getcwd(), "data", "universe_live.txt"))
 UNIVERSE_TRADING_PATH = _get_str("UNIVERSE_TRADING_PATH", os.path.join(os.getcwd(), "data", "universe_trading.txt"))
+ACTIVE_UNIVERSE_SIZE = _get_int("ACTIVE_UNIVERSE_SIZE", "8")
+ACTIVE_UNIVERSE_REFRESH_MINUTES = _get_int("ACTIVE_UNIVERSE_REFRESH_MINUTES", "10")
+RESEARCH_UNIVERSE_SIZE = _get_int("RESEARCH_UNIVERSE_SIZE", "30")
 
 AUTO_PROMOTE_ENABLED = _get_bool("AUTO_PROMOTE_ENABLED", True)
 PROMOTE_COOLDOWN_MIN = _get_int("PROMOTE_COOLDOWN_MIN", 60)
@@ -101,4 +104,5 @@ NIGHT_AUTO_ENABLED = _get_bool("NIGHT_AUTO_ENABLED", True)
 NIGHT_START = _get_str("NIGHT_START", "18:30")
 NIGHT_INTERVAL_MIN = _get_int("NIGHT_INTERVAL_MIN", 90)
 NIGHT_END_OFFSET_MIN = _get_int("NIGHT_END_OFFSET_MIN", 5)
+EOD_REPORT_TIME = _get_str("EOD_REPORT_TIME", "15:15")
 # Profit lock values are read from env above (PROFIT_LOCK_ACTIVATE_PCT / PROFIT_LOCK_TRAIL_PCT).
