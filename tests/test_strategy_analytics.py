@@ -106,6 +106,8 @@ def test_eod_report_includes_filter_effectiveness(monkeypatch, tmp_path):
         }
     )
 
-    txt = sa.generate_eod_report_text({})
+    txt = sa.generate_eod_report_text({"last_regime": "WEAK", "research_last_report": {"top_ranked": [{"symbol": "SBIN"}, {"symbol": "LT"}, {"symbol": "ICICIBANK"}]}})
     assert "Filter Effectiveness" in txt
     assert "score_too_low" in txt
+    assert "Market Regime: WEAK" in txt
+    assert "Top Universe Leaders" in txt

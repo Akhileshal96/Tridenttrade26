@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import yfinance as yf
 
 import config as CFG
 from broker_zerodha import get_kite
@@ -50,6 +51,11 @@ STATE = {
     "sector_map_cache": None,
     "research_universe": [],
     "fallback_universe": [],
+    "active_universe": [],
+    "active_universe_last_refresh": None,
+    "active_no_setup_cycles": 0,
+    "opening_mode": "OPEN_CLEAN",
+    "opening_metrics": {},
     "no_entry_cycles": 0,
     "fallback_mode_active": False,
     "eod_report_sent_date": "",
@@ -820,6 +826,76 @@ def _resolve_trade_universe() -> list:
     return fallback
 
 
+def _sector_strength_snapshot(research_universe: list) -> dict:
+    bucket = {}
+    for sym in research_universe or []:
+        sec = str(SECTOR_MAP.get(str(sym).upper(), "OTHER") or "OTHER").upper()
+        mom = _compute_symbol_momentum_pct(str(sym).upper())
+        bucket.setdefault(sec, []).append(float(mom))
+    out = {}
+    for sec, arr in bucket.items():
+        out[sec] = (sum(arr) / len(arr)) if arr else 0.0
+    return out
+
+
+def _active_score_metrics(symbol: str, sector_strength: dict) -> dict:
+    try:
+        df = _htf_fetch(symbol, days=4)
+        if df.empty or "close" not in df.columns or "volume" not in df.columns:
+            return {"ok": False}
+        close = df["close"].astype(float)
+        vol = df["volume"].astype(float)
+        if len(close) < 8:
+            return {"ok": False}
+
+        intraday_change = ((float(close.iloc[-1]) - float(close.iloc[-4])) / float(close.iloc[-4]) * 100.0) if float(close.iloc[-4]) > 0 else 0.0
+        rel_vol = float(vol.iloc[-1]) / float(vol.tail(20).mean()) if float(vol.tail(20).mean()) > 0 else 0.0
+        momentum = ((float(close.iloc[-1]) - float(close.iloc[-2])) / float(close.iloc[-2]) * 100.0) if float(close.iloc[-2]) > 0 else 0.0
+        vwap = (close * vol).sum() / max(1.0, float(vol.sum()))
+        vwap_distance = ((float(close.iloc[-1]) - float(vwap)) / float(vwap) * 100.0) if float(vwap) > 0 else 0.0
+        sec = str(SECTOR_MAP.get(symbol, "OTHER") or "OTHER").upper()
+        sec_strength = float(sector_strength.get(sec, 0.0))
+
+        score = (0.35 * intraday_change) + (0.25 * rel_vol) + (0.20 * momentum) + (0.10 * vwap_distance) + (0.10 * sec_strength)
+        return {"ok": True, "score": float(score)}
+    except Exception:
+        return {"ok": False}
+
+
+def build_active_universe(research_universe: list) -> list:
+    base = [str(s).strip().upper() for s in (research_universe or []) if str(s).strip()]
+    if not base:
+        STATE["active_universe"] = []
+        return []
+    n = int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)
+    sec_strength = _sector_strength_snapshot(base)
+    scored = []
+    for sym in base:
+        m = _active_score_metrics(sym, sec_strength)
+        if m.get("ok"):
+            scored.append((sym, float(m.get("score") or 0.0)))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    out = [s for s, _ in scored[: max(1, n)]]
+    if not out:
+        out = base[: max(1, n)]
+    STATE["active_universe"] = out
+    STATE["active_universe_last_refresh"] = datetime.now(IST)
+    append_log("INFO", "UNIV", f"Active universe refreshed size={len(out)}")
+    return out
+
+
+def refresh_active_universe_if_due(research_universe: list):
+    mins = int(getattr(CFG, "ACTIVE_UNIVERSE_REFRESH_MINUTES", 10) or 10)
+    last = STATE.get("active_universe_last_refresh")
+    if not STATE.get("active_universe"):
+        return build_active_universe(research_universe)
+    if not isinstance(last, datetime):
+        return build_active_universe(research_universe)
+    if datetime.now(IST) - last >= timedelta(minutes=max(1, mins)):
+        return build_active_universe(research_universe)
+    return list(STATE.get("active_universe") or [])
+
+
 def _passes_sector_entry_filter(sym: str) -> bool:
     """Explicit sector filter step before risk checks (separate from exposure guard)."""
     sec = str(SECTOR_MAP.get(sym, "OTHER") or "OTHER").upper()
@@ -1002,6 +1078,131 @@ def _nifty_reference_return(days: int = 45, bars: int = 20) -> float | None:
     return ((last - base) / base) * 100.0
 
 
+def _session_bucket(now: datetime | None = None) -> str:
+    t = (now or datetime.now(IST)).time()
+    if t >= datetime.strptime("09:15", "%H:%M").time() and t < datetime.strptime("09:30", "%H:%M").time():
+        return "EARLY"
+    if t >= datetime.strptime("09:30", "%H:%M").time() and t < datetime.strptime("13:30", "%H:%M").time():
+        return "MAIN"
+    if t >= datetime.strptime("13:30", "%H:%M").time() and t <= datetime.strptime("15:00", "%H:%M").time():
+        return "LATE"
+    return "OFF"
+
+
+def _in_open_filter_window(now: datetime | None = None) -> bool:
+    t = (now or datetime.now(IST)).time()
+    sh, sm = _parse_hhmm(getattr(CFG, "OPEN_FILTER_START", "09:15"))
+    eh, em = _parse_hhmm(getattr(CFG, "OPEN_FILTER_END", "09:30"))
+    start = datetime.now(IST).replace(hour=sh, minute=sm, second=0, microsecond=0).time()
+    end = datetime.now(IST).replace(hour=eh, minute=em, second=0, microsecond=0).time()
+    return start <= t <= end
+
+
+def _compute_opening_metrics() -> dict:
+    out = {
+        "gap_pct": 0.0,
+        "first_5m_range_pct": 0.0,
+        "direction_clear": False,
+        "spread_quality": "UNKNOWN",
+        "volume_quality": "UNKNOWN",
+        "valid": False,
+    }
+    try:
+        d1 = yf.download("^NSEI", period="7d", interval="1d", auto_adjust=False, progress=False, threads=False)
+        m5 = yf.download("^NSEI", period="2d", interval="5m", auto_adjust=False, progress=False, threads=False)
+        if d1 is None or d1.empty or m5 is None or m5.empty:
+            return out
+        d1 = d1.dropna()
+        m5 = m5.dropna()
+        if len(d1) < 2 or len(m5) < 3:
+            return out
+
+        prev_close = float(d1["Close"].astype(float).iloc[-2])
+        open_today = float(d1["Open"].astype(float).iloc[-1])
+        gap_pct = ((open_today - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
+
+        # first intraday candle of current day
+        idx = m5.index
+        if getattr(idx, "tz", None) is None:
+            idx = idx.tz_localize("UTC").tz_convert(IST)
+        else:
+            idx = idx.tz_convert(IST)
+        m5 = m5.copy()
+        m5.index = idx
+        today = datetime.now(IST).date()
+        day_df = m5[m5.index.date == today]
+        if day_df.empty:
+            return out
+        first = day_df.iloc[0]
+        o5 = float(first.get("Open", 0.0) or 0.0)
+        h5 = float(first.get("High", 0.0) or 0.0)
+        l5 = float(first.get("Low", 0.0) or 0.0)
+        c_last = float(day_df["Close"].astype(float).iloc[-1])
+        ma3 = float(day_df["Close"].astype(float).rolling(3).mean().dropna().iloc[-1]) if len(day_df) >= 3 else c_last
+        first_5m_range_pct = ((h5 - l5) / o5 * 100.0) if o5 > 0 else 0.0
+        direction_clear = abs((c_last - o5) / o5 * 100.0) >= 0.15 and ((c_last > ma3 and c_last > o5) or (c_last < ma3 and c_last < o5))
+
+        vol = day_df["Volume"].astype(float) if "Volume" in day_df.columns else pd.Series(dtype=float)
+        volume_quality = "GOOD"
+        if not vol.empty and len(vol) > 1:
+            v0 = float(vol.iloc[0])
+            vm = float(vol.tail(min(20, len(vol))).mean())
+            volume_quality = "GOOD" if vm <= 0 or (v0 / vm) >= 0.8 else "LOW"
+
+        max_range = float(getattr(CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2) or 1.2)
+        spread_quality = "GOOD" if first_5m_range_pct <= max_range * 1.4 else "WIDE"
+
+        out.update(
+            {
+                "gap_pct": float(gap_pct),
+                "first_5m_range_pct": float(first_5m_range_pct),
+                "direction_clear": bool(direction_clear),
+                "spread_quality": spread_quality,
+                "volume_quality": volume_quality,
+                "valid": True,
+            }
+        )
+        return out
+    except Exception:
+        return out
+
+
+def get_opening_mode() -> tuple[str, dict]:
+    if not bool(getattr(CFG, "USE_ADAPTIVE_OPEN_FILTER", True)):
+        return "OPEN_CLEAN", {"valid": False}
+    if not _in_open_filter_window():
+        return "OPEN_CLEAN", {"valid": False}
+
+    m = _compute_opening_metrics()
+    gap = abs(float(m.get("gap_pct") or 0.0))
+    rng = float(m.get("first_5m_range_pct") or 0.0)
+    max_gap = float(getattr(CFG, "MAX_SAFE_GAP_PCT", 0.8) or 0.8)
+    max_rng = float(getattr(CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2) or 1.2)
+    dir_ok = bool(m.get("direction_clear"))
+    spread_good = str(m.get("spread_quality") or "UNKNOWN").upper() == "GOOD"
+    vol_good = str(m.get("volume_quality") or "UNKNOWN").upper() == "GOOD"
+
+    append_log("INFO", "OPEN", f"gap_pct={float(m.get('gap_pct') or 0.0):.2f}")
+    append_log("INFO", "OPEN", f"first_5m_range_pct={float(m.get('first_5m_range_pct') or 0.0):.2f}")
+    append_log("INFO", "OPEN", f"spread_quality={m.get('spread_quality')}")
+    append_log("INFO", "OPEN", f"volume_quality={m.get('volume_quality')}")
+
+    if gap > max_gap * 1.25 or rng > max_rng * 1.5 or (not dir_ok and not vol_good):
+        return "OPEN_UNSAFE", m
+
+    score = 0
+    score += 1 if gap <= max_gap else 0
+    score += 1 if rng <= max_rng else 0
+    score += 1 if dir_ok else 0
+    score += 1 if spread_good else 0
+    score += 1 if vol_good else 0
+    if score >= 4:
+        return "OPEN_CLEAN", m
+    if score >= 2:
+        return "OPEN_MODERATE", m
+    return "OPEN_UNSAFE", m
+
+
 def confirm_long_htf(symbol: str) -> bool:
     if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
         return True
@@ -1015,7 +1216,15 @@ def confirm_long_htf(symbol: str) -> bool:
     if len(ma) < 2:
         append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
         return False
-    ok = float(close.iloc[-1]) > float(ma.iloc[-1]) and float(ma.iloc[-1]) > float(ma.iloc[-2])
+    bucket = _session_bucket()
+    if bucket == "EARLY":
+        ok = float(close.iloc[-1]) > float(ma.iloc[-1])
+        if ok:
+            append_log("INFO", "CONFIRM", "early_session_relaxed_htf")
+    elif bucket == "LATE":
+        ok = float(close.iloc[-1]) > float(ma.iloc[-1])
+    else:
+        ok = float(close.iloc[-1]) > float(ma.iloc[-1]) and float(ma.iloc[-1]) > float(ma.iloc[-2])
     if ok and bool(getattr(CFG, "HTF_CONFIRM_RSI", False)):
         rsi = _calc_rsi(close)
         min_rsi = float(getattr(CFG, "HTF_LONG_MIN_RSI", 52.0) or 52.0)
@@ -1070,6 +1279,28 @@ def _quality_metrics(symbol: str) -> dict:
         "ret_20d": ret_20d,
         "rs_vs_nifty": rs_vs_nifty,
     }
+
+
+def _opening_symbol_quality_ok(symbol: str, side: str = "BUY") -> bool:
+    q = _quality_metrics(symbol)
+    if not q.get("ok"):
+        return False
+    price = float(q.get("price") or 0.0)
+    sma20 = float(q.get("sma20") or 0.0)
+    vol_score = float(q.get("vol_score") or 0.0)
+    side_u = str(side or "BUY").upper()
+    if side_u == "SHORT":
+        return price < sma20 and vol_score >= float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2)
+    return price > sma20 and vol_score >= 1.0
+
+
+def _opening_size_multiplier() -> float:
+    mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_MODERATE":
+        return float(getattr(CFG, "OPEN_MODERATE_SIZE_MULTIPLIER", 0.5) or 0.5)
+    if mode == "OPEN_CLEAN":
+        return float(getattr(CFG, "OPEN_CLEAN_SIZE_MULTIPLIER", 1.0) or 1.0)
+    return 0.0
 
 
 def generate_short_signal(symbol: str):
@@ -1145,6 +1376,20 @@ def _maybe_enter_short_from_signal(sig):
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
         strategy_tag = "mtf_confirmed_short"
     qty = _apply_strategy_allocation(qty, strategy_tag)
+
+    mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_MODERATE":
+        if not _opening_symbol_quality_ok(sym, side="SHORT"):
+            append_log("INFO", "OPEN", "signal observed but blocked by opening filter")
+            return False
+        open_mult = _opening_size_multiplier()
+        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced size entry allowed")
+    elif mode == "OPEN_CLEAN" and _in_open_filter_window():
+        open_mult = _opening_size_multiplier()
+        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
         try:
@@ -1270,6 +1515,20 @@ def _maybe_enter_from_signal(sig):
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
         strategy_tag = "mtf_confirmed_long"
     qty = _apply_strategy_allocation(qty, strategy_tag)
+
+    mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_MODERATE":
+        if not _opening_symbol_quality_ok(sym, side="BUY"):
+            append_log("INFO", "OPEN", "signal observed but blocked by opening filter")
+            return False
+        open_mult = _opening_size_multiplier()
+        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced size entry allowed")
+    elif mode == "OPEN_CLEAN" and _in_open_filter_window():
+        open_mult = _opening_size_multiplier()
+        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
         try:
@@ -1561,29 +1820,67 @@ def tick():
     if not _within_entry_window():
         return
 
-    universe = _resolve_trade_universe()
-    if not universe:
+    research_universe = _resolve_trade_universe()
+    if not research_universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
+
+    active_universe = refresh_active_universe_if_due(research_universe)
+    if not active_universe:
+        active_universe = list(research_universe[: int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)])
 
     max_new = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    STATE["last_regime"] = regime
     append_log("INFO", "MARKET", f"regime={regime} entry_mode={get_regime_entry_mode(regime)}")
 
+    open_mode, open_metrics = get_opening_mode()
+    STATE["opening_mode"] = open_mode
+    STATE["opening_metrics"] = dict(open_metrics or {})
+    if _in_open_filter_window():
+        append_log("INFO", "OPEN", f"mode={open_mode}")
+    if _in_open_filter_window() and open_mode == "OPEN_UNSAFE":
+        append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → blocking new entries")
+        return
+
     opened = 0
+    append_log("INFO", "UNIV", "scanning active universe")
     if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-        append_log("INFO", "MARKET", "regime=WEAK → activating SHORT mode")
-        opened += _scan_short_entries(universe, max_new=max_new)
+        append_log("INFO", "MARKET", "weak regime → short mode enabled")
+        opened += _scan_short_entries(active_universe, max_new=max_new)
         if opened < max_new:
-            opened += _scan_long_entries(universe, max_new=max_new - opened)
+            opened += _scan_long_entries(active_universe, max_new=max_new - opened)
     else:
-        opened += _scan_long_entries(universe, max_new=max_new)
+        opened += _scan_long_entries(active_universe, max_new=max_new)
+
+    if opened <= 0:
+        STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
+        append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
+        research_tail = [s for s in research_universe if s not in set(active_universe)]
+        if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(research_tail, max_new=max_new)
+            if opened < max_new:
+                opened += _scan_long_entries(research_tail, max_new=max_new - opened)
+        else:
+            opened += _scan_long_entries(research_tail, max_new=max_new)
+
+    expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
+    if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
+        append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
+        expanded = list(research_universe)
+        if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(expanded, max_new=max_new)
+            if opened < max_new:
+                opened += _scan_long_entries(expanded, max_new=max_new - opened)
+        else:
+            opened += _scan_long_entries(expanded, max_new=max_new)
 
     if opened <= 0:
         STATE["no_entry_cycles"] = int(STATE.get("no_entry_cycles") or 0) + 1
     else:
         STATE["no_entry_cycles"] = 0
+        STATE["active_no_setup_cycles"] = 0
         STATE["fallback_mode_active"] = False
 
     trigger_n = int(getattr(CFG, "FALLBACK_TRIGGER_CYCLES", 5) or 5)
