@@ -77,7 +77,8 @@ def _admin_buttons():
 def _logs_buttons():
     return [
         [Button.inline("📅 Daily Log", b"cp:cmd:dailylog"), Button.inline("📜 Last 20", b"cp:cmd:logs20")],
-        [Button.inline("📜 Last 30", b"cp:cmd:logs30"), Button.inline("📦 Export All", b"cp:cmd:exportlog")],
+        [Button.inline("🕘 Trading Hours", b"cp:cmd:tradinglog"), Button.inline("📜 Last 30", b"cp:cmd:logs30")],
+        [Button.inline("📦 Export All", b"cp:cmd:exportlog")],
         [Button.inline("🧹 Reset Logs", b"cp:cmd:resetlogs")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]

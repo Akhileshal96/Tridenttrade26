@@ -403,6 +403,26 @@ def generate_eod_report_text(state: dict) -> str:
     for s in skips:
         by_reason[str(s.get("reason") or "unknown")] += 1
 
+    top_sector = "N/A"
+    if by_sector:
+        top_sector = max(by_sector.items(), key=lambda x: x[1])[0]
+
+    top_leaders = []
+    try:
+        rep = dict((state or {}).get("research_last_report") or {})
+        for r in list(rep.get("top_ranked") or [])[:3]:
+            sym = str((r or {}).get("symbol") or "").strip().upper()
+            if sym:
+                top_leaders.append(sym)
+    except Exception:
+        pass
+
+    regime = "UNKNOWN"
+    try:
+        regime = str((state or {}).get("last_regime") or "UNKNOWN")
+    except Exception:
+        regime = "UNKNOWN"
+
     missed = []
     for s in skips:
         vals = [_safe_float(s.get("after_15m_pct"), None), _safe_float(s.get("after_30m_pct"), None), _safe_float(s.get("after_60m_pct"), None)]
@@ -487,6 +507,12 @@ def generate_eod_report_text(state: dict) -> str:
         lines.append("📌 Insights")
         for i in insights:
             lines.append(f"• {i}")
+    lines.append("")
+    lines.append(f"Market Regime: {regime}")
+    lines.append(f"Top Sector: {top_sector}")
+    if top_leaders:
+        lines.append("Top Universe Leaders:")
+        lines.extend(top_leaders[:3])
     lines.append("")
     lines.append("Bot: Trident Trade Bot")
     lines.append("Developed by AK")

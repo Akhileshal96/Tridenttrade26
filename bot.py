@@ -11,7 +11,7 @@ from night_scheduler import run_nightly_maintenance
 from telethon import TelegramClient, events
 from kiteconnect import KiteConnect
 
-from log_store import append_log, tail_text, export_all, LOG_FILE, clear_logs
+from log_store import append_log, tail_text, export_all, LOG_FILE, clear_logs, tail_trading_hours_today
 from env_utils import set_env_value, get_env_value
 from broker_zerodha import get_kite
 from trade_notifier import notify, notification_worker, setup_loop
@@ -55,6 +55,7 @@ HELP_TEXT = (
     "• /logs30     → last 30 log lines\n"
     "• /exportlog  → full log as txt\n"
     "• /dailylog   → today's log as txt\n"
+    "• /tradinglog → today's trading-hours log as txt\n"
     "• /resetlogs  → truncate all logs (Owner)\n"
     "• /positions  → Zerodha net positions\n\n"
     "RESEARCH [Trader/Owner]:\n"
@@ -155,6 +156,22 @@ def _make_daily_log_file():
         return None
     with open(out_path, "w") as f:
         f.writelines(todays)
+    return out_path
+
+
+def _make_trading_hour_log_file():
+    out_dir = os.path.join(os.getcwd(), "logs")
+    os.makedirs(out_dir, exist_ok=True)
+    today = datetime.now().strftime("%Y-%m-%d")
+    out_path = os.path.join(out_dir, f"trident_trading_hours_{today}.txt")
+    txt = tail_trading_hours_today(
+        start_hhmm=str(getattr(CFG, "OPEN_FILTER_START", "09:15") or "09:15"),
+        end_hhmm=str(getattr(CFG, "FORCE_EXIT", "15:10") or "15:10"),
+    )
+    if not txt or txt.startswith("(no "):
+        return None
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(txt)
     return out_path
 
 
@@ -405,6 +422,7 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             "• /logs20 -> last 20 lines\n"
             "• /logs30 -> last 30 lines\n"
             "• /exportlog -> full log file\n"
+            "• /tradinglog -> trading-hours logs\n"
             "• /resetlogs -> truncate logs (owner)"
         )
         return True
@@ -437,6 +455,14 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("(no logs for today)")
             return True
         await event.reply(file=fp, message="📅 Today's log export")
+        return True
+
+    if cmd_word == "/tradinglog":
+        fp = _make_trading_hour_log_file()
+        if not fp or not os.path.exists(fp):
+            await event.reply("(no trading-hour logs for today)")
+            return True
+        await event.reply(file=fp, message="🕘 Trading-hours log export")
         return True
 
     if cmd_word == "/resetlogs":
@@ -713,6 +739,7 @@ async def main():
         "logs20": _mk_panel_handler("logs20"),
         "logs30": _mk_panel_handler("logs30"),
         "dailylog": _mk_panel_handler("dailylog"),
+        "tradinglog": _mk_panel_handler("tradinglog"),
         "exportlog": _mk_panel_handler("exportlog"),
         "resetlogs": _mk_panel_handler("resetlogs"),
         "positions": _mk_panel_handler("positions"),
