@@ -722,7 +722,15 @@ async def main():
             await _dispatch_command(message_event, sender, f"/{command_name}", "")
         return _run
 
+    def _pnl_so_far_button_label():
+        day_pnl = float(CYCLE.STATE.get("today_pnl") or 0.0)
+        wallet = float(CYCLE.STATE.get("wallet_net_inr") or CYCLE.STATE.get("last_wallet") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        pct = (day_pnl / wallet * 100.0) if wallet > 0 else 0.0
+        icon = "🟢" if pct >= 0 else "🔴"
+        return f"{icon} P/L So Far {pct:+.2f}%"
+
     panel_handlers = {
+        "__pnl_so_far_label__": _pnl_so_far_button_label,
         "myid": _mk_panel_handler("myid"),
         "help": _mk_panel_handler("help"),
         "commands": _mk_panel_handler("commands"),

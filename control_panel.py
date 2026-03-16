@@ -17,12 +17,20 @@ LOGS_TITLE = "📜 **LOGS PANEL**"
 ANALYTICS_TITLE = "📊 **ANALYTICS PANEL**"
 
 
-def _main_buttons():
+def _main_buttons(handlers=None):
+    pnl_label = "📉 P/L So Far"
+    try:
+        provider = (handlers or {}).get("__pnl_so_far_label__")
+        if callable(provider):
+            pnl_label = str(provider() or pnl_label)
+    except Exception:
+        pass
     return [
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
+        [Button.inline(pnl_label, b"cp:cmd:status")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
@@ -146,10 +154,11 @@ async def _safe_invoke(handler_name, event, handlers):
 def register_control_panel(client, handlers):
     async def _render_panel(event, panel_name: str, edit=False):
         title, button_fn = _PANEL_MAP.get(panel_name, _PANEL_MAP["main"])
+        btns = button_fn(handlers) if panel_name == "main" else button_fn()
         if edit:
-            await event.edit(title, buttons=button_fn())
+            await event.edit(title, buttons=btns)
         else:
-            await event.respond(title, buttons=button_fn())
+            await event.respond(title, buttons=btns)
 
     @client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?$"))
     async def _start_panel(event):
