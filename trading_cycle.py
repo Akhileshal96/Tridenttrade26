@@ -62,6 +62,11 @@ STATE = {
     "confirm_strictness": "STRICT",
     "signals_seen_window": 0,
     "entries_executed_window": 0,
+    "signal_event_ts": [],
+    "entry_event_ts": [],
+    "micro_mode_active": False,
+    "micro_mode_trade_count": 0,
+    "micro_mode_regime": "",
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -1511,12 +1516,32 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
         total += (w_htf * 0.6)
 
     rg = str(regime or "UNKNOWN").upper()
+    side_u = str(side or "BUY").upper()
     allowed, _reason, _meta = is_market_entry_allowed(symbol, rg, research_universe)
     comps["regime"] = "ok" if allowed else "weak"
-    if allowed:
-        total += w_reg
+    if rg == "TRENDING":
+        if side_u == "BUY":
+            total += w_reg if allowed else (w_reg * 0.7)
+            comps["bias"] = "LONG_FIRST"
+        else:
+            total += (w_reg * 0.35) if allowed else (w_reg * 0.2)
+            comps["bias"] = "SHORT_EXCEPTIONAL"
     elif rg == "WEAK":
-        total += (w_reg * 0.35)
+        if side_u == "SHORT":
+            total += w_reg if allowed else (w_reg * 0.7)
+            comps["bias"] = "SHORT_FIRST"
+        else:
+            total += (w_reg * 0.35) if allowed else (w_reg * 0.2)
+            comps["bias"] = "LONG_EXCEPTIONAL"
+    elif rg == "SIDEWAYS":
+        total += (w_reg * 0.75) if allowed else (w_reg * 0.45)
+        comps["bias"] = "BALANCED"
+    elif rg == "VOLATILE":
+        total += (w_reg * 0.6) if allowed else (w_reg * 0.35)
+        comps["bias"] = "RISK_REDUCED"
+    else:
+        total += (w_reg * 0.5) if allowed else (w_reg * 0.25)
+        comps["bias"] = "UNKNOWN"
 
     rank = get_research_rank(symbol, research_universe)
     rscore = _research_score_for_symbol(symbol)
@@ -1547,6 +1572,8 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
         total += (w_vol * 0.5)
 
     total = total * _session_quality_score()
+    if rg == "VOLATILE":
+        total = total * 0.75
     comps["session"] = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
 
     score = int(round(max(0.0, min(100.0, total))))
@@ -1565,38 +1592,102 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
             score = min(score, int(getattr(CFG, "ENTRY_MICRO_MIN_SCORE", 45) or 45) - 1)
             comps["micro_rank"] = "fail"
 
+    if _is_micro_mode_active() and not hard_block_reason:
+        max_trades = int(getattr(CFG, "MICRO_MODE_MAX_TRADES", 2) or 2)
+        done = int(STATE.get("micro_mode_trade_count") or 0)
+        if done < max_trades:
+            min_score = int(getattr(CFG, "MICRO_MODE_MIN_SCORE", 35) or 35)
+            micro_n = int(getattr(CFG, "ENTRY_MICRO_TOP_N", 5) or 5)
+            top_ranked = (not research_universe) or is_top_ranked_symbol(symbol, research_universe, micro_n)
+            if score >= min_score and top_ranked and tier == "BLOCK":
+                tier = "MICRO"
+                comps["micro_override"] = "active"
+
+    size_mult = _entry_tier_multiplier(tier)
+    if _is_micro_mode_active() and tier == "MICRO":
+        size_mult = min(size_mult, float(getattr(CFG, "MICRO_MODE_SIZE_MULTIPLIER", 0.25) or 0.25))
+
     return {
         "score": score,
         "tier": tier,
-        "size_mult": _entry_tier_multiplier(tier),
+        "size_mult": size_mult,
         "components": comps,
         "hard_block": hard_block_reason,
     }
 
 
+def _prune_micro_mode_events(now_ts: float | None = None):
+    now_ts = float(now_ts or time.time())
+    lookback_min = int(getattr(CFG, "MICRO_MODE_LOOKBACK_MINUTES", 45) or 45)
+    cutoff = now_ts - (max(1, lookback_min) * 60)
+    sig = [float(x) for x in list(STATE.get("signal_event_ts") or []) if float(x) >= cutoff]
+    ent = [float(x) for x in list(STATE.get("entry_event_ts") or []) if float(x) >= cutoff]
+    STATE["signal_event_ts"] = sig
+    STATE["entry_event_ts"] = ent
+    STATE["signals_seen_window"] = len(sig)
+    STATE["entries_executed_window"] = len(ent)
+
+
 def _record_signal_seen():
-    STATE["signals_seen_window"] = int(STATE.get("signals_seen_window") or 0) + 1
+    now_ts = time.time()
+    events = list(STATE.get("signal_event_ts") or [])
+    events.append(now_ts)
+    STATE["signal_event_ts"] = events
+    _prune_micro_mode_events(now_ts)
 
 
 def _record_entry_executed():
-    STATE["entries_executed_window"] = int(STATE.get("entries_executed_window") or 0) + 1
+    now_ts = time.time()
+    events = list(STATE.get("entry_event_ts") or [])
+    events.append(now_ts)
+    STATE["entry_event_ts"] = events
+    _prune_micro_mode_events(now_ts)
+    if bool(STATE.get("micro_mode_active")):
+        STATE["micro_mode_trade_count"] = int(STATE.get("micro_mode_trade_count") or 0) + 1
+
+
+def _is_micro_mode_active() -> bool:
+    return bool(STATE.get("micro_mode_active"))
+
+
+def _deactivate_micro_mode(reason: str = ""):
+    if not bool(STATE.get("micro_mode_active")):
+        return
+    STATE["micro_mode_active"] = False
+    STATE["micro_mode_trade_count"] = 0
+    STATE["micro_mode_regime"] = ""
+    append_log("INFO", "HEALTH", f"MICRO MODE deactivated{(' reason=' + reason) if reason else ''}")
 
 
 def _overfilter_health_check():
+    _prune_micro_mode_events()
     sig_n = int(STATE.get("signals_seen_window") or 0)
     ent_n = int(STATE.get("entries_executed_window") or 0)
     no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
     sig_thr = int(getattr(CFG, "OVERFILTER_SIGNAL_THRESHOLD", 8) or 8)
     cyc_thr = int(getattr(CFG, "OVERFILTER_NO_ENTRY_CYCLES", 6) or 6)
+    micro_sig_thr = int(getattr(CFG, "MICRO_MODE_SIGNAL_THRESHOLD", 5) or 5)
+
     if sig_n >= sig_thr and ent_n == 0 and no_entry_cycles >= cyc_thr:
         if str(STATE.get("confirm_strictness") or "STRICT").upper() != "MODERATE":
             STATE["confirm_strictness"] = "MODERATE"
             append_log("WARN", "HEALTH", "Over-filtered mode detected → downgrading strict HTF to moderate")
             _notify("[HEALTH] Over-filtered: valid signals detected but no executions. Downgrading strict HTF to moderate.")
-    elif ent_n > 0:
+
+    if sig_n >= micro_sig_thr and ent_n == 0 and no_entry_cycles >= cyc_thr:
+        if not bool(STATE.get("micro_mode_active")):
+            STATE["micro_mode_active"] = True
+            STATE["micro_mode_trade_count"] = 0
+            STATE["micro_mode_regime"] = str(STATE.get("last_regime") or "UNKNOWN")
+            append_log("WARN", "HEALTH", "over-filter detected -> activating MICRO MODE")
+            _notify("[HEALTH] over-filter detected -> activating MICRO MODE")
+
+    if ent_n > 0:
         STATE["confirm_strictness"] = "STRICT"
         STATE["signals_seen_window"] = 0
         STATE["entries_executed_window"] = 0
+        if bool(STATE.get("micro_mode_active")):
+            _deactivate_micro_mode("normal_trades_resumed")
 
 
 def generate_short_signal(symbol: str):
@@ -1756,6 +1847,9 @@ def _maybe_enter_short_from_signal(sig):
     }
     _set_cooldown()
     append_log("INFO", "ENTRY", f"SHORT {sym} qty={qty} entry={booked_entry:.2f}")
+    append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
+    if _is_micro_mode_active() and decision.get("tier") == "MICRO":
+        append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
     _notify(f"🟠 SHORT {mode}\nSymbol: {sym}\nQuantity: {qty}\nEntry: {booked_entry:.2f}")
     _record_entry_executed()
     return True
@@ -1779,25 +1873,12 @@ def _maybe_enter_from_signal(sig):
 
     if regime == "WEAK":
         if not allowed:
-            append_log("WARN", "MARKET", f"regime=WEAK → blocked {sym} reason={reason}")
+            append_log("INFO", "MARKET", f"regime=WEAK → long kept exceptional for {sym} reason={reason}")
             weak_cd = int(getattr(CFG, "MARKET_WEAK_COOLDOWN_MIN", 3) or 3)
             weak_cd = max(2, min(5, weak_cd))
-            try:
-                SA.record_skipped_signal(
-                    {
-                        "symbol": sym,
-                        "side": "BUY",
-                        "reason": "market_weak",
-                        "strategy_tag": "weak_market_long",
-                        "signal_price": float(sig.get("entry") or 0.0),
-                        "market_regime": regime,
-                    }
-                )
-            except Exception:
-                pass
             _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
-            return False
-        append_log("INFO", "MARKET", f"regime=WEAK → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
+        else:
+            append_log("INFO", "MARKET", f"regime=WEAK → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
     elif regime == "UNKNOWN" and bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False)):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
@@ -1923,6 +2004,9 @@ def _maybe_enter_from_signal(sig):
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
     append_log("INFO", "TRADE", f"{mode} BUY {sym} qty={qty}")
+    append_log("INFO", "EXEC", f"symbol={sym} side=BUY size={int(round(tier_mult * 100))}%")
+    if _is_micro_mode_active() and decision.get("tier") == "MICRO":
+        append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
     _notify(
         f"🟢 BUY {mode}\n"
         f"Symbol: {sym}\n"
@@ -2176,8 +2260,11 @@ def tick():
     max_new = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    prev_regime = str(STATE.get("last_regime") or "")
     STATE["last_regime"] = regime
     append_log("INFO", "MARKET", f"regime={regime} entry_mode={get_regime_entry_mode(regime)}")
+    if _is_micro_mode_active() and prev_regime and prev_regime != regime:
+        _deactivate_micro_mode("regime_changed")
 
     open_mode, open_metrics = get_opening_mode()
     STATE["opening_mode"] = open_mode
@@ -2191,26 +2278,67 @@ def tick():
         hard_reason = str((open_metrics or {}).get("reason") or "")
         if hard_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
             append_log("WARN", "OPEN", f"mode={open_mode} reason={hard_reason} → blocking new entries")
+            _deactivate_micro_mode(hard_reason)
             return
 
     opened = 0
     append_log("INFO", "UNIV", "scanning active universe")
-    if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-        append_log("INFO", "MARKET", "weak regime → short mode enabled")
-        opened += _scan_short_entries(active_universe, max_new=max_new)
+    regime_u = str(regime or "UNKNOWN").upper()
+    if regime_u == "WEAK":
+        append_log("INFO", "MARKET", "regime=WEAK bias=SHORT_FIRST")
+        if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(active_universe, max_new=max_new)
         if opened < max_new:
             opened += _scan_long_entries(active_universe, max_new=max_new - opened)
-    else:
+    elif regime_u == "TRENDING":
+        append_log("INFO", "MARKET", "regime=TRENDING bias=LONG_FIRST")
         opened += _scan_long_entries(active_universe, max_new=max_new)
+        if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(active_universe, max_new=max_new - opened)
+    elif regime_u == "SIDEWAYS":
+        append_log("INFO", "MARKET", "regime=SIDEWAYS bias=BALANCED")
+        half = max(1, max_new // 2)
+        opened += _scan_long_entries(active_universe, max_new=half)
+        if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(active_universe, max_new=max_new - opened)
+        elif opened < max_new:
+            opened += _scan_long_entries(active_universe, max_new=max_new - opened)
+    elif regime_u == "VOLATILE":
+        append_log("INFO", "MARKET", "regime=VOLATILE bias=RISK_REDUCED")
+        vol_cap = max(1, int(math.ceil(max_new * 0.5)))
+        opened += _scan_long_entries(active_universe, max_new=vol_cap)
+        if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(active_universe, max_new=vol_cap - opened)
+    else:
+        append_log("INFO", "MARKET", f"regime={regime_u} bias=ADAPTIVE_DEFAULT")
+        opened += _scan_long_entries(active_universe, max_new=max_new)
+        if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            opened += _scan_short_entries(active_universe, max_new=max_new - opened)
 
     if opened <= 0:
         STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
         research_tail = [s for s in research_universe if s not in set(active_universe)]
-        if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+        if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(research_tail, max_new=max_new)
             if opened < max_new:
                 opened += _scan_long_entries(research_tail, max_new=max_new - opened)
+        elif regime_u == "TRENDING":
+            opened += _scan_long_entries(research_tail, max_new=max_new)
+            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(research_tail, max_new=max_new - opened)
+        elif regime_u == "SIDEWAYS":
+            half = max(1, max_new // 2)
+            opened += _scan_long_entries(research_tail, max_new=half)
+            if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(research_tail, max_new=max_new - opened)
+            elif opened < max_new:
+                opened += _scan_long_entries(research_tail, max_new=max_new - opened)
+        elif regime_u == "VOLATILE":
+            vol_cap = max(1, int(math.ceil(max_new * 0.5)))
+            opened += _scan_long_entries(research_tail, max_new=vol_cap)
+            if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(research_tail, max_new=vol_cap - opened)
         else:
             opened += _scan_long_entries(research_tail, max_new=max_new)
 
@@ -2218,10 +2346,26 @@ def tick():
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
         append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
         expanded = list(research_universe)
-        if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+        if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(expanded, max_new=max_new)
             if opened < max_new:
                 opened += _scan_long_entries(expanded, max_new=max_new - opened)
+        elif regime_u == "TRENDING":
+            opened += _scan_long_entries(expanded, max_new=max_new)
+            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(expanded, max_new=max_new - opened)
+        elif regime_u == "SIDEWAYS":
+            half = max(1, max_new // 2)
+            opened += _scan_long_entries(expanded, max_new=half)
+            if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(expanded, max_new=max_new - opened)
+            elif opened < max_new:
+                opened += _scan_long_entries(expanded, max_new=max_new - opened)
+        elif regime_u == "VOLATILE":
+            vol_cap = max(1, int(math.ceil(max_new * 0.5)))
+            opened += _scan_long_entries(expanded, max_new=vol_cap)
+            if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                opened += _scan_short_entries(expanded, max_new=vol_cap - opened)
         else:
             opened += _scan_long_entries(expanded, max_new=max_new)
 
@@ -2244,10 +2388,26 @@ def tick():
         if fb:
             append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)}")
             fb_opened = 0
-            if regime == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 fb_opened += _scan_short_entries(fb, max_new=max_new)
                 if fb_opened < max_new:
                     fb_opened += _scan_long_entries(fb, max_new=max_new - fb_opened)
+            elif regime_u == "TRENDING":
+                fb_opened += _scan_long_entries(fb, max_new=max_new)
+                if fb_opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                    fb_opened += _scan_short_entries(fb, max_new=max_new - fb_opened)
+            elif regime_u == "SIDEWAYS":
+                half = max(1, max_new // 2)
+                fb_opened += _scan_long_entries(fb, max_new=half)
+                if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                    fb_opened += _scan_short_entries(fb, max_new=max_new - fb_opened)
+                elif fb_opened < max_new:
+                    fb_opened += _scan_long_entries(fb, max_new=max_new - fb_opened)
+            elif regime_u == "VOLATILE":
+                vol_cap = max(1, int(math.ceil(max_new * 0.5)))
+                fb_opened += _scan_long_entries(fb, max_new=vol_cap)
+                if fb_opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+                    fb_opened += _scan_short_entries(fb, max_new=vol_cap - fb_opened)
             else:
                 fb_opened += _scan_long_entries(fb, max_new=max_new)
             if fb_opened > 0:
