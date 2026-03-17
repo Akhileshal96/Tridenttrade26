@@ -192,3 +192,40 @@ def test_opening_filter_fallback_min_trade_after_no_exec(monkeypatch):
     ok, reason = tc._opening_selective_entry_allowed("CCC", side="BUY")
     assert ok is True
     assert reason == "fallback_min_trade"
+
+
+def test_tick_fallback_scans_mean_reversion_strategy(monkeypatch):
+    tc.STATE["paused"] = False
+    tc.STATE["positions"] = {}
+    tc.STATE["fallback_mode_active"] = True
+    tc.STATE["fallback_universe"] = ["AAA"]
+    tc.STATE["no_entry_cycles"] = 10
+    tc.STATE["active_no_setup_cycles"] = 0
+
+    monkeypatch.setattr(tc, "_ensure_day_key", lambda: None)
+    monkeypatch.setattr(tc.RISK, "sync_wallet", lambda _s: None)
+    monkeypatch.setattr(tc, "_sync_wallet_and_caps", lambda force=False: None)
+    monkeypatch.setattr(tc.RISK, "check_day_drawdown_guard", lambda _s: False)
+    monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
+    monkeypatch.setattr(tc, "_within_entry_window", lambda: True)
+    monkeypatch.setattr(tc, "_resolve_trade_universe", lambda: ["A", "B"])
+    monkeypatch.setattr(tc, "refresh_active_universe_if_due", lambda _u: ["A", "B"])
+    monkeypatch.setattr(tc, "get_market_regime_snapshot", lambda: {"regime": "SIDEWAYS"})
+    monkeypatch.setattr(tc, "get_regime_entry_mode", lambda _r: "BALANCED")
+    monkeypatch.setattr(tc, "get_opening_mode", lambda: ("OPEN_CLEAN", {}))
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: False)
+    monkeypatch.setattr(tc, "ee_monitor_positions", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_scan_short_entries", lambda *a, **k: 0)
+
+    called = {"fallback_mr": False}
+
+    def _scan_long_stub(universe, max_new, signal_fn=tc.generate_signal):
+        if signal_fn is tc.generate_mean_reversion_signal:
+            called["fallback_mr"] = True
+        return 0
+
+    monkeypatch.setattr(tc, "_scan_long_entries", _scan_long_stub)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    tc.tick()
+    assert called["fallback_mr"] is True

@@ -11,7 +11,7 @@ import config as CFG
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
-from strategy_engine import generate_signal
+from strategy_engine import generate_signal, generate_mean_reversion_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
@@ -1280,34 +1280,62 @@ def get_opening_mode() -> tuple[str, dict]:
     return "OPEN_CLEAN", m
 
 
-def confirm_long_htf(symbol: str) -> bool:
+def _htf_volume_surge_score(symbol: str) -> float:
+    q = _quality_metrics(symbol)
+    if not q.get("ok"):
+        return 0.0
+    return float(q.get("vol_score") or 0.0)
+
+
+def confirm_long_htf(symbol: str, regime: str | None = None) -> bool:
     if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
         return True
-    df = _htf_fetch(symbol)
-    if df.empty or "close" not in df.columns:
-        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
-        return False
-    ma_n = int(getattr(CFG, "HTF_CONFIRM_MA", 20) or 20)
-    close = df["close"].astype(float)
-    ma = close.rolling(ma_n).mean().dropna()
-    if len(ma) < 2:
-        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
-        return False
-    bucket = _session_bucket()
-    if bucket == "EARLY":
-        ok = float(close.iloc[-1]) > float(ma.iloc[-1])
-        if ok:
-            append_log("INFO", "CONFIRM", "early_session_relaxed_htf")
-    elif bucket == "LATE":
-        ok = float(close.iloc[-1]) > float(ma.iloc[-1])
+    rg = str(regime or (get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN").upper()
+    htf_status = _htf_alignment_status(symbol, "BUY", rg)
+    htf_score = 2 if htf_status == "FULL" else (1 if htf_status == "PARTIAL" else 0)
+
+    if rg == "TRENDING":
+        ok = htf_score >= 2
+    elif rg == "SIDEWAYS":
+        ok = htf_score >= 1
+    elif rg == "VOLATILE":
+        vol_req = float(getattr(CFG, "VOLATILE_HTF_MIN_VOL_SCORE", 1.2) or 1.2)
+        vol_score = _htf_volume_surge_score(symbol)
+        ok = (htf_score >= 2) and (vol_score >= vol_req)
+        if not ok:
+            append_log(
+                "INFO",
+                "CONFIRM",
+                f"BUY blocked {symbol} reason=HTF_Score_Below_Req_for_{rg} htf_status={htf_status} htf_score={htf_score} vol_score={vol_score:.2f} vol_req={vol_req:.2f}",
+            )
+            return False
     else:
-        ok = float(close.iloc[-1]) > float(ma.iloc[-1]) and float(ma.iloc[-1]) > float(ma.iloc[-2])
+        ok = htf_score >= 1
+
     if ok and bool(getattr(CFG, "HTF_CONFIRM_RSI", False)):
-        rsi = _calc_rsi(close)
-        min_rsi = float(getattr(CFG, "HTF_LONG_MIN_RSI", 52.0) or 52.0)
-        ok = float(rsi.iloc[-1]) >= min_rsi
+        df = _htf_fetch(symbol)
+        if df.empty or "close" not in df.columns:
+            ok = False
+        else:
+            close = df["close"].astype(float)
+            rsi = _calc_rsi(close)
+            min_rsi = float(getattr(CFG, "HTF_LONG_MIN_RSI", 52.0) or 52.0)
+            rv = float(rsi.iloc[-1]) if len(rsi) > 0 and pd.notna(rsi.iloc[-1]) else 0.0
+            ok = rv >= min_rsi
+            if not ok:
+                append_log(
+                    "INFO",
+                    "CONFIRM",
+                    f"BUY blocked {symbol} reason=HTF_Score_Below_Req_for_{rg} htf_status={htf_status} htf_score={htf_score} rsi={rv:.2f} rsi_min={min_rsi:.2f}",
+                )
+                return False
+
     if not ok:
-        append_log("INFO", "CONFIRM", f"BUY blocked {symbol} reason=htf_not_bullish")
+        append_log(
+            "INFO",
+            "CONFIRM",
+            f"BUY blocked {symbol} reason=HTF_Score_Below_Req_for_{rg} htf_status={htf_status} htf_score={htf_score}",
+        )
     return ok
 
 
@@ -1459,6 +1487,13 @@ def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
         return "PARTIAL" if partial else "FAIL"
     if rg == "SIDEWAYS":
         return "PARTIAL" if partial else "FAIL"
+    if rg == "VOLATILE":
+        vol_req = float(getattr(CFG, "VOLATILE_HTF_MIN_VOL_SCORE", 1.2) or 1.2)
+        q = _quality_metrics(symbol)
+        vol_score = float(q.get("vol_score") or 0.0) if q.get("ok") else 0.0
+        if full and vol_score >= vol_req:
+            return "FULL"
+        return "FAIL"
     if rg == "WEAK":
         q = _quality_metrics(symbol)
         exceptional = bool(q.get("ok")) and float(q.get("vol_score") or 0.0) >= 1.3 and float(q.get("price") or 0.0) > float(q.get("sma20") or 0.0)
@@ -1776,6 +1811,8 @@ def _maybe_enter_short_from_signal(sig):
         append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
         return False
     if decision.get("tier") == "BLOCK":
+        if str(decision.get("components", {}).get("htf") or "").lower() == "fail":
+            append_log("INFO", "CONFIRM", f"SHORT blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
         append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
         return False
     tier_mult = float(decision.get("size_mult") or 0.0)
@@ -1928,6 +1965,8 @@ def _maybe_enter_from_signal(sig):
         append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
         return False
     if decision.get("tier") == "BLOCK":
+        if str(decision.get("components", {}).get("htf") or "").lower() == "fail":
+            append_log("INFO", "CONFIRM", f"BUY blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
         append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
         return False
     tier_mult = float(decision.get("size_mult") or 0.0)
@@ -2177,12 +2216,12 @@ def _maybe_send_eod_report():
         append_log("WARN", "EOD", f"report generation failed: {e}")
 
 
-def _scan_long_entries(universe: list, max_new: int) -> int:
+def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal) -> int:
     before = _open_positions_count()
     ee_process_entries(
         universe,
         _positions(),
-        signal_fn=generate_signal,
+        signal_fn=signal_fn,
         try_enter_fn=_maybe_enter_from_signal,
         max_new=max_new,
     )
@@ -2386,30 +2425,9 @@ def tick():
     if STATE.get("fallback_mode_active"):
         fb = list(STATE.get("fallback_universe") or [])
         if fb:
-            append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)}")
+            append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)} strategy=MEAN_REVERSION")
             fb_opened = 0
-            if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                fb_opened += _scan_short_entries(fb, max_new=max_new)
-                if fb_opened < max_new:
-                    fb_opened += _scan_long_entries(fb, max_new=max_new - fb_opened)
-            elif regime_u == "TRENDING":
-                fb_opened += _scan_long_entries(fb, max_new=max_new)
-                if fb_opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                    fb_opened += _scan_short_entries(fb, max_new=max_new - fb_opened)
-            elif regime_u == "SIDEWAYS":
-                half = max(1, max_new // 2)
-                fb_opened += _scan_long_entries(fb, max_new=half)
-                if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                    fb_opened += _scan_short_entries(fb, max_new=max_new - fb_opened)
-                elif fb_opened < max_new:
-                    fb_opened += _scan_long_entries(fb, max_new=max_new - fb_opened)
-            elif regime_u == "VOLATILE":
-                vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-                fb_opened += _scan_long_entries(fb, max_new=vol_cap)
-                if fb_opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                    fb_opened += _scan_short_entries(fb, max_new=vol_cap - fb_opened)
-            else:
-                fb_opened += _scan_long_entries(fb, max_new=max_new)
+            fb_opened += _scan_long_entries(fb, max_new=max_new, signal_fn=generate_mean_reversion_signal)
             if fb_opened > 0:
                 append_log(
                     "INFO",
