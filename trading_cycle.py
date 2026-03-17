@@ -1106,6 +1106,8 @@ def _compute_opening_metrics() -> dict:
         "spread_quality": "UNKNOWN",
         "volume_quality": "UNKNOWN",
         "valid": False,
+        "data_state": "INCOMPLETE",
+        "feed_error": False,
     }
     try:
         d1 = yf.download("^NSEI", period="7d", interval="1d", auto_adjust=False, progress=False, threads=False)
@@ -1160,10 +1162,14 @@ def _compute_opening_metrics() -> dict:
                 "spread_quality": spread_quality,
                 "volume_quality": volume_quality,
                 "valid": True,
+                "data_state": "READY",
+                "feed_error": False,
             }
         )
         return out
     except Exception:
+        out["data_state"] = "FEED_ERROR"
+        out["feed_error"] = True
         return out
 
 
@@ -1213,14 +1219,26 @@ def get_opening_mode() -> tuple[str, dict]:
     score += 1 if spread_good else 0
     score += 1 if volume_good else 0
 
+    if bool(m.get("feed_error")):
+        m["reason"] = "confirmed_broken_feed"
+        m["confidence"] = confidence
+        return "OPEN_UNSAFE", m
+
     if clear_bad_conditions:
-        m["reason"] = "clear_bad_opening_conditions"
+        if gap > max_gap * 1.25:
+            m["reason"] = "confirmed_extreme_gap"
+        elif rng > max_rng * 1.5:
+            m["reason"] = "confirmed_extreme_first_5m_range"
+        elif spread_bad and volume_bad:
+            m["reason"] = "confirmed_abnormal_liquidity"
+        else:
+            m["reason"] = "confirmed_unsafe_open"
         m["confidence"] = confidence
         return "OPEN_UNSAFE", m
 
     insufficient_data = (not bool(m.get("valid"))) or confidence <= 2
     if insufficient_data:
-        m["reason"] = "insufficient_opening_data"
+        m["reason"] = "incomplete_opening_data"
         m["confidence"] = confidence
         return "OPEN_MODERATE", m
 
@@ -1355,8 +1373,11 @@ def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bo
         return True, "allowed"
 
     if mode == "OPEN_MODERATE":
+        top_n = int(getattr(CFG, "OPEN_MODERATE_TOP_N", 10) or 10)
+        if research_universe and not is_top_ranked_symbol(sym, research_universe, top_n):
+            return False, "opening_filter_low_confidence"
         if not _opening_symbol_quality_ok(sym, side=side):
-            return False, "open_moderate_quality_failed"
+            return False, "opening_filter_low_confidence"
         return True, "allowed"
 
     return True, "allowed"

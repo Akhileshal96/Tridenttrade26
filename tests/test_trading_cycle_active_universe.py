@@ -97,7 +97,7 @@ def test_opening_mode_unknown_quality_defaults_to_moderate(monkeypatch):
 
     mode, metrics = tc.get_opening_mode()
     assert mode == "OPEN_MODERATE"
-    assert metrics.get("reason") == "insufficient_opening_data"
+    assert metrics.get("reason") == "incomplete_opening_data"
 
 def test_tick_allows_selective_scans_on_open_unsafe(monkeypatch):
     tc.STATE["paused"] = False
@@ -128,3 +128,14 @@ def test_tick_allows_selective_scans_on_open_unsafe(monkeypatch):
 
     assert called["long"] >= 1
     assert called["short"] == 0
+
+
+def test_opening_moderate_blocks_non_top_ranked_symbol(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "OPEN_MODERATE_TOP_N", 2, raising=False)
+    tc.STATE["opening_mode"] = "OPEN_MODERATE"
+    monkeypatch.setattr(tc, "_active_trade_universe", lambda: ["AAA", "BBB", "CCC"])
+    monkeypatch.setattr(tc, "_opening_symbol_quality_ok", lambda *_a, **_k: True)
+
+    ok, reason = tc._opening_selective_entry_allowed("CCC", side="BUY")
+    assert ok is False
+    assert reason == "opening_filter_low_confidence"
