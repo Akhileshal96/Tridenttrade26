@@ -59,6 +59,9 @@ STATE = {
     "no_entry_cycles": 0,
     "fallback_mode_active": False,
     "eod_report_sent_date": "",
+    "confirm_strictness": "STRICT",
+    "signals_seen_window": 0,
+    "entries_executed_window": 0,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -1405,6 +1408,197 @@ def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bo
     return True, "allowed"
 
 
+def _session_quality_score() -> float:
+    mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_UNSAFE":
+        return 0.3
+    if mode == "OPEN_MODERATE":
+        return 0.6
+    return 1.0
+
+
+def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
+    if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
+        return "FULL"
+    df = _htf_fetch(symbol)
+    if df.empty or "close" not in df.columns:
+        return "FAIL"
+    ma_n = int(getattr(CFG, "HTF_CONFIRM_MA", 20) or 20)
+    close = df["close"].astype(float)
+    ma = close.rolling(ma_n).mean().dropna()
+    if len(ma) < 2:
+        return "FAIL"
+
+    px = float(close.iloc[-1])
+    ma_now = float(ma.iloc[-1])
+    ma_prev = float(ma.iloc[-2])
+    bucket = _session_bucket()
+    strictness = str(STATE.get("confirm_strictness") or "STRICT").upper()
+    rg = str(regime or "UNKNOWN").upper()
+    side_u = str(side or "BUY").upper()
+
+    if side_u == "SHORT":
+        partial = px < ma_now
+        full = partial and ma_now < ma_prev
+        if rg == "WEAK":
+            return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+        if bucket == "EARLY" or strictness == "MODERATE":
+            return "PARTIAL" if partial else "FAIL"
+        return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+
+    partial = px > ma_now
+    full = partial and ma_now > ma_prev
+    if rg == "TRENDING":
+        if strictness == "STRICT" and bucket != "EARLY":
+            return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+        return "PARTIAL" if partial else "FAIL"
+    if rg == "SIDEWAYS":
+        return "PARTIAL" if partial else "FAIL"
+    if rg == "WEAK":
+        q = _quality_metrics(symbol)
+        exceptional = bool(q.get("ok")) and float(q.get("vol_score") or 0.0) >= 1.3 and float(q.get("price") or 0.0) > float(q.get("sma20") or 0.0)
+        if full and exceptional:
+            return "FULL"
+        return "PARTIAL" if partial and exceptional else "FAIL"
+
+    if bucket == "EARLY" or strictness == "MODERATE":
+        return "PARTIAL" if partial else "FAIL"
+    return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+
+
+def _entry_tier_from_score(score: int) -> str:
+    if score >= int(getattr(CFG, "ENTRY_FULL_MIN_SCORE", 80) or 80):
+        return "FULL"
+    if score >= int(getattr(CFG, "ENTRY_REDUCED_MIN_SCORE", 60) or 60):
+        return "REDUCED"
+    if score >= int(getattr(CFG, "ENTRY_MICRO_MIN_SCORE", 45) or 45):
+        return "MICRO"
+    return "BLOCK"
+
+
+def _entry_tier_multiplier(tier: str) -> float:
+    t = str(tier or "BLOCK").upper()
+    if t == "FULL":
+        return float(getattr(CFG, "ENTRY_FULL_SIZE_MULTIPLIER", 1.0) or 1.0)
+    if t == "REDUCED":
+        return float(getattr(CFG, "ENTRY_REDUCED_SIZE_MULTIPLIER", 0.5) or 0.5)
+    if t == "MICRO":
+        return float(getattr(CFG, "ENTRY_MICRO_SIZE_MULTIPLIER", 0.25) or 0.25)
+    return 0.0
+
+
+def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, research_universe: list) -> dict:
+    w_ltf = int(getattr(CFG, "CONFIRM_WEIGHT_LTF", 30) or 30)
+    w_htf = int(getattr(CFG, "CONFIRM_WEIGHT_HTF", 25) or 25)
+    w_reg = int(getattr(CFG, "CONFIRM_WEIGHT_REGIME", 15) or 15)
+    w_rank = int(getattr(CFG, "CONFIRM_WEIGHT_RANK", 15) or 15)
+    w_sec = int(getattr(CFG, "CONFIRM_WEIGHT_SECTOR", 10) or 10)
+    w_vol = int(getattr(CFG, "CONFIRM_WEIGHT_VOLUME", 5) or 5)
+
+    comps = {}
+    total = 0.0
+
+    ltf_ok = bool(sig)
+    comps["ltf"] = "ok" if ltf_ok else "fail"
+    if ltf_ok:
+        total += w_ltf
+
+    htf_status = _htf_alignment_status(symbol, side, regime)
+    comps["htf"] = htf_status.lower()
+    if htf_status == "FULL":
+        total += w_htf
+    elif htf_status == "PARTIAL":
+        total += (w_htf * 0.6)
+
+    rg = str(regime or "UNKNOWN").upper()
+    allowed, _reason, _meta = is_market_entry_allowed(symbol, rg, research_universe)
+    comps["regime"] = "ok" if allowed else "weak"
+    if allowed:
+        total += w_reg
+    elif rg == "WEAK":
+        total += (w_reg * 0.35)
+
+    rank = get_research_rank(symbol, research_universe)
+    rscore = _research_score_for_symbol(symbol)
+    rank_ok = (rank > 0 and rank <= 10) or (rscore is not None and float(rscore) >= 0.85)
+    comps["rank"] = "strong" if rank_ok else "weak"
+    if rank_ok:
+        total += w_rank
+    elif rank > 0 and rank <= 20:
+        total += (w_rank * 0.5)
+
+    sec_map = _sector_strength_snapshot(research_universe)
+    sec = _sector_for_symbol(symbol)
+    sec_strength = float(sec_map.get(sec, 0.0)) if isinstance(sec_map, dict) else 0.0
+    comps["sector"] = "strong" if sec_strength >= 0 else "weak"
+    if sec_strength >= 0.5:
+        total += w_sec
+    elif sec_strength >= 0:
+        total += (w_sec * 0.6)
+    elif sec_strength > -0.5:
+        total += (w_sec * 0.3)
+
+    q = _quality_metrics(symbol)
+    vol_score = float(q.get("vol_score") or 0.0) if q.get("ok") else 0.0
+    comps["volume"] = "ok" if vol_score >= 1.0 else "weak"
+    if vol_score >= 1.0:
+        total += w_vol
+    elif vol_score >= 0.8:
+        total += (w_vol * 0.5)
+
+    total = total * _session_quality_score()
+    comps["session"] = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+
+    score = int(round(max(0.0, min(100.0, total))))
+    tier = _entry_tier_from_score(score)
+
+    hard_block_reason = ""
+    om = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    om_reason = str((STATE.get("opening_metrics") or {}).get("reason") or "")
+    if om == "OPEN_UNSAFE" and om_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
+        hard_block_reason = om_reason
+
+    if tier == "MICRO":
+        micro_n = int(getattr(CFG, "ENTRY_MICRO_TOP_N", 5) or 5)
+        if research_universe and not is_top_ranked_symbol(symbol, research_universe, micro_n):
+            tier = "BLOCK"
+            score = min(score, int(getattr(CFG, "ENTRY_MICRO_MIN_SCORE", 45) or 45) - 1)
+            comps["micro_rank"] = "fail"
+
+    return {
+        "score": score,
+        "tier": tier,
+        "size_mult": _entry_tier_multiplier(tier),
+        "components": comps,
+        "hard_block": hard_block_reason,
+    }
+
+
+def _record_signal_seen():
+    STATE["signals_seen_window"] = int(STATE.get("signals_seen_window") or 0) + 1
+
+
+def _record_entry_executed():
+    STATE["entries_executed_window"] = int(STATE.get("entries_executed_window") or 0) + 1
+
+
+def _overfilter_health_check():
+    sig_n = int(STATE.get("signals_seen_window") or 0)
+    ent_n = int(STATE.get("entries_executed_window") or 0)
+    no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
+    sig_thr = int(getattr(CFG, "OVERFILTER_SIGNAL_THRESHOLD", 8) or 8)
+    cyc_thr = int(getattr(CFG, "OVERFILTER_NO_ENTRY_CYCLES", 6) or 6)
+    if sig_n >= sig_thr and ent_n == 0 and no_entry_cycles >= cyc_thr:
+        if str(STATE.get("confirm_strictness") or "STRICT").upper() != "MODERATE":
+            STATE["confirm_strictness"] = "MODERATE"
+            append_log("WARN", "HEALTH", "Over-filtered mode detected → downgrading strict HTF to moderate")
+            _notify("[HEALTH] Over-filtered: valid signals detected but no executions. Downgrading strict HTF to moderate.")
+    elif ent_n > 0:
+        STATE["confirm_strictness"] = "STRICT"
+        STATE["signals_seen_window"] = 0
+        STATE["entries_executed_window"] = 0
+
+
 def generate_short_signal(symbol: str):
     sym = (symbol or "").strip().upper()
     q = _quality_metrics(sym)
@@ -1459,6 +1653,7 @@ def build_fallback_universe() -> list:
 def _maybe_enter_short_from_signal(sig):
     if not sig:
         return False
+    _record_signal_seen()
     sym = str(sig.get("symbol") or "").strip().upper()
     entry = float(sig.get("entry") or 0.0)
     if not sym or entry <= 0:
@@ -1468,9 +1663,6 @@ def _maybe_enter_short_from_signal(sig):
         append_log("WARN", "RISK", "max short positions reached")
         return False
 
-    if not confirm_short_htf(sym):
-        return False
-
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
     qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
@@ -1478,6 +1670,26 @@ def _maybe_enter_short_from_signal(sig):
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
         strategy_tag = "mtf_confirmed_short"
     qty = _apply_strategy_allocation(qty, strategy_tag)
+
+    research_universe = _active_trade_universe()
+    regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN")
+    decision = _build_entry_confidence(sym, "SHORT", sig, regime, research_universe)
+    append_log(
+        "INFO",
+        "CONFIRM",
+        f"symbol={sym} score={decision['score']} tier={decision['tier']} "
+        f"htf={decision['components'].get('htf')} regime={decision['components'].get('regime')} "
+        f"rank={decision['components'].get('rank')}",
+    )
+    if decision.get("hard_block"):
+        append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
+        return False
+    if decision.get("tier") == "BLOCK":
+        append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
+        return False
+    tier_mult = float(decision.get("size_mult") or 0.0)
+    qty = max(1, int(math.floor(qty * tier_mult))) if qty > 0 and tier_mult > 0 else 0
+    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
@@ -1545,11 +1757,13 @@ def _maybe_enter_short_from_signal(sig):
     _set_cooldown()
     append_log("INFO", "ENTRY", f"SHORT {sym} qty={qty} entry={booked_entry:.2f}")
     _notify(f"🟠 SHORT {mode}\nSymbol: {sym}\nQuantity: {qty}\nEntry: {booked_entry:.2f}")
+    _record_entry_executed()
     return True
 
 def _maybe_enter_from_signal(sig):
     if not sig:
         return False
+    _record_signal_seen()
     sym = sig["symbol"].strip().upper()
     append_log("INFO", "SCAN", f"Scanning {sym}")
 
@@ -1588,9 +1802,6 @@ def _maybe_enter_from_signal(sig):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
 
-    if not confirm_long_htf(sym):
-        return False
-
     # 2) Universe membership check against active dynamic universe (if available)
     active_dyn = _active_trade_universe()
     if active_dyn and sym not in set(active_dyn):
@@ -1623,6 +1834,24 @@ def _maybe_enter_from_signal(sig):
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
         strategy_tag = "mtf_confirmed_long"
     qty = _apply_strategy_allocation(qty, strategy_tag)
+
+    decision = _build_entry_confidence(sym, "BUY", sig, regime, research_universe)
+    append_log(
+        "INFO",
+        "CONFIRM",
+        f"symbol={sym} score={decision['score']} tier={decision['tier']} "
+        f"htf={decision['components'].get('htf')} regime={decision['components'].get('regime')} "
+        f"rank={decision['components'].get('rank')}",
+    )
+    if decision.get("hard_block"):
+        append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
+        return False
+    if decision.get("tier") == "BLOCK":
+        append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
+        return False
+    tier_mult = float(decision.get("size_mult") or 0.0)
+    qty = max(1, int(math.floor(qty * tier_mult))) if qty > 0 and tier_mult > 0 else 0
+    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
@@ -1701,6 +1930,7 @@ def _maybe_enter_from_signal(sig):
         f"Entry: {booked_entry:.2f}\n"
         f"Wallet: {float(STATE.get('wallet_net_inr') or 0.0):.2f}"
     )
+    _record_entry_executed()
     return True
 
 
@@ -2030,6 +2260,7 @@ def tick():
             else:
                 append_log("INFO", "UNIV", "fallback scanned but no eligible entries this cycle")
 
+    _overfilter_health_check()
     _maybe_send_eod_report()
 
 
