@@ -139,3 +139,56 @@ def test_opening_moderate_blocks_non_top_ranked_symbol(monkeypatch):
     ok, reason = tc._opening_selective_entry_allowed("CCC", side="BUY")
     assert ok is False
     assert reason == "opening_filter_low_confidence"
+
+
+def test_opening_confidence_ignores_unknown_inputs(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "MAX_SAFE_GAP_PCT", 0.8, raising=False)
+    monkeypatch.setattr(tc.CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2, raising=False)
+
+    score, meta = tc.get_opening_confidence(
+        {
+            "gap_pct": 0.15,
+            "first_5m_range_pct": 0.0,
+            "direction_clear": False,
+            "spread_quality": "UNKNOWN",
+            "volume_quality": "UNKNOWN",
+            "valid": False,
+            "feed_error": False,
+        }
+    )
+
+    assert score >= 40
+    assert "volume" in meta.get("ignored", [])
+    assert "spread" in meta.get("ignored", [])
+
+
+def test_opening_mode_uses_confidence_thresholds(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    monkeypatch.setattr(tc, "_compute_opening_metrics", lambda: {"gap_pct": 0.1, "feed_error": False, "valid": True})
+    monkeypatch.setattr(tc, "get_opening_confidence", lambda _m=None: (35, {"ignored": []}))
+    mode, _ = tc.get_opening_mode()
+    assert mode == "OPEN_UNSAFE"
+
+    monkeypatch.setattr(tc, "get_opening_confidence", lambda _m=None: (55, {"ignored": []}))
+    mode, _ = tc.get_opening_mode()
+    assert mode == "OPEN_MODERATE"
+
+    monkeypatch.setattr(tc, "get_opening_confidence", lambda _m=None: (75, {"ignored": []}))
+    mode, _ = tc.get_opening_mode()
+    assert mode == "OPEN_CLEAN"
+
+
+def test_opening_filter_fallback_min_trade_after_no_exec(monkeypatch):
+    tc.STATE["opening_mode"] = "OPEN_MODERATE"
+    tc.STATE["no_entry_cycles"] = 10
+    monkeypatch.setattr(tc.CFG, "OPEN_MIN_TRADE_AFTER_NO_EXEC_CYCLES", 8, raising=False)
+    monkeypatch.setattr(tc.CFG, "OPEN_MODERATE_TOP_N", 2, raising=False)
+    monkeypatch.setattr(tc, "_active_trade_universe", lambda: ["AAA", "BBB", "CCC"])
+    monkeypatch.setattr(tc, "_opening_symbol_quality_ok", lambda *_a, **_k: False)
+
+    ok, reason = tc._opening_selective_entry_allowed("CCC", side="BUY")
+    assert ok is True
+    assert reason == "fallback_min_trade"

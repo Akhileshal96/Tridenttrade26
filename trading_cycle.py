@@ -1173,6 +1173,60 @@ def _compute_opening_metrics() -> dict:
         return out
 
 
+def get_opening_confidence(metrics: dict | None = None) -> tuple[int, dict]:
+    m = dict(metrics or _compute_opening_metrics() or {})
+    gap = abs(float(m.get("gap_pct") or 0.0))
+    rng = float(m.get("first_5m_range_pct") or 0.0)
+    max_gap = float(getattr(CFG, "MAX_SAFE_GAP_PCT", 0.8) or 0.8)
+    max_rng = float(getattr(CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2) or 1.2)
+    dir_ok = bool(m.get("direction_clear"))
+    spread_q = str(m.get("spread_quality") or "UNKNOWN").upper()
+    volume_q = str(m.get("volume_quality") or "UNKNOWN").upper()
+
+    parts = []
+    considered = []
+
+    if max_gap > 0:
+        gscore = max(0.0, min(100.0, 100.0 * (1.0 - (gap / (max_gap * 1.5)))))
+        parts.append(gscore)
+        considered.append("gap")
+
+    if rng > 0 and max_rng > 0:
+        rscore = max(0.0, min(100.0, 100.0 * (1.0 - (rng / (max_rng * 1.6)))))
+        parts.append(rscore)
+        considered.append("range")
+
+    if bool(m.get("valid")):
+        parts.append(100.0 if dir_ok else 30.0)
+        considered.append("trend")
+
+    if volume_q != "UNKNOWN":
+        parts.append(100.0 if volume_q == "GOOD" else 25.0)
+        considered.append("volume")
+
+    if spread_q != "UNKNOWN":
+        parts.append(100.0 if spread_q == "GOOD" else 20.0)
+        considered.append("spread")
+
+    ignored = []
+    if volume_q == "UNKNOWN":
+        ignored.append("volume")
+    if spread_q == "UNKNOWN":
+        ignored.append("spread")
+    if rng <= 0:
+        ignored.append("opening_range")
+
+    score = int(round(sum(parts) / len(parts))) if parts else 55
+    score = max(0, min(100, score))
+    meta = {
+        "considered": considered,
+        "ignored": ignored,
+        "data_state": str(m.get("data_state") or "INCOMPLETE"),
+        "feed_error": bool(m.get("feed_error")),
+    }
+    return score, meta
+
+
 def get_opening_mode() -> tuple[str, dict]:
     if not bool(getattr(CFG, "USE_ADAPTIVE_OPEN_FILTER", True)):
         return "OPEN_CLEAN", {"valid": False}
@@ -1181,75 +1235,41 @@ def get_opening_mode() -> tuple[str, dict]:
 
     m = _compute_opening_metrics()
     gap = abs(float(m.get("gap_pct") or 0.0))
-    rng = float(m.get("first_5m_range_pct") or 0.0)
     max_gap = float(getattr(CFG, "MAX_SAFE_GAP_PCT", 0.8) or 0.8)
-    max_rng = float(getattr(CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2) or 1.2)
-    dir_ok = bool(m.get("direction_clear"))
-
     spread_q = str(m.get("spread_quality") or "UNKNOWN").upper()
     volume_q = str(m.get("volume_quality") or "UNKNOWN").upper()
-    spread_bad = spread_q == "WIDE"
-    volume_bad = volume_q in ("LOW", "POOR")
-    spread_good = spread_q == "GOOD"
-    volume_good = volume_q == "GOOD"
 
-    # Missing/unknown quality is neutral (not auto-unsafe).
-    confidence = 0
-    confidence += 1 if bool(m.get("valid")) else 0
-    confidence += 1 if spread_q != "UNKNOWN" else 0
-    confidence += 1 if volume_q != "UNKNOWN" else 0
-    confidence += 1 if rng > 0 else 0
+    conf, conf_meta = get_opening_confidence(m)
+    m["confidence"] = conf
+    m["confidence_meta"] = conf_meta
 
     append_log("INFO", "OPEN", f"gap_pct={float(m.get('gap_pct') or 0.0):.2f}")
     append_log("INFO", "OPEN", f"first_5m_range_pct={float(m.get('first_5m_range_pct') or 0.0):.2f}")
     append_log("INFO", "OPEN", f"spread_quality={spread_q}")
     append_log("INFO", "OPEN", f"volume_quality={volume_q}")
-
-    clear_bad_conditions = (
-        gap > max_gap * 1.25
-        or rng > max_rng * 1.5
-        or (spread_bad and volume_bad)
-        or (not dir_ok and gap > max_gap and rng > max_rng)
-    )
-
-    score = 0
-    score += 1 if gap <= max_gap else 0
-    score += 1 if rng <= max_rng else 0
-    score += 1 if dir_ok else 0
-    score += 1 if spread_good else 0
-    score += 1 if volume_good else 0
+    if conf_meta.get("ignored"):
+        append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
 
     if bool(m.get("feed_error")):
         m["reason"] = "confirmed_broken_feed"
-        m["confidence"] = confidence
         return "OPEN_UNSAFE", m
 
-    if clear_bad_conditions:
-        if gap > max_gap * 1.25:
-            m["reason"] = "confirmed_extreme_gap"
-        elif rng > max_rng * 1.5:
-            m["reason"] = "confirmed_extreme_first_5m_range"
-        elif spread_bad and volume_bad:
-            m["reason"] = "confirmed_abnormal_liquidity"
-        else:
-            m["reason"] = "confirmed_unsafe_open"
-        m["confidence"] = confidence
+    if gap > max_gap * 1.5:
+        m["reason"] = "confirmed_extreme_gap"
         return "OPEN_UNSAFE", m
 
-    insufficient_data = (not bool(m.get("valid"))) or confidence <= 2
-    if insufficient_data:
+    if not bool(m.get("valid")):
         m["reason"] = "incomplete_opening_data"
-        m["confidence"] = confidence
         return "OPEN_MODERATE", m
 
-    if score >= 4:
-        m["reason"] = "opening_conditions_clean"
-        m["confidence"] = confidence
-        return "OPEN_CLEAN", m
-
-    m["reason"] = "mixed_opening_conditions"
-    m["confidence"] = confidence
-    return "OPEN_MODERATE", m
+    if conf < 40:
+        m["reason"] = "low_opening_confidence"
+        return "OPEN_UNSAFE", m
+    if conf < 70:
+        m["reason"] = "incomplete_opening_data"
+        return "OPEN_MODERATE", m
+    m["reason"] = "opening_conditions_clean"
+    return "OPEN_CLEAN", m
 
 
 def confirm_long_htf(symbol: str) -> bool:
@@ -1359,25 +1379,27 @@ def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bo
         return False, "invalid_symbol"
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     research_universe = _active_trade_universe()
+    no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
+    fallback_cycles = int(getattr(CFG, "OPEN_MIN_TRADE_AFTER_NO_EXEC_CYCLES", 8) or 8)
 
     if mode == "OPEN_UNSAFE":
         top_n = int(getattr(CFG, "OPEN_UNSAFE_TOP_N", 5) or 5)
         min_score = float(getattr(CFG, "OPEN_UNSAFE_MIN_SCORE", 0.90) or 0.90)
         if research_universe and not is_top_ranked_symbol(sym, research_universe, top_n):
-            return False, "open_unsafe_not_top_ranked"
+            return (True, "fallback_min_trade") if no_entry_cycles >= fallback_cycles else (False, "opening_filter_low_confidence")
         score = _research_score_for_symbol(sym)
         if score is not None and score < min_score:
-            return False, "open_unsafe_score_too_low"
+            return (True, "fallback_min_trade") if no_entry_cycles >= fallback_cycles else (False, "opening_filter_low_confidence")
         if not _opening_symbol_quality_ok(sym, side=side):
-            return False, "open_unsafe_quality_failed"
+            return (True, "fallback_min_trade") if no_entry_cycles >= fallback_cycles else (False, "opening_filter_low_confidence")
         return True, "allowed"
 
     if mode == "OPEN_MODERATE":
         top_n = int(getattr(CFG, "OPEN_MODERATE_TOP_N", 10) or 10)
         if research_universe and not is_top_ranked_symbol(sym, research_universe, top_n):
-            return False, "opening_filter_low_confidence"
+            return (True, "fallback_min_trade") if no_entry_cycles >= fallback_cycles else (False, "opening_filter_low_confidence")
         if not _opening_symbol_quality_ok(sym, side=side):
-            return False, "opening_filter_low_confidence"
+            return (True, "fallback_min_trade") if no_entry_cycles >= fallback_cycles else (False, "opening_filter_low_confidence")
         return True, "allowed"
 
     return True, "allowed"
@@ -1464,11 +1486,15 @@ def _maybe_enter_short_from_signal(sig):
             append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
-        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        if open_reason == "fallback_min_trade":
+            append_log("INFO", "OPEN", "fallback min-trade activated after prolonged no-exec cycles")
+            qty = 1
+        else:
+            qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
         if mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
+            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → reduced-size entry allowed mult={open_mult:.2f}")
         elif mode == "OPEN_MODERATE":
-            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size entry allowed")
+            append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
             append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
 
@@ -1605,11 +1631,15 @@ def _maybe_enter_from_signal(sig):
             append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
-        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+        if open_reason == "fallback_min_trade":
+            append_log("INFO", "OPEN", "fallback min-trade activated after prolonged no-exec cycles")
+            qty = 1
+        else:
+            qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
         if mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
+            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → reduced-size entry allowed mult={open_mult:.2f}")
         elif mode == "OPEN_MODERATE":
-            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size entry allowed")
+            append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
             append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
 
@@ -1923,11 +1953,15 @@ def tick():
     STATE["opening_mode"] = open_mode
     STATE["opening_metrics"] = dict(open_metrics or {})
     if _in_open_filter_window():
-        append_log("INFO", "OPEN", f"mode={open_mode} reason={str((open_metrics or {}).get('reason') or 'n/a')}")
+        append_log("INFO", "OPEN", f"confidence={int((open_metrics or {}).get('confidence') or 0)} mode={open_mode} reason={str((open_metrics or {}).get('reason') or 'n/a')}")
         if open_mode == "OPEN_UNSAFE":
             append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
         elif open_mode == "OPEN_MODERATE":
             append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size selective entry allowed")
+        hard_reason = str((open_metrics or {}).get("reason") or "")
+        if hard_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
+            append_log("WARN", "OPEN", f"mode={open_mode} reason={hard_reason} → blocking new entries")
+            return
 
     opened = 0
     append_log("INFO", "UNIV", "scanning active universe")
