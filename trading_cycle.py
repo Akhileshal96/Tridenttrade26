@@ -1179,28 +1179,59 @@ def get_opening_mode() -> tuple[str, dict]:
     max_gap = float(getattr(CFG, "MAX_SAFE_GAP_PCT", 0.8) or 0.8)
     max_rng = float(getattr(CFG, "MAX_SAFE_FIRST_5M_RANGE_PCT", 1.2) or 1.2)
     dir_ok = bool(m.get("direction_clear"))
-    spread_good = str(m.get("spread_quality") or "UNKNOWN").upper() == "GOOD"
-    vol_good = str(m.get("volume_quality") or "UNKNOWN").upper() == "GOOD"
+
+    spread_q = str(m.get("spread_quality") or "UNKNOWN").upper()
+    volume_q = str(m.get("volume_quality") or "UNKNOWN").upper()
+    spread_bad = spread_q == "WIDE"
+    volume_bad = volume_q in ("LOW", "POOR")
+    spread_good = spread_q == "GOOD"
+    volume_good = volume_q == "GOOD"
+
+    # Missing/unknown quality is neutral (not auto-unsafe).
+    confidence = 0
+    confidence += 1 if bool(m.get("valid")) else 0
+    confidence += 1 if spread_q != "UNKNOWN" else 0
+    confidence += 1 if volume_q != "UNKNOWN" else 0
+    confidence += 1 if rng > 0 else 0
 
     append_log("INFO", "OPEN", f"gap_pct={float(m.get('gap_pct') or 0.0):.2f}")
     append_log("INFO", "OPEN", f"first_5m_range_pct={float(m.get('first_5m_range_pct') or 0.0):.2f}")
-    append_log("INFO", "OPEN", f"spread_quality={m.get('spread_quality')}")
-    append_log("INFO", "OPEN", f"volume_quality={m.get('volume_quality')}")
+    append_log("INFO", "OPEN", f"spread_quality={spread_q}")
+    append_log("INFO", "OPEN", f"volume_quality={volume_q}")
 
-    if gap > max_gap * 1.25 or rng > max_rng * 1.5 or (not dir_ok and not vol_good):
-        return "OPEN_UNSAFE", m
+    clear_bad_conditions = (
+        gap > max_gap * 1.25
+        or rng > max_rng * 1.5
+        or (spread_bad and volume_bad)
+        or (not dir_ok and gap > max_gap and rng > max_rng)
+    )
 
     score = 0
     score += 1 if gap <= max_gap else 0
     score += 1 if rng <= max_rng else 0
     score += 1 if dir_ok else 0
     score += 1 if spread_good else 0
-    score += 1 if vol_good else 0
-    if score >= 4:
-        return "OPEN_CLEAN", m
-    if score >= 2:
+    score += 1 if volume_good else 0
+
+    if clear_bad_conditions:
+        m["reason"] = "clear_bad_opening_conditions"
+        m["confidence"] = confidence
+        return "OPEN_UNSAFE", m
+
+    insufficient_data = (not bool(m.get("valid"))) or confidence <= 2
+    if insufficient_data:
+        m["reason"] = "insufficient_opening_data"
+        m["confidence"] = confidence
         return "OPEN_MODERATE", m
-    return "OPEN_UNSAFE", m
+
+    if score >= 4:
+        m["reason"] = "opening_conditions_clean"
+        m["confidence"] = confidence
+        return "OPEN_CLEAN", m
+
+    m["reason"] = "mixed_opening_conditions"
+    m["confidence"] = confidence
+    return "OPEN_MODERATE", m
 
 
 def confirm_long_htf(symbol: str) -> bool:
@@ -1296,11 +1327,39 @@ def _opening_symbol_quality_ok(symbol: str, side: str = "BUY") -> bool:
 
 def _opening_size_multiplier() -> float:
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_UNSAFE":
+        return float(getattr(CFG, "OPEN_UNSAFE_SIZE_MULTIPLIER", 0.25) or 0.25)
     if mode == "OPEN_MODERATE":
         return float(getattr(CFG, "OPEN_MODERATE_SIZE_MULTIPLIER", 0.5) or 0.5)
     if mode == "OPEN_CLEAN":
         return float(getattr(CFG, "OPEN_CLEAN_SIZE_MULTIPLIER", 1.0) or 1.0)
-    return 0.0
+    return 1.0
+
+def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bool, str]:
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return False, "invalid_symbol"
+    mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    research_universe = _active_trade_universe()
+
+    if mode == "OPEN_UNSAFE":
+        top_n = int(getattr(CFG, "OPEN_UNSAFE_TOP_N", 5) or 5)
+        min_score = float(getattr(CFG, "OPEN_UNSAFE_MIN_SCORE", 0.90) or 0.90)
+        if research_universe and not is_top_ranked_symbol(sym, research_universe, top_n):
+            return False, "open_unsafe_not_top_ranked"
+        score = _research_score_for_symbol(sym)
+        if score is not None and score < min_score:
+            return False, "open_unsafe_score_too_low"
+        if not _opening_symbol_quality_ok(sym, side=side):
+            return False, "open_unsafe_quality_failed"
+        return True, "allowed"
+
+    if mode == "OPEN_MODERATE":
+        if not _opening_symbol_quality_ok(sym, side=side):
+            return False, "open_moderate_quality_failed"
+        return True, "allowed"
+
+    return True, "allowed"
 
 
 def generate_short_signal(symbol: str):
@@ -1378,17 +1437,19 @@ def _maybe_enter_short_from_signal(sig):
     qty = _apply_strategy_allocation(qty, strategy_tag)
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if mode == "OPEN_MODERATE":
-        if not _opening_symbol_quality_ok(sym, side="SHORT"):
-            append_log("INFO", "OPEN", "signal observed but blocked by opening filter")
+    if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+        allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="SHORT")
+        if not allowed_open:
+            append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
         qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
-        append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced size entry allowed")
-    elif mode == "OPEN_CLEAN" and _in_open_filter_window():
-        open_mult = _opening_size_multiplier()
-        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
-        append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+        if mode == "OPEN_UNSAFE":
+            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
+        elif mode == "OPEN_MODERATE":
+            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size entry allowed")
+        else:
+            append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
 
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
@@ -1517,17 +1578,19 @@ def _maybe_enter_from_signal(sig):
     qty = _apply_strategy_allocation(qty, strategy_tag)
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if mode == "OPEN_MODERATE":
-        if not _opening_symbol_quality_ok(sym, side="BUY"):
-            append_log("INFO", "OPEN", "signal observed but blocked by opening filter")
+    if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+        allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
+        if not allowed_open:
+            append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
         qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
-        append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced size entry allowed")
-    elif mode == "OPEN_CLEAN" and _in_open_filter_window():
-        open_mult = _opening_size_multiplier()
-        qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
-        append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+        if mode == "OPEN_UNSAFE":
+            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
+        elif mode == "OPEN_MODERATE":
+            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size entry allowed")
+        else:
+            append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
 
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
@@ -1839,10 +1902,11 @@ def tick():
     STATE["opening_mode"] = open_mode
     STATE["opening_metrics"] = dict(open_metrics or {})
     if _in_open_filter_window():
-        append_log("INFO", "OPEN", f"mode={open_mode}")
-    if _in_open_filter_window() and open_mode == "OPEN_UNSAFE":
-        append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → blocking new entries")
-        return
+        append_log("INFO", "OPEN", f"mode={open_mode} reason={str((open_metrics or {}).get('reason') or 'n/a')}")
+        if open_mode == "OPEN_UNSAFE":
+            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
+        elif open_mode == "OPEN_MODERATE":
+            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size selective entry allowed")
 
     opened = 0
     append_log("INFO", "UNIV", "scanning active universe")
@@ -1922,6 +1986,12 @@ def run_loop_forever():
         f"weak mode config top_n={int(getattr(CFG, 'WEAK_MARKET_TOP_N', 10) or 10)} "
         f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
         f"size_multiplier={float(getattr(CFG, 'WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+    )
+    append_log(
+        "INFO",
+        "OPEN",
+        f"adaptive opening filter enabled unsafe_mult={float(getattr(CFG, 'OPEN_UNSAFE_SIZE_MULTIPLIER', 0.25) or 0.25):.2f} "
+        f"moderate_mult={float(getattr(CFG, 'OPEN_MODERATE_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
     if not _active_trade_universe():
         _load_research_universe_from_file()

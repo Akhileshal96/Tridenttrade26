@@ -76,7 +76,30 @@ def test_opening_mode_unsafe_from_metrics(monkeypatch):
     assert mode == "OPEN_UNSAFE"
 
 
-def test_tick_blocks_entries_on_open_unsafe(monkeypatch):
+
+
+def test_opening_mode_unknown_quality_defaults_to_moderate(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        tc,
+        "_compute_opening_metrics",
+        lambda: {
+            "gap_pct": 0.10,
+            "first_5m_range_pct": 0.0,
+            "direction_clear": False,
+            "spread_quality": "UNKNOWN",
+            "volume_quality": "UNKNOWN",
+            "valid": False,
+        },
+    )
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    mode, metrics = tc.get_opening_mode()
+    assert mode == "OPEN_MODERATE"
+    assert metrics.get("reason") == "insufficient_opening_data"
+
+def test_tick_allows_selective_scans_on_open_unsafe(monkeypatch):
     tc.STATE["paused"] = False
     tc.STATE["positions"] = {}
     tc.STATE["fallback_mode_active"] = False
@@ -103,5 +126,5 @@ def test_tick_blocks_entries_on_open_unsafe(monkeypatch):
 
     tc.tick()
 
-    assert called["long"] == 0
+    assert called["long"] >= 1
     assert called["short"] == 0
