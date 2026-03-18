@@ -73,6 +73,11 @@ def generate_signal(universe):
 
             buffer = _compute_entry_buffer(df, last, avg)
             trigger = avg + buffer
+            append_log(
+                "INFO",
+                "SIG",
+                f"{sym} primary_eval_ok last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
+            )
 
             # Strict trigger: do not spam NEAR logs or emit attempts unless buffer is cleared.
             if last <= trigger:

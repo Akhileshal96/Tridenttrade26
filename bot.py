@@ -44,6 +44,7 @@ HELP_TEXT = (
     "• /stoploop  → pause trading loop\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
+    "• /pnl        → day P/L snapshot\n"
     "• /trailstatus → trailing lock details\n"
     "• /strategyreport → strategy analytics summary\n"
     "• /beststrategy → top strategy by net pnl\n"
@@ -297,6 +298,14 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
 
     if cmd_word == "/status":
         await event.reply(CYCLE.get_status_text())
+        return True
+
+    if cmd_word == "/pnl":
+        day_pnl = float(CYCLE.STATE.get("today_pnl") or 0.0)
+        wallet = float(CYCLE.STATE.get("wallet_net_inr") or CYCLE.STATE.get("last_wallet") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+        pct = (day_pnl / wallet * 100.0) if wallet > 0 else 0.0
+        icon = "🟢" if day_pnl >= 0 else "🔴"
+        await event.reply(f"{icon} Day P/L: ₹{day_pnl:.2f} ({pct:+.2f}%)")
         return True
 
     if cmd_word == "/trailstatus":
@@ -737,6 +746,7 @@ async def main():
         "startloop": _mk_panel_handler("startloop"),
         "stoploop": _mk_panel_handler("stoploop"),
         "status": _mk_panel_handler("status"),
+        "pnl": _mk_panel_handler("pnl"),
         "trailstatus": _mk_panel_handler("trailstatus"),
         "strategyreport": _mk_panel_handler("strategyreport"),
         "beststrategy": _mk_panel_handler("beststrategy"),

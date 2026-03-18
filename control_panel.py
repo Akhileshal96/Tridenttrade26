@@ -30,7 +30,7 @@ def _main_buttons(handlers=None):
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
-        [Button.inline(pnl_label, b"cp:cmd:status")],
+        [Button.inline(pnl_label, b"cp:cmd:pnl")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
