@@ -18,21 +18,30 @@ def _cfg_float(name: str, default: float) -> float:
         return float(default)
 
 
-def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float) -> float:
+def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: str = "") -> float:
     fixed_pct = _cfg_float("SMA20_ENTRY_BUFFER_PCT", 0.1) / 100.0
     pct_buffer = max(0.0, sma20 * fixed_pct)
 
     atr_mult = _cfg_float("SMA20_ENTRY_BUFFER_ATR_MULT", 0.0)
     atr_buffer = 0.0
-    if atr_mult > 0 and all(c in df.columns for c in ("high", "low", "close")) and len(df) >= 20:
-        high = df["high"].astype(float)
-        low = df["low"].astype(float)
-        close = df["close"].astype(float)
-        prev_close = close.shift(1)
-        tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-        atr = tr.rolling(14).mean().iloc[-1]
-        if not pd.isna(atr):
-            atr_buffer = float(atr) * atr_mult
+    if atr_mult > 0:
+        if not all(c in df.columns for c in ("high", "low", "close")):
+            if symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
+        elif len(df) < 15:
+            if symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
+        else:
+            high = df["high"].astype(float)
+            low = df["low"].astype(float)
+            close = df["close"].astype(float)
+            prev_close = close.shift(1)
+            tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+            atr = tr.rolling(14).mean().iloc[-1]
+            if not pd.isna(atr):
+                atr_buffer = float(atr) * atr_mult
+            elif symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
 
     return max(pct_buffer, atr_buffer)
 
@@ -66,8 +75,9 @@ def generate_signal(universe):
                 append_log("WARN", "SIG", f"{sym} no candle data")
                 continue
 
-            if len(df) < 25:
-                append_log("WARN", "SIG", f"{sym} insufficient candles: {len(df)}")
+            core_min_bars = int(getattr(CFG, "SMA20_CORE_MIN_BARS", 20) or 20)
+            if len(df) < core_min_bars:
+                append_log("INFO", "SIG", f"{sym} skipped reason=insufficient_history_min_bars have={len(df)} need={core_min_bars}")
                 continue
 
             sma20 = df["close"].rolling(20).mean()
@@ -83,7 +93,7 @@ def generate_signal(universe):
                 append_log("WARN", "SIG", f"{sym} invalid prices last={last} sma20={avg}")
                 continue
 
-            buffer = _compute_entry_buffer(df, last, avg)
+            buffer = _compute_entry_buffer(df, last, avg, symbol=sym)
             trigger = avg + buffer
             append_log(
                 "INFO",
