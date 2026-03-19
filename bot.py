@@ -747,6 +747,7 @@ async def main():
 
     panel_handlers = {
         "__pnl_so_far_label__": _pnl_so_far_button_label,
+        "__is_viewer__": _is_viewer,
         "myid": _mk_panel_handler("myid"),
         "help": _mk_panel_handler("help"),
         "commands": _mk_panel_handler("commands"),
