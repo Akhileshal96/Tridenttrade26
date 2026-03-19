@@ -1,4 +1,3 @@
-import excluded_store
 import time
 import pandas as pd
 
@@ -8,83 +7,361 @@ from instrument_store import token_for_symbol
 from log_store import append_log
 
 
-def _now():
-    return pd.Timestamp.now(tz="Asia/Kolkata")
+def _cfg_obj():
+    # Defensive local resolver for runtime environments that may hold stale module globals.
+    import config as cfg
+    return cfg
+
+
+def _cfg_float(name: str, default: float) -> float:
+    raw = getattr(_cfg_obj(), name, None)
+    if raw is None:
+        append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        append_log("WARN", "CONFIRM", f"invalid config for {name}={raw}; using default={default}")
+        return float(default)
+
+
+def _cfg_int(name: str, default: int) -> int:
+    raw = getattr(_cfg_obj(), name, None)
+    if raw is None:
+        append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        append_log("WARN", "CONFIRM", f"invalid config for {name}={raw}; using default={default}")
+        return int(default)
+
+
+def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: str = "") -> float:
+    fixed_pct = _cfg_float("SMA20_ENTRY_BUFFER_PCT", 0.1) / 100.0
+    pct_buffer = max(0.0, sma20 * fixed_pct)
+
+    atr_mult = _cfg_float("SMA20_ENTRY_BUFFER_ATR_MULT", 0.0)
+    atr_buffer = 0.0
+    if atr_mult > 0:
+        if not all(c in df.columns for c in ("high", "low", "close")):
+            if symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
+        elif len(df) < 15:
+            if symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
+        else:
+            high = df["high"].astype(float)
+            low = df["low"].astype(float)
+            close = df["close"].astype(float)
+            prev_close = close.shift(1)
+            tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+            atr = tr.rolling(14).mean().iloc[-1]
+            if not pd.isna(atr):
+                atr_buffer = float(atr) * atr_mult
+            elif symbol:
+                append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
+
+    return max(pct_buffer, atr_buffer)
+
+
+_ZERODHA_INTERVAL_MAP = {
+    "1m": "minute",
+    "1min": "minute",
+    "minute": "minute",
+    "3m": "3minute",
+    "3min": "3minute",
+    "3minute": "3minute",
+    "5m": "5minute",
+    "5min": "5minute",
+    "5minute": "5minute",
+    "10m": "10minute",
+    "10min": "10minute",
+    "10minute": "10minute",
+    "15m": "15minute",
+    "15min": "15minute",
+    "15minute": "15minute",
+    "30m": "30minute",
+    "30min": "30minute",
+    "30minute": "30minute",
+    "60m": "60minute",
+    "60min": "60minute",
+    "1h": "60minute",
+    "60minute": "60minute",
+    "1d": "day",
+    "day": "day",
+}
+
+
+def normalize_zerodha_interval(interval: str) -> str:
+    raw = str(interval or "").strip().lower()
+    return _ZERODHA_INTERVAL_MAP.get(raw, raw or "15minute")
+
+
+def _score_momentum_setup(last: float, trigger: float, rel_vol: float, sma_now: float, sma_prev: float, atr: float) -> float:
+    dist_above_trigger = max(0.0, ((last - trigger) / trigger) * 100.0) if trigger > 0 else 0.0
+    sma_slope = max(0.0, ((sma_now - sma_prev) / sma_prev) * 100.0) if sma_prev > 0 else 0.0
+    atr_norm_dist = max(0.0, (last - sma_now) / atr) if atr > 0 else 0.0
+    return (
+        (0.40 * dist_above_trigger)
+        + (0.30 * max(0.0, rel_vol))
+        + (0.20 * max(0.0, sma_slope))
+        + (0.10 * max(0.0, atr_norm_dist))
+    )
+
+
+def _score_mean_reversion_setup(rsi_last: float, bounce_size_pct: float, recovery_momentum_pct: float) -> float:
+    rsi_depth = max(0.0, 30.0 - float(rsi_last))
+    return (
+        (0.50 * rsi_depth)
+        + (0.30 * max(0.0, bounce_size_pct))
+        + (0.20 * max(0.0, recovery_momentum_pct))
+    )
 
 
 def generate_signal(universe):
     """
-    Simple signal:
-    - Fetch last 10 days of 15m candles
-    - BUY if last close > SMA20
-    Observability:
-    - Logs each scan
-    - Logs exact exception per symbol
+    Signal: last close > SMA20 (15m candles). Logs real errors.
     """
     kite = get_kite()
 
+    candidates = []
     for sym in universe:
-        # insider safety: skip excluded symbols
-        if str(sym).strip().upper() in excluded_store.load_excluded():
-            continue
         sym = (sym or "").strip().upper()
         if not sym:
             continue
 
-        # Skip if excluded list exists and contains symbol (optional)
-        try:
-            if hasattr(CFG, "EXCLUDE_PATH") and CFG.EXCLUDE_PATH:
-                import os
-                if os.path.exists(CFG.EXCLUDE_PATH):
-                    with open(CFG.EXCLUDE_PATH, "r") as f:
-                        blocked = {x.strip().upper() for x in f.read().splitlines() if x.strip()}
-                    if sym in blocked:
-                        append_log("INFO", "SCAN", f"Skipping excluded {sym}")
-                        continue
-        except Exception as e:
-            append_log("WARN", "SCAN", f"Exclude check failed: {e}")
-
-        append_log("INFO", "SCAN", f"Scanning {sym}")
-
         try:
             token = token_for_symbol(sym)
 
-            # 10 days of candles (rate-limit friendly)
-            frm = _now() - pd.Timedelta(days=10)
-            to = _now()
-            data = kite.historical_data(token, frm.to_pydatetime(), to.to_pydatetime(), "15minute")
+            data = kite.historical_data(
+                token,
+                pd.Timestamp.now() - pd.Timedelta(days=10),
+                pd.Timestamp.now(),
+                "15minute",
+            )
 
-            time.sleep(0.45)  # keep under 3 req/sec
+            # Zerodha historical endpoint rate: keep it safe
+            time.sleep(0.5)
 
             df = pd.DataFrame(data)
             if df.empty or "close" not in df.columns:
                 append_log("WARN", "SIG", f"{sym} no candle data")
                 continue
 
-            # Need >= 20 candles for SMA20
-            if len(df) < 25:
-                append_log("WARN", "SIG", f"{sym} insufficient candles={len(df)}")
+            core_min_bars = _cfg_int("SMA20_CORE_MIN_BARS", 20)
+            if len(df) < core_min_bars:
+                append_log("INFO", "SIG", f"{sym} skipped reason=insufficient_history_min_bars have={len(df)} need={core_min_bars}")
                 continue
 
-            closes = df["close"].astype(float)
-            sma20 = closes.rolling(20).mean().iloc[-1]
-            last = float(closes.iloc[-1])
-
-            if pd.isna(sma20) or sma20 <= 0:
-                append_log("WARN", "SIG", f"{sym} SMA20 invalid")
+            sma20 = df["close"].rolling(20).mean()
+            last = float(df["close"].iloc[-1])
+            avg_val = sma20.iloc[-1]
+            if pd.isna(avg_val):
+                append_log("WARN", "SIG", f"{sym} SMA20 NA")
                 continue
 
-            # Near-signal visibility (within 0.2%)
-            if abs(last - sma20) / sma20 < 0.002:
-                append_log("INFO", "NEAR", f"{sym} near: last={last:.2f} sma20={sma20:.2f}")
+            avg = float(avg_val)
 
-            if last > sma20:
-                append_log("INFO", "SIG", f"{sym} BUY trigger last={last:.2f} sma20={sma20:.2f}")
-                return {"symbol": sym, "side": "BUY", "entry": last}
+            if last <= 0 or avg <= 0:
+                append_log("WARN", "SIG", f"{sym} invalid prices last={last} sma20={avg}")
+                continue
+
+            buffer = _compute_entry_buffer(df, last, avg, symbol=sym)
+            trigger = avg + buffer
+            append_log(
+                "INFO",
+                "SIG",
+                f"primary scan evaluated {sym} successfully last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
+            )
+
+            # Strict trigger: do not spam NEAR logs or emit attempts unless buffer is cleared.
+            if last <= trigger:
+                continue
+
+            if last > trigger:
+                vol = df["volume"].astype(float) if "volume" in df.columns else pd.Series(dtype=float)
+                rel_vol = 0.0
+                if not vol.empty and len(vol) >= 20:
+                    avg_vol = float(vol.tail(20).mean())
+                    rel_vol = (float(vol.iloc[-1]) / avg_vol) if avg_vol > 0 else 0.0
+                sma_prev = float(sma20.iloc[-2]) if len(sma20) >= 2 and not pd.isna(sma20.iloc[-2]) else avg
+                atr = 0.0
+                if all(c in df.columns for c in ("high", "low", "close")) and len(df) >= 15:
+                    high = df["high"].astype(float)
+                    low = df["low"].astype(float)
+                    close = df["close"].astype(float)
+                    prev_close = close.shift(1)
+                    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+                    atr_val = tr.rolling(14).mean().iloc[-1]
+                    atr = float(atr_val) if not pd.isna(atr_val) else 0.0
+                signal_score = _score_momentum_setup(last, trigger, rel_vol, avg, sma_prev, atr)
+                append_log(
+                    "INFO",
+                    "SIG",
+                    f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
+                )
+                candidates.append({
+                    "symbol": sym,
+                    "side": "BUY",
+                    "entry": float(last),
+                    "sma20": avg,
+                    "entry_buffer": buffer,
+                    "strategy_setup": "trend_breakout",
+                    "strategy_family": "trend_long",
+                    "signal_score": float(signal_score),
+                })
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
             continue
 
-    append_log("INFO", "SIG", f"No signal | score={score} threshold={threshold} rsi={rsi} ema20={ema20} ema50={ema50} macd={macd}")
+    if not candidates:
+        append_log("INFO", "SIG", "No signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"momentum candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    return best
+
+
+def _calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, pd.NA)
+    return 100 - (100 / (1 + rs))
+
+
+def generate_mean_reversion_signal(universe):
+    """Fallback signal: RSI oversold rebound or lower-BB bounce."""
+    kite = get_kite()
+
+    candidates = []
+    for sym in universe:
+        sym = (sym or "").strip().upper()
+        if not sym:
+            continue
+
+        try:
+            token = token_for_symbol(sym)
+            data = kite.historical_data(
+                token,
+                pd.Timestamp.now() - pd.Timedelta(days=10),
+                pd.Timestamp.now(),
+                "15minute",
+            )
+            time.sleep(0.5)
+            df = pd.DataFrame(data)
+            if df.empty or "close" not in df.columns or len(df) < 25:
+                continue
+
+            close = df["close"].astype(float)
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            sma20 = close.rolling(20).mean()
+            std20 = close.rolling(20).std()
+            if pd.isna(sma20.iloc[-1]) or pd.isna(std20.iloc[-1]):
+                continue
+
+            lower = float(sma20.iloc[-1] - (2.0 * std20.iloc[-1]))
+            prev_lower = float(sma20.iloc[-2] - (2.0 * std20.iloc[-2])) if not pd.isna(std20.iloc[-2]) else lower
+            rsi = _calc_rsi(close)
+            rsi_last = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+
+            # Mean-reversion long setups: RSI oversold or lower-band bounce confirmation.
+            rsi_setup = rsi_last < 30.0
+            bb_bounce_setup = prev <= prev_lower and last > lower
+            if not (rsi_setup or bb_bounce_setup):
+                continue
+
+            bounce_size_pct = (((last - lower) / lower) * 100.0) if lower > 0 else 0.0
+            recovery_momentum_pct = (((last - prev) / prev) * 100.0) if prev > 0 else 0.0
+            signal_score = _score_mean_reversion_setup(rsi_last, bounce_size_pct, recovery_momentum_pct)
+            append_log(
+                "INFO",
+                "SIG",
+                f"{sym} MR BUY trigger last={last:.2f} rsi={rsi_last:.2f} lower_bb={lower:.2f} setup={'RSI' if rsi_setup else 'BB_BOUNCE'}",
+            )
+            candidates.append({
+                "symbol": sym,
+                "side": "BUY",
+                "entry": last,
+                "strategy_setup": "mean_reversion",
+                "strategy_family": "mean_reversion",
+                "rsi": rsi_last,
+                "lower_bb": lower,
+                "signal_score": float(signal_score),
+            })
+
+        except Exception as e:
+            append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            continue
+
+    if not candidates:
+        append_log("INFO", "SIG", "No mean-reversion signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"mean_reversion candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    return best
+
+
+def generate_pullback_signal(universe):
+    """Pullback continuation long: price holds above rising SMA20 and reclaims it from below."""
+    kite = get_kite()
+
+    for sym in universe:
+        sym = (sym or "").strip().upper()
+        if not sym:
+            continue
+
+        try:
+            token = token_for_symbol(sym)
+            data = kite.historical_data(
+                token,
+                pd.Timestamp.now() - pd.Timedelta(days=10),
+                pd.Timestamp.now(),
+                "15minute",
+            )
+            time.sleep(0.5)
+            df = pd.DataFrame(data)
+            if df.empty or "close" not in df.columns or len(df) < 25:
+                continue
+
+            close = df["close"].astype(float)
+            sma20 = close.rolling(20).mean()
+            if pd.isna(sma20.iloc[-1]) or pd.isna(sma20.iloc[-2]):
+                continue
+
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            sma_now = float(sma20.iloc[-1])
+            sma_prev = float(sma20.iloc[-2])
+            if sma_now <= sma_prev:
+                continue
+
+            reclaimed = prev <= sma_prev and last > sma_now
+            shallow_pullback = last >= (sma_now * 0.998)
+            if not (reclaimed and shallow_pullback):
+                continue
+
+            append_log(
+                "INFO",
+                "SIG",
+                f"{sym} PULLBACK BUY trigger last={last:.2f} sma20={sma_now:.2f} prev={prev:.2f}",
+            )
+            return {
+                "symbol": sym,
+                "side": "BUY",
+                "entry": last,
+                "strategy_setup": "pullback_long",
+                "strategy_family": "pullback_long",
+                "sma20": sma_now,
+            }
+        except Exception as e:
+            append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            continue
+
+    append_log("INFO", "SIG", "No pullback signal found")
     return None
