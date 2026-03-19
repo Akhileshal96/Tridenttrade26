@@ -242,7 +242,7 @@ def test_tick_fallback_scans_mean_reversion_strategy(monkeypatch):
 
     called = {"fallback_mr": False}
 
-    def _scan_long_stub(universe, max_new, signal_fn=tc.generate_signal, strategy_family="trend_long"):
+    def _scan_long_stub(universe, max_new, signal_fn=tc.generate_signal, strategy_family="trend_long", universe_source="primary"):
         if signal_fn is tc.generate_mean_reversion_signal:
             called["fallback_mr"] = True
         return 0

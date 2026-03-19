@@ -48,6 +48,24 @@ def detect_market_regime(df: pd.DataFrame) -> str:
     return regime
 
 
+def detect_trend_direction(df: pd.DataFrame) -> str:
+    """Directional split for TRENDING routing: UP / DOWN / FLAT / UNKNOWN."""
+    if df is None or df.empty or "Close" not in df.columns:
+        return "UNKNOWN"
+    close = df["Close"].astype(float)
+    if not _is_valid_close(close):
+        return "UNKNOWN"
+    last = float(close.iloc[-1])
+    prev = float(close.iloc[-2]) if len(close) > 1 else last
+    ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+    chg1 = ((last - prev) / prev) * 100.0 if prev > 0 else 0.0
+    if last >= ema20 and chg1 >= 0:
+        return "UP"
+    if last < ema20 and chg1 <= 0:
+        return "DOWN"
+    return "FLAT"
+
+
 def get_market_regime_snapshot() -> dict:
     global _LAST_VALID_SNAPSHOT
     try:
@@ -82,8 +100,10 @@ def get_market_regime_snapshot() -> dict:
             atr_pct = float(tr_pct.tail(14).mean()) if not tr_pct.empty else 0.0
 
         regime = detect_market_regime(df)
+        trend_direction = detect_trend_direction(df)
         snap = {
             "regime": regime,
+            "trend_direction": trend_direction,
             "nifty": nifty,
             "ema20": ema20,
             "chg1": chg1,
@@ -105,6 +125,10 @@ def get_market_regime_snapshot() -> dict:
 
 def get_regime_entry_mode(regime: str) -> str:
     rg = str(regime or "UNKNOWN").upper()
+    if rg == "TRENDING_UP":
+        return "LONG"
+    if rg == "TRENDING_DOWN":
+        return "SHORT_PRIMARY"
     if rg == "WEAK":
         return "SHORT_PRIMARY"
     if rg == "TRENDING":

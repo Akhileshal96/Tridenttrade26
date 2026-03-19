@@ -57,7 +57,7 @@ def _append_csv(path: str, fieldnames: list[str], row: dict):
 def record_trade_exit(record: dict):
     fields = [
         "entry_time", "exit_time", "symbol", "side", "qty", "entry", "exit", "pnl_inr", "pnl_pct", "reason",
-        "strategy_tag", "market_regime", "universe_source", "sector",
+        "strategy_tag", "strategy_family", "market_regime", "universe_source", "sector",
     ]
     row = dict(record or {})
     row.setdefault("exit_time", _now_iso())
@@ -66,7 +66,7 @@ def record_trade_exit(record: dict):
 
 def record_skipped_signal(record: dict):
     fields = [
-        "time", "symbol", "side", "reason", "strategy_tag", "market_regime", "signal_price", "after_15m_pct", "after_30m_pct", "after_60m_pct"
+        "time", "symbol", "side", "reason", "strategy_tag", "strategy_family", "market_regime", "signal_price", "after_15m_pct", "after_30m_pct", "after_60m_pct"
     ]
     row = dict(record or {})
     row.setdefault("time", _now_iso())
@@ -395,11 +395,15 @@ def generate_eod_report_text(state: dict) -> str:
     worst = min(trades, key=lambda r: _safe_float(r.get("pnl_inr")), default=None)
 
     by_strategy = defaultdict(float)
+    by_family = defaultdict(float)
     by_sector = defaultdict(float)
+    by_route = defaultdict(float)
     by_reason = defaultdict(int)
     for t in trades:
         by_strategy[str(t.get("strategy_tag") or "unknown")] += _safe_float(t.get("pnl_inr"))
+        by_family[str(t.get("strategy_family") or "unknown")] += _safe_float(t.get("pnl_inr"))
         by_sector[str(t.get("sector") or "OTHER")] += _safe_float(t.get("pnl_inr"))
+        by_route[str(t.get("universe_source") or "primary")] += _safe_float(t.get("pnl_inr"))
     for s in skips:
         by_reason[str(s.get("reason") or "unknown")] += 1
 
@@ -482,6 +486,12 @@ def generate_eod_report_text(state: dict) -> str:
     for k, v in sorted(by_strategy.items(), key=lambda x: x[1], reverse=True)[:5]:
         count = sum(1 for t in trades if str(t.get("strategy_tag") or "") == k)
         lines.append(f"{k} → {_fmt_p(v)} ({count})")
+    if by_family:
+        lines.append("")
+        lines.append("Strategy Family Performance")
+        for k, v in sorted(by_family.items(), key=lambda x: x[1], reverse=True)[:8]:
+            count = sum(1 for t in trades if str(t.get("strategy_family") or "unknown") == k)
+            lines.append(f"{k} → {_fmt_p(v)} ({count})")
     lines.append("")
     lines.append("Sector Performance")
     for k, v in sorted(by_sector.items(), key=lambda x: x[1], reverse=True)[:5]:
@@ -507,6 +517,11 @@ def generate_eod_report_text(state: dict) -> str:
         lines.append("📌 Insights")
         for i in insights:
             lines.append(f"• {i}")
+    if by_route:
+        lines.append("")
+        lines.append("Routing Summary")
+        for k, v in sorted(by_route.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"{k} → {_fmt_p(v)}")
     lines.append("")
     lines.append(f"Market Regime: {regime}")
     lines.append(f"Top Sector: {top_sector}")

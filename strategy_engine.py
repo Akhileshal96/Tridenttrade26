@@ -129,7 +129,15 @@ def generate_signal(universe):
                     "SIG",
                     f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
                 )
-                return {"symbol": sym, "side": "BUY", "entry": float(last), "sma20": avg, "entry_buffer": buffer}
+                return {
+                    "symbol": sym,
+                    "side": "BUY",
+                    "entry": float(last),
+                    "sma20": avg,
+                    "entry_buffer": buffer,
+                    "strategy_setup": "trend_breakout",
+                    "strategy_family": "trend_long",
+                }
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
@@ -198,6 +206,7 @@ def generate_mean_reversion_signal(universe):
                 "side": "BUY",
                 "entry": last,
                 "strategy_setup": "mean_reversion",
+                "strategy_family": "mean_reversion",
                 "rsi": rsi_last,
                 "lower_bb": lower,
             }
@@ -207,4 +216,64 @@ def generate_mean_reversion_signal(universe):
             continue
 
     append_log("INFO", "SIG", "No mean-reversion signal found")
+    return None
+
+
+def generate_pullback_signal(universe):
+    """Pullback continuation long: price holds above rising SMA20 and reclaims it from below."""
+    kite = get_kite()
+
+    for sym in universe:
+        sym = (sym or "").strip().upper()
+        if not sym:
+            continue
+
+        try:
+            token = token_for_symbol(sym)
+            data = kite.historical_data(
+                token,
+                pd.Timestamp.now() - pd.Timedelta(days=10),
+                pd.Timestamp.now(),
+                "15minute",
+            )
+            time.sleep(0.5)
+            df = pd.DataFrame(data)
+            if df.empty or "close" not in df.columns or len(df) < 25:
+                continue
+
+            close = df["close"].astype(float)
+            sma20 = close.rolling(20).mean()
+            if pd.isna(sma20.iloc[-1]) or pd.isna(sma20.iloc[-2]):
+                continue
+
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            sma_now = float(sma20.iloc[-1])
+            sma_prev = float(sma20.iloc[-2])
+            if sma_now <= sma_prev:
+                continue
+
+            reclaimed = prev <= sma_prev and last > sma_now
+            shallow_pullback = last >= (sma_now * 0.998)
+            if not (reclaimed and shallow_pullback):
+                continue
+
+            append_log(
+                "INFO",
+                "SIG",
+                f"{sym} PULLBACK BUY trigger last={last:.2f} sma20={sma_now:.2f} prev={prev:.2f}",
+            )
+            return {
+                "symbol": sym,
+                "side": "BUY",
+                "entry": last,
+                "strategy_setup": "pullback_long",
+                "strategy_family": "pullback_long",
+                "sma20": sma_now,
+            }
+        except Exception as e:
+            append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            continue
+
+    append_log("INFO", "SIG", "No pullback signal found")
     return None
