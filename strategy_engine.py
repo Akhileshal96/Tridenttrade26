@@ -6,11 +6,23 @@ from instrument_store import token_for_symbol
 from log_store import append_log
 
 
+def _cfg_float(name: str, default: float) -> float:
+    raw = getattr(CFG, name, None)
+    if raw is None:
+        append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        append_log("WARN", "CONFIRM", f"invalid config for {name}={raw}; using default={default}")
+        return float(default)
+
+
 def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float) -> float:
-    fixed_pct = float(getattr(CFG, "SMA20_ENTRY_BUFFER_PCT", 0.1) or 0.1) / 100.0
+    fixed_pct = _cfg_float("SMA20_ENTRY_BUFFER_PCT", 0.1) / 100.0
     pct_buffer = max(0.0, sma20 * fixed_pct)
 
-    atr_mult = float(getattr(CFG, "SMA20_ENTRY_BUFFER_ATR_MULT", 0.0) or 0.0)
+    atr_mult = _cfg_float("SMA20_ENTRY_BUFFER_ATR_MULT", 0.0)
     atr_buffer = 0.0
     if atr_mult > 0 and all(c in df.columns for c in ("high", "low", "close")) and len(df) >= 20:
         high = df["high"].astype(float)
@@ -76,7 +88,7 @@ def generate_signal(universe):
             append_log(
                 "INFO",
                 "SIG",
-                f"{sym} primary_eval_ok last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
+                f"primary scan evaluated {sym} successfully last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
             )
 
             # Strict trigger: do not spam NEAR logs or emit attempts unless buffer is cleared.
