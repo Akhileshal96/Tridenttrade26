@@ -1,7 +1,6 @@
 import time
 import pandas as pd
 
-import config as CFG
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
