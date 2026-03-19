@@ -1793,6 +1793,7 @@ def _maybe_enter_short_from_signal(sig):
     _record_signal_seen()
     sym = str(sig.get("symbol") or "").strip().upper()
     entry = float(sig.get("entry") or 0.0)
+    strategy_family = str(sig.get("strategy_family") or "short_breakdown")
     if not sym or entry <= 0:
         return False
 
@@ -1814,7 +1815,7 @@ def _maybe_enter_short_from_signal(sig):
     append_log(
         "INFO",
         "CONFIRM",
-        f"symbol={sym} score={decision['score']} tier={decision['tier']} "
+        f"symbol={sym} family={strategy_family} score={decision['score']} tier={decision['tier']} "
         f"htf={decision['components'].get('htf')} regime={decision['components'].get('regime')} "
         f"rank={decision['components'].get('rank')}",
     )
@@ -1888,13 +1889,14 @@ def _maybe_enter_short_from_signal(sig):
         "trailing_active": False,
         "order_id": oid,
         "strategy_tag": strategy_tag,
+        "strategy_family": strategy_family,
         "market_regime": str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN"),
         "universe_source": "primary",
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     }
     _set_cooldown()
-    append_log("INFO", "ENTRY", f"SHORT {sym} qty={qty} entry={booked_entry:.2f}")
+    append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
     append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
         append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
@@ -1907,6 +1909,7 @@ def _maybe_enter_from_signal(sig):
         return False
     _record_signal_seen()
     sym = sig["symbol"].strip().upper()
+    strategy_family = str(sig.get("strategy_family") or "trend_long")
     append_log("INFO", "SCAN", f"Scanning {sym}")
 
     if _skip_cooldown_active(sym):
@@ -1968,7 +1971,7 @@ def _maybe_enter_from_signal(sig):
     append_log(
         "INFO",
         "CONFIRM",
-        f"symbol={sym} score={decision['score']} tier={decision['tier']} "
+        f"symbol={sym} family={strategy_family} score={decision['score']} tier={decision['tier']} "
         f"htf={decision['components'].get('htf')} regime={decision['components'].get('regime')} "
         f"rank={decision['components'].get('rank')}",
     )
@@ -2046,6 +2049,7 @@ def _maybe_enter_from_signal(sig):
         "trailing_active": False,
         "order_id": oid,
         "strategy_tag": strategy_tag,
+        "strategy_family": strategy_family,
         "market_regime": regime,
         "universe_source": "primary",
         "sector": _sector_for_symbol(sym),
@@ -2053,7 +2057,7 @@ def _maybe_enter_from_signal(sig):
     }
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
-    append_log("INFO", "TRADE", f"{mode} BUY {sym} qty={qty}")
+    append_log("INFO", "TRADE", f"{mode} BUY {sym} family={strategy_family} tier={decision.get('tier')} qty={qty}")
     append_log("INFO", "EXEC", f"symbol={sym} side=BUY size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
         append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
@@ -2119,7 +2123,7 @@ def get_status_text():
         e, q = _trade_entry_qty(p)
         rows.append(
             f"- {sym} {str(p.get('side') or 'BUY').upper()} qty={q} entry={e:.2f} "
-            f"strategy={p.get('strategy_tag','-')} regime={p.get('market_regime','-')}"
+            f"strategy={p.get('strategy_tag','-')} family={p.get('strategy_family','-')} regime={p.get('market_regime','-')}"
         )
     current_profit, current_loss = _current_open_pnl_breakdown()
     return (
@@ -2203,6 +2207,7 @@ def _scan_short_entries(universe: list, max_new: int) -> int:
         if not sig:
             SA.record_skipped_signal({"symbol": sym, "side": "SHORT", "reason": "no_short_signal", "strategy_tag": "short_breakdown"})
             continue
+        sig.setdefault("strategy_family", "short_breakdown")
         if _maybe_enter_short_from_signal(sig):
             opened += 1
     return opened
@@ -2227,12 +2232,19 @@ def _maybe_send_eod_report():
         append_log("WARN", "EOD", f"report generation failed: {e}")
 
 
-def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal) -> int:
+def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, strategy_family: str = "trend_long") -> int:
     before = _open_positions_count()
+
+    def _signal_with_family(cands):
+        sig = signal_fn(cands)
+        if sig and strategy_family and not sig.get("strategy_family"):
+            sig["strategy_family"] = strategy_family
+        return sig
+
     ee_process_entries(
         universe,
         _positions(),
-        signal_fn=signal_fn,
+        signal_fn=_signal_with_family,
         try_enter_fn=_maybe_enter_from_signal,
         max_new=max_new,
     )
@@ -2339,88 +2351,95 @@ def tick():
     regime_u = str(regime or "UNKNOWN").upper()
     if regime_u == "WEAK":
         append_log("INFO", "MARKET", "regime=WEAK bias=SHORT_FIRST")
+        append_log("INFO", "ROUTE", "regime=WEAK prioritizing short candidates in active_universe")
         if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(active_universe, max_new=max_new)
         if opened < max_new:
-            opened += _scan_long_entries(active_universe, max_new=max_new - opened)
+            opened += _scan_long_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_long")
     elif regime_u == "TRENDING":
         append_log("INFO", "MARKET", "regime=TRENDING bias=LONG_FIRST")
-        opened += _scan_long_entries(active_universe, max_new=max_new)
+        append_log("INFO", "ROUTE", "regime=TRENDING prioritizing trend_long in active_universe")
+        opened += _scan_long_entries(active_universe, max_new=max_new, strategy_family="trend_long")
         if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(active_universe, max_new=max_new - opened)
     elif regime_u == "SIDEWAYS":
-        append_log("INFO", "MARKET", "regime=SIDEWAYS bias=BALANCED")
+        append_log("INFO", "MARKET", "regime=SIDEWAYS bias=MEAN_REVERSION_FIRST")
+        append_log("INFO", "ROUTE", "regime=SIDEWAYS prioritizing mean_reversion candidates in active_universe")
         half = max(1, max_new // 2)
-        opened += _scan_long_entries(active_universe, max_new=half)
+        opened += _scan_long_entries(active_universe, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion")
         if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(active_universe, max_new=max_new - opened)
         elif opened < max_new:
-            opened += _scan_long_entries(active_universe, max_new=max_new - opened)
+            opened += _scan_long_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_long")
     elif regime_u == "VOLATILE":
         append_log("INFO", "MARKET", "regime=VOLATILE bias=RISK_REDUCED")
         vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-        opened += _scan_long_entries(active_universe, max_new=vol_cap)
+        append_log("INFO", "ROUTE", "regime=VOLATILE prioritizing selective clean setups in active_universe")
+        opened += _scan_long_entries(active_universe, max_new=vol_cap, strategy_family="outlier_long")
         if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(active_universe, max_new=vol_cap - opened)
     else:
         append_log("INFO", "MARKET", f"regime={regime_u} bias=ADAPTIVE_DEFAULT")
-        opened += _scan_long_entries(active_universe, max_new=max_new)
+        append_log("INFO", "ROUTE", "regime=UNKNOWN prioritizing micro/low-confidence participation only")
+        opened += _scan_long_entries(active_universe, max_new=max_new, strategy_family="fallback_long")
         if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(active_universe, max_new=max_new - opened)
 
     if opened <= 0:
         STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
+        append_log("INFO", "ROUTE", "no setup in active_universe -> expanding to research_universe")
         research_tail = [s for s in research_universe if s not in set(active_universe)]
         if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(research_tail, max_new=max_new)
             if opened < max_new:
                 opened += _scan_long_entries(research_tail, max_new=max_new - opened)
         elif regime_u == "TRENDING":
-            opened += _scan_long_entries(research_tail, max_new=max_new)
+            opened += _scan_long_entries(research_tail, max_new=max_new, strategy_family="trend_long")
             if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(research_tail, max_new=max_new - opened)
         elif regime_u == "SIDEWAYS":
             half = max(1, max_new // 2)
-            opened += _scan_long_entries(research_tail, max_new=half)
+            opened += _scan_long_entries(research_tail, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion")
             if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(research_tail, max_new=max_new - opened)
             elif opened < max_new:
-                opened += _scan_long_entries(research_tail, max_new=max_new - opened)
+                opened += _scan_long_entries(research_tail, max_new=max_new - opened, strategy_family="outlier_long")
         elif regime_u == "VOLATILE":
             vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-            opened += _scan_long_entries(research_tail, max_new=vol_cap)
+            opened += _scan_long_entries(research_tail, max_new=vol_cap, strategy_family="outlier_long")
             if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(research_tail, max_new=vol_cap - opened)
         else:
-            opened += _scan_long_entries(research_tail, max_new=max_new)
+            opened += _scan_long_entries(research_tail, max_new=max_new, strategy_family="fallback_long")
 
     expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
         append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
+        append_log("INFO", "ROUTE", "no trend setup in active_universe -> expanding to fallback_universe")
         expanded = list(research_universe)
         if regime_u == "WEAK" and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
             opened += _scan_short_entries(expanded, max_new=max_new)
             if opened < max_new:
                 opened += _scan_long_entries(expanded, max_new=max_new - opened)
         elif regime_u == "TRENDING":
-            opened += _scan_long_entries(expanded, max_new=max_new)
+            opened += _scan_long_entries(expanded, max_new=max_new, strategy_family="trend_long")
             if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(expanded, max_new=max_new - opened)
         elif regime_u == "SIDEWAYS":
             half = max(1, max_new // 2)
-            opened += _scan_long_entries(expanded, max_new=half)
+            opened += _scan_long_entries(expanded, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion")
             if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(expanded, max_new=max_new - opened)
             elif opened < max_new:
-                opened += _scan_long_entries(expanded, max_new=max_new - opened)
+                opened += _scan_long_entries(expanded, max_new=max_new - opened, strategy_family="outlier_long")
         elif regime_u == "VOLATILE":
             vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-            opened += _scan_long_entries(expanded, max_new=vol_cap)
+            opened += _scan_long_entries(expanded, max_new=vol_cap, strategy_family="outlier_long")
             if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
                 opened += _scan_short_entries(expanded, max_new=vol_cap - opened)
         else:
-            opened += _scan_long_entries(expanded, max_new=max_new)
+            opened += _scan_long_entries(expanded, max_new=max_new, strategy_family="fallback_long")
 
     if opened <= 0:
         STATE["no_entry_cycles"] = int(STATE.get("no_entry_cycles") or 0) + 1
@@ -2441,7 +2460,8 @@ def tick():
         if fb:
             append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)} strategy=MEAN_REVERSION")
             fb_opened = 0
-            fb_opened += _scan_long_entries(fb, max_new=max_new, signal_fn=generate_mean_reversion_signal)
+            append_log("INFO", "ROUTE", "fallback_universe active -> mean_reversion/fallback_long routing")
+            fb_opened += _scan_long_entries(fb, max_new=max_new, signal_fn=generate_mean_reversion_signal, strategy_family="fallback_long")
             if fb_opened > 0:
                 append_log(
                     "INFO",
