@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import config as CFG
 import trading_cycle as CYCLE
+from trading_cycle import STATE_LOCK
 import night_research
 from night_scheduler import run_nightly_maintenance
 
@@ -392,7 +393,8 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if not _is_trader(sender):
             await event.reply("❌ Not permitted (Trader/Owner only).")
             return True
-        CYCLE.STATE["paused"] = False
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["paused"] = False
         await event.reply("▶️ Loop Started")
         return True
 
@@ -400,7 +402,8 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if not _is_trader(sender):
             await event.reply("❌ Not permitted (Trader/Owner only).")
             return True
-        CYCLE.STATE["paused"] = True
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["paused"] = True
         await event.reply("⏸️ Loop Paused")
         return True
 
@@ -409,8 +412,9 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if not _is_owner(sender):
             await event.reply("❌ Not permitted (Owner only).")
             return True
-        CYCLE.STATE["initiated"] = True
-        CYCLE.STATE["live_override"] = True
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["initiated"] = True
+            CYCLE.STATE["live_override"] = True
         await event.reply("🟢 LIVE INITIATED (runtime override enabled). Use /disengage to stop.")
         return True
 
@@ -418,8 +422,9 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if not _is_owner(sender):
             await event.reply("❌ Not permitted (Owner only).")
             return True
-        CYCLE.STATE["initiated"] = False
-        CYCLE.STATE["live_override"] = False
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["initiated"] = False
+            CYCLE.STATE["live_override"] = False
         await event.reply("🔴 DISENGAGED (runtime override disabled). Orders blocked.")
         return True
 
@@ -592,10 +597,12 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if not _is_owner(sender):
             await event.reply("❌ Not permitted (Owner only).")
             return True
-        CYCLE.STATE["paused"] = True
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["paused"] = True
         close_ok = CYCLE._close_all_open_trades("PANIC")
-        CYCLE.STATE["initiated"] = False
-        CYCLE.STATE["live_override"] = False
+        with CYCLE.STATE_LOCK:
+            CYCLE.STATE["initiated"] = False
+            CYCLE.STATE["live_override"] = False
         if close_ok:
             await event.reply("🛑 PANIC done: paused + disengaged + close-all attempted.")
         else:

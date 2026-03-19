@@ -19,6 +19,7 @@ import research_engine as RE
 from universe_builder import SECTOR_MAP
 from market_regime import get_market_regime_snapshot, get_regime_entry_mode
 import strategy_analytics as SA
+from state_lock import STATE_LOCK, safe_update, PositionManager
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -71,6 +72,7 @@ STATE = {
 
 # backwards compatibility for any caller that still checks open_trades key
 STATE["open_trades"] = STATE["positions"]
+PM = PositionManager(STATE)
 
 RUNTIME = {
     "MAX_ENTRY_SLIPPAGE_PCT": float(getattr(CFG, "MAX_ENTRY_SLIPPAGE_PCT", 0.30)),
@@ -217,11 +219,33 @@ def _past_force_exit_time():
 
 
 def _ensure_day_key():
-    today = datetime.now(IST).strftime("%Y-%m-%d")
-    if STATE.get("day_key") != today:
-        STATE["day_key"] = today
+    with STATE_LOCK:
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        if STATE.get("day_key") != today:
+            STATE["day_key"] = today
+            STATE["today_pnl"] = 0.0
+            _positions().clear()
+            STATE["profit_milestone_hit"] = False
+            STATE["cooldown_until"] = None
+            STATE["loss_streak"] = 0
+            STATE["reduce_size_factor"] = 1.0
+            STATE["pause_entries_until"] = None
+            STATE["halt_for_day"] = False
+            STATE["day_peak_pnl"] = 0.0
+            STATE["sector_map_cache"] = None
+            append_log("INFO", "DAY", f"Auto rollover reset for {today}")
+
+
+
+def set_runtime_param(key, value):
+    RUNTIME[key] = value
+
+
+def manual_reset_day():
+    with STATE_LOCK:
         STATE["today_pnl"] = 0.0
         _positions().clear()
+        STATE["day_key"] = datetime.now(IST).strftime("%Y-%m-%d")
         STATE["profit_milestone_hit"] = False
         STATE["cooldown_until"] = None
         STATE["loss_streak"] = 0
@@ -230,25 +254,6 @@ def _ensure_day_key():
         STATE["halt_for_day"] = False
         STATE["day_peak_pnl"] = 0.0
         STATE["sector_map_cache"] = None
-        append_log("INFO", "DAY", f"Auto rollover reset for {today}")
-
-
-def set_runtime_param(key, value):
-    RUNTIME[key] = value
-
-
-def manual_reset_day():
-    STATE["today_pnl"] = 0.0
-    _positions().clear()
-    STATE["day_key"] = datetime.now(IST).strftime("%Y-%m-%d")
-    STATE["profit_milestone_hit"] = False
-    STATE["cooldown_until"] = None
-    STATE["loss_streak"] = 0
-    STATE["reduce_size_factor"] = 1.0
-    STATE["pause_entries_until"] = None
-    STATE["halt_for_day"] = False
-    STATE["day_peak_pnl"] = 0.0
-    STATE["sector_map_cache"] = None
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -627,10 +632,10 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         if ltp is None:
             ltp = entry
         pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
-        STATE["today_pnl"] += pnl
+        safe_update(STATE, "today_pnl", lambda x: float(x or 0.0) + pnl)
         RISK.update_loss_streak(STATE, pnl)
         RISK.check_day_drawdown_guard(STATE)
-        _positions().pop(sym, None)
+        PM.remove(sym)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
         append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
@@ -670,10 +675,10 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         ltp = _ltp(kite, sym) or entry
 
     pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
-    STATE["today_pnl"] += pnl
+    safe_update(STATE, "today_pnl", lambda x: float(x or 0.0) + pnl)
     RISK.update_loss_streak(STATE, pnl)
     RISK.check_day_drawdown_guard(STATE)
-    _positions().pop(sym, None)
+    PM.remove(sym)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
     append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
@@ -722,7 +727,15 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
     sym = sym.strip().upper()
     now = datetime.now(IST)
 
-    if STATE.get("cooldown_until") and now < STATE["cooldown_until"]:
+    with STATE_LOCK:
+        cooldown_until = STATE.get("cooldown_until")
+        last_exit = STATE.get("last_exit_ts", {}).get(sym)
+        halt_for_day = bool(STATE.get("halt_for_day"))
+        pause_until = STATE.get("pause_entries_until")
+        wallet_avail = float(STATE.get("wallet_available_inr") or 0.0)
+        wallet_net = float(STATE.get("wallet_net_inr") or 0.0)
+
+    if cooldown_until and now < cooldown_until:
         append_log("INFO", "SKIP", f"{sym} reason=cooldown")
         return False
 
@@ -730,7 +743,6 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
         return False
 
-    last_exit = STATE.get("last_exit_ts", {}).get(sym)
     reentry_block = int(getattr(CFG, "REENTRY_BLOCK_MINUTES", 30))
     if last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
         if not momentum_positive:
@@ -738,11 +750,10 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
             return False
         append_log("INFO", "SKIP", f"{sym} reentry_block bypassed reason=positive_momentum")
 
-    if STATE.get("halt_for_day"):
+    if halt_for_day:
         append_log("INFO", "SKIP", f"{sym} reason=halt_for_day")
         return False
 
-    pause_until = STATE.get("pause_entries_until")
     if pause_until and now < pause_until:
         append_log("INFO", "SKIP", f"{sym} reason=pause_entries")
         return False
@@ -757,12 +768,11 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         return False
 
     required_value = float(entry) * max(1, int(qty or 1))
-    wallet_avail = float(STATE.get("wallet_available_inr") or 0.0)
     if required_value > wallet_avail:
         append_log("INFO", "SKIP", f"{sym} reason=insufficient_wallet need={required_value:.2f} avail={wallet_avail:.2f}")
         return False
 
-    if not RISK.can_enter_trade(sym, float(entry), _positions(), float(STATE.get("wallet_net_inr") or 0.0), int(qty), sector=_sector_for_symbol(sym)):
+    if not RISK.can_enter_trade(sym, float(entry), _positions(), wallet_net, int(qty), sector=_sector_for_symbol(sym)):
         _apply_skip_cooldown(sym, "risk_guard")
         return False
 
@@ -1897,7 +1907,7 @@ def _maybe_enter_short_from_signal(sig):
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
 
-    _positions()[sym] = {
+    PM.set(sym, {
         "symbol": sym,
         "side": "SHORT",
         "entry": booked_entry,
@@ -1918,7 +1928,7 @@ def _maybe_enter_short_from_signal(sig):
         "universe_source": universe_source,
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
-    }
+    })
     _set_cooldown()
     append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
     append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
@@ -2060,7 +2070,7 @@ def _maybe_enter_from_signal(sig):
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
 
-    _positions()[sym] = {
+    PM.set(sym, {
         "symbol": sym,
         "side": "BUY",
         "entry": booked_entry,
@@ -2081,7 +2091,7 @@ def _maybe_enter_from_signal(sig):
         "universe_source": universe_source,
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
-    }
+    })
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
     append_log("INFO", "TRADE", f"{mode} BUY {sym} family={strategy_family} tier={decision.get('tier')} qty={qty}")

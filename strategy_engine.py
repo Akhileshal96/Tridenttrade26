@@ -64,12 +64,67 @@ def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: s
     return max(pct_buffer, atr_buffer)
 
 
+_ZERODHA_INTERVAL_MAP = {
+    "1m": "minute",
+    "1min": "minute",
+    "minute": "minute",
+    "3m": "3minute",
+    "3min": "3minute",
+    "3minute": "3minute",
+    "5m": "5minute",
+    "5min": "5minute",
+    "5minute": "5minute",
+    "10m": "10minute",
+    "10min": "10minute",
+    "10minute": "10minute",
+    "15m": "15minute",
+    "15min": "15minute",
+    "15minute": "15minute",
+    "30m": "30minute",
+    "30min": "30minute",
+    "30minute": "30minute",
+    "60m": "60minute",
+    "60min": "60minute",
+    "1h": "60minute",
+    "60minute": "60minute",
+    "1d": "day",
+    "day": "day",
+}
+
+
+def normalize_zerodha_interval(interval: str) -> str:
+    raw = str(interval or "").strip().lower()
+    return _ZERODHA_INTERVAL_MAP.get(raw, raw or "15minute")
+
+
+def _score_momentum_setup(last: float, trigger: float, rel_vol: float, sma_now: float, sma_prev: float, atr: float) -> float:
+    dist_above_trigger = max(0.0, ((last - trigger) / trigger) * 100.0) if trigger > 0 else 0.0
+    sma_slope = max(0.0, ((sma_now - sma_prev) / sma_prev) * 100.0) if sma_prev > 0 else 0.0
+    atr_norm_dist = max(0.0, (last - sma_now) / atr) if atr > 0 else 0.0
+    return (
+        (0.40 * dist_above_trigger)
+        + (0.30 * max(0.0, rel_vol))
+        + (0.20 * max(0.0, sma_slope))
+        + (0.10 * max(0.0, atr_norm_dist))
+    )
+
+
+def _score_mean_reversion_setup(rsi_last: float, bounce_size_pct: float, recovery_momentum_pct: float) -> float:
+    rsi_depth = max(0.0, 30.0 - float(rsi_last))
+    return (
+        (0.50 * rsi_depth)
+        + (0.30 * max(0.0, bounce_size_pct))
+        + (0.20 * max(0.0, recovery_momentum_pct))
+    )
+
+
 def generate_signal(universe):
     """
     Signal: last close > SMA20 (15m candles). Logs real errors.
     """
     kite = get_kite()
 
+    candidates = []
     for sym in universe:
         sym = (sym or "").strip().upper()
         if not sym:
@@ -124,12 +179,28 @@ def generate_signal(universe):
                 continue
 
             if last > trigger:
+                vol = df["volume"].astype(float) if "volume" in df.columns else pd.Series(dtype=float)
+                rel_vol = 0.0
+                if not vol.empty and len(vol) >= 20:
+                    avg_vol = float(vol.tail(20).mean())
+                    rel_vol = (float(vol.iloc[-1]) / avg_vol) if avg_vol > 0 else 0.0
+                sma_prev = float(sma20.iloc[-2]) if len(sma20) >= 2 and not pd.isna(sma20.iloc[-2]) else avg
+                atr = 0.0
+                if all(c in df.columns for c in ("high", "low", "close")) and len(df) >= 15:
+                    high = df["high"].astype(float)
+                    low = df["low"].astype(float)
+                    close = df["close"].astype(float)
+                    prev_close = close.shift(1)
+                    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+                    atr_val = tr.rolling(14).mean().iloc[-1]
+                    atr = float(atr_val) if not pd.isna(atr_val) else 0.0
+                signal_score = _score_momentum_setup(last, trigger, rel_vol, avg, sma_prev, atr)
                 append_log(
                     "INFO",
                     "SIG",
                     f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
                 )
-                return {
+                candidates.append({
                     "symbol": sym,
                     "side": "BUY",
                     "entry": float(last),
@@ -137,14 +208,20 @@ def generate_signal(universe):
                     "entry_buffer": buffer,
                     "strategy_setup": "trend_breakout",
                     "strategy_family": "trend_long",
-                }
+                    "signal_score": float(signal_score),
+                })
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
             continue
 
-    append_log("INFO", "SIG", "No signal found")
-    return None
+    if not candidates:
+        append_log("INFO", "SIG", "No signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"momentum candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    return best
 
 
 def _calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -159,6 +236,7 @@ def generate_mean_reversion_signal(universe):
     """Fallback signal: RSI oversold rebound or lower-BB bounce."""
     kite = get_kite()
 
+    candidates = []
     for sym in universe:
         sym = (sym or "").strip().upper()
         if not sym:
@@ -196,12 +274,15 @@ def generate_mean_reversion_signal(universe):
             if not (rsi_setup or bb_bounce_setup):
                 continue
 
+            bounce_size_pct = (((last - lower) / lower) * 100.0) if lower > 0 else 0.0
+            recovery_momentum_pct = (((last - prev) / prev) * 100.0) if prev > 0 else 0.0
+            signal_score = _score_mean_reversion_setup(rsi_last, bounce_size_pct, recovery_momentum_pct)
             append_log(
                 "INFO",
                 "SIG",
                 f"{sym} MR BUY trigger last={last:.2f} rsi={rsi_last:.2f} lower_bb={lower:.2f} setup={'RSI' if rsi_setup else 'BB_BOUNCE'}",
             )
-            return {
+            candidates.append({
                 "symbol": sym,
                 "side": "BUY",
                 "entry": last,
@@ -209,14 +290,20 @@ def generate_mean_reversion_signal(universe):
                 "strategy_family": "mean_reversion",
                 "rsi": rsi_last,
                 "lower_bb": lower,
-            }
+                "signal_score": float(signal_score),
+            })
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
             continue
 
-    append_log("INFO", "SIG", "No mean-reversion signal found")
-    return None
+    if not candidates:
+        append_log("INFO", "SIG", "No mean-reversion signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"mean_reversion candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    return best
 
 
 def generate_pullback_signal(universe):
