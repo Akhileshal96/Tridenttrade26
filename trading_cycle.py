@@ -1260,18 +1260,22 @@ def get_opening_mode() -> tuple[str, dict]:
 
     if bool(m.get("feed_error")):
         m["reason"] = "confirmed_broken_feed"
-        return "OPEN_UNSAFE", m
+        return "OPEN_HARD_BLOCK", m
 
     if gap > max_gap * 1.5:
         m["reason"] = "confirmed_extreme_gap"
-        return "OPEN_UNSAFE", m
+        return "OPEN_HARD_BLOCK", m
 
     if not bool(m.get("valid")):
         m["reason"] = "incomplete_opening_data"
         return "OPEN_MODERATE", m
 
+    if spread_q == "UNKNOWN" or volume_q == "UNKNOWN":
+        m["reason"] = "incomplete_opening_data"
+        return "OPEN_MODERATE", m
+
     if conf < 40:
-        m["reason"] = "low_opening_confidence"
+        m["reason"] = "unstable_open"
         return "OPEN_UNSAFE", m
     if conf < 70:
         m["reason"] = "incomplete_opening_data"
@@ -1401,6 +1405,8 @@ def _opening_symbol_quality_ok(symbol: str, side: str = "BUY") -> bool:
 
 def _opening_size_multiplier() -> float:
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_HARD_BLOCK":
+        return 0.0
     if mode == "OPEN_UNSAFE":
         return float(getattr(CFG, "OPEN_UNSAFE_SIZE_MULTIPLIER", 0.25) or 0.25)
     if mode == "OPEN_MODERATE":
@@ -1417,6 +1423,9 @@ def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bo
     research_universe = _active_trade_universe()
     no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
     fallback_cycles = int(getattr(CFG, "OPEN_MIN_TRADE_AFTER_NO_EXEC_CYCLES", 8) or 8)
+
+    if mode == "OPEN_HARD_BLOCK":
+        return False, "hard_block_opening"
 
     if mode == "OPEN_UNSAFE":
         top_n = int(getattr(CFG, "OPEN_UNSAFE_TOP_N", 5) or 5)
@@ -1443,6 +1452,8 @@ def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bo
 
 def _session_quality_score() -> float:
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
+    if mode == "OPEN_HARD_BLOCK":
+        return 0.2
     if mode == "OPEN_UNSAFE":
         return 0.3
     if mode == "OPEN_MODERATE":
@@ -1617,7 +1628,7 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
     hard_block_reason = ""
     om = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     om_reason = str((STATE.get("opening_metrics") or {}).get("reason") or "")
-    if om == "OPEN_UNSAFE" and om_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
+    if om == "OPEN_HARD_BLOCK" and om_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
         hard_block_reason = om_reason
 
     if tier == "MICRO":
@@ -1820,7 +1831,7 @@ def _maybe_enter_short_from_signal(sig):
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+    if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="SHORT")
         if not allowed_open:
             append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
@@ -1832,7 +1843,7 @@ def _maybe_enter_short_from_signal(sig):
         else:
             qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
         if mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → reduced-size entry allowed mult={open_mult:.2f}")
+            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → micro-size selective entry allowed mult={open_mult:.2f}")
         elif mode == "OPEN_MODERATE":
             append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
@@ -1974,7 +1985,7 @@ def _maybe_enter_from_signal(sig):
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if _in_open_filter_window() and mode in ("OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+    if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
         if not allowed_open:
             append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
@@ -1986,7 +1997,7 @@ def _maybe_enter_from_signal(sig):
         else:
             qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
         if mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → reduced-size entry allowed mult={open_mult:.2f}")
+            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → micro-size selective entry allowed mult={open_mult:.2f}")
         elif mode == "OPEN_MODERATE":
             append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
@@ -2309,15 +2320,18 @@ def tick():
     STATE["opening_mode"] = open_mode
     STATE["opening_metrics"] = dict(open_metrics or {})
     if _in_open_filter_window():
-        append_log("INFO", "OPEN", f"confidence={int((open_metrics or {}).get('confidence') or 0)} mode={open_mode} reason={str((open_metrics or {}).get('reason') or 'n/a')}")
-        if open_mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", "mode=OPEN_UNSAFE → selective reduced-size entry allowed")
-        elif open_mode == "OPEN_MODERATE":
-            append_log("INFO", "OPEN", "mode=OPEN_MODERATE → reduced-size selective entry allowed")
-        hard_reason = str((open_metrics or {}).get("reason") or "")
-        if hard_reason in ("confirmed_broken_feed", "confirmed_extreme_gap"):
-            append_log("WARN", "OPEN", f"mode={open_mode} reason={hard_reason} → blocking new entries")
-            _deactivate_micro_mode(hard_reason)
+        reason = str((open_metrics or {}).get("reason") or "n/a")
+        conf_i = int((open_metrics or {}).get("confidence") or 0)
+        action = {
+            "OPEN_CLEAN": "NORMAL_TRADING",
+            "OPEN_MODERATE": "REDUCED_TRADING",
+            "OPEN_UNSAFE": "MICRO_TRADING",
+            "OPEN_HARD_BLOCK": "BLOCK_ALL",
+        }.get(open_mode, "NORMAL_TRADING")
+        append_log("INFO", "OPEN", f"state={open_mode} reason={reason} action={action} confidence={conf_i}")
+        if open_mode == "OPEN_HARD_BLOCK":
+            append_log("WARN", "OPEN", f"state=OPEN_HARD_BLOCK reason={reason} action=BLOCK_ALL")
+            _deactivate_micro_mode(reason)
             return
 
     opened = 0

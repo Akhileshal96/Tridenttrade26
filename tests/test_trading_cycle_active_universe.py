@@ -55,7 +55,7 @@ def test_refresh_active_universe_if_due(monkeypatch):
     assert out == ["X", "Y"]
 
 
-def test_opening_mode_unsafe_from_metrics(monkeypatch):
+def test_opening_mode_hard_block_from_confirmed_extreme_gap(monkeypatch):
     monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
     monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
     monkeypatch.setattr(
@@ -73,7 +73,7 @@ def test_opening_mode_unsafe_from_metrics(monkeypatch):
     monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
 
     mode, _m = tc.get_opening_mode()
-    assert mode == "OPEN_UNSAFE"
+    assert mode == "OPEN_HARD_BLOCK"
 
 
 
@@ -91,6 +91,29 @@ def test_opening_mode_unknown_quality_defaults_to_moderate(monkeypatch):
             "spread_quality": "UNKNOWN",
             "volume_quality": "UNKNOWN",
             "valid": False,
+        },
+    )
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    mode, metrics = tc.get_opening_mode()
+    assert mode == "OPEN_MODERATE"
+    assert metrics.get("reason") == "incomplete_opening_data"
+
+
+def test_opening_mode_unknown_inputs_map_to_moderate_even_if_valid(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        tc,
+        "_compute_opening_metrics",
+        lambda: {
+            "gap_pct": 0.12,
+            "first_5m_range_pct": 0.4,
+            "direction_clear": True,
+            "spread_quality": "UNKNOWN",
+            "volume_quality": "UNKNOWN",
+            "valid": True,
+            "feed_error": False,
         },
     )
     monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
@@ -167,7 +190,7 @@ def test_opening_mode_uses_confidence_thresholds(monkeypatch):
     monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
     monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
 
-    monkeypatch.setattr(tc, "_compute_opening_metrics", lambda: {"gap_pct": 0.1, "feed_error": False, "valid": True})
+    monkeypatch.setattr(tc, "_compute_opening_metrics", lambda: {"gap_pct": 0.1, "feed_error": False, "valid": True, "spread_quality": "TIGHT", "volume_quality": "OK"})
     monkeypatch.setattr(tc, "get_opening_confidence", lambda _m=None: (35, {"ignored": []}))
     mode, _ = tc.get_opening_mode()
     assert mode == "OPEN_UNSAFE"
