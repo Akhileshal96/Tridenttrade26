@@ -1,5 +1,6 @@
 import time
 import pandas as pd
+from zoneinfo import ZoneInfo
 
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
@@ -364,3 +365,114 @@ def generate_pullback_signal(universe):
 
     append_log("INFO", "SIG", "No pullback signal found")
     return None
+
+
+def _score_vwap_ema_setup(dist_above_vwap_pct: float, ema_sep_pct: float, rel_vol: float, momentum_pct: float) -> float:
+    dist_component = min(max(float(dist_above_vwap_pct), 0.0), 1.0) / 1.0
+    ema_component = min(max(float(ema_sep_pct), 0.0), 1.0) / 1.0
+    vol_component = min(max(float(rel_vol), 0.0), 3.0) / 3.0
+    mom_component = min(max(float(momentum_pct), 0.0), 1.0) / 1.0
+    return (
+        (0.35 * dist_component)
+        + (0.30 * ema_component)
+        + (0.25 * vol_component)
+        + (0.10 * mom_component)
+    )
+
+
+def generate_vwap_ema_signal(universe: list) -> dict | None:
+    kite = get_kite()
+    ist = ZoneInfo("Asia/Kolkata")
+    fast_n = int(getattr(CFG, "VWAP_EMA_FAST", 9) or 9)
+    slow_n = int(getattr(CFG, "VWAP_EMA_SLOW", 21) or 21)
+    min_rel_vol = float(getattr(CFG, "VWAP_EMA_MIN_VOL_SCORE", 1.5) or 1.5)
+    min_score = float(getattr(CFG, "VWAP_EMA_MIN_SCORE", 0.40) or 0.40)
+
+    candidates = []
+    for sym in universe:
+        sym = (sym or "").strip().upper()
+        if not sym:
+            continue
+        try:
+            token = token_for_symbol(sym)
+            data = kite.historical_data(
+                token,
+                pd.Timestamp.now() - pd.Timedelta(days=2),
+                pd.Timestamp.now(),
+                "15minute",
+            )
+            time.sleep(0.5)
+            df = pd.DataFrame(data)
+            if df.empty or "close" not in df.columns:
+                continue
+            if "date" in df.columns:
+                dt = pd.to_datetime(df["date"], errors="coerce")
+                if getattr(dt.dt, "tz", None) is None:
+                    dt = dt.dt.tz_localize(ist)
+                else:
+                    dt = dt.dt.tz_convert(ist)
+                df = df.assign(_dt=dt)
+            else:
+                continue
+
+            today = pd.Timestamp.now(tz=ist).date()
+            tdf = df[df["_dt"].dt.date == today].copy()
+            if len(tdf) < 10:
+                continue
+            if any(c not in tdf.columns for c in ("close", "volume")):
+                continue
+
+            close = tdf["close"].astype(float)
+            vol = tdf["volume"].astype(float)
+            if len(close) < max(21, slow_n + 1):
+                continue
+
+            vwap_num = (close * vol).cumsum()
+            vwap_den = vol.cumsum().replace(0, pd.NA)
+            vwap_s = vwap_num / vwap_den
+            ema9_s = close.ewm(span=fast_n, adjust=False).mean()
+            ema21_s = close.ewm(span=slow_n, adjust=False).mean()
+
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            vwap = float(vwap_s.iloc[-1]) if not pd.isna(vwap_s.iloc[-1]) else 0.0
+            ema9 = float(ema9_s.iloc[-1]) if not pd.isna(ema9_s.iloc[-1]) else 0.0
+            ema21 = float(ema21_s.iloc[-1]) if not pd.isna(ema21_s.iloc[-1]) else 0.0
+            avg20_vol = float(vol.tail(20).mean())
+            rel_vol = (float(vol.iloc[-1]) / avg20_vol) if avg20_vol > 0 else 0.0
+
+            # Trigger conditions (all required)
+            if not (last > vwap and ema9 > ema21 and rel_vol > min_rel_vol):
+                continue
+
+            dist_pct = ((last - vwap) / vwap * 100.0) if vwap > 0 else 0.0
+            ema_sep_pct = ((ema9 - ema21) / ema21 * 100.0) if ema21 > 0 else 0.0
+            momentum_pct = ((last - prev) / prev * 100.0) if prev > 0 else 0.0
+            score = _score_vwap_ema_setup(dist_pct, ema_sep_pct, rel_vol, momentum_pct)
+            if score < min_score:
+                continue
+
+            append_log("INFO", "SIG", f"{sym} VWAP+EMA candidate score={score:.4f} last={last:.2f} vwap={vwap:.2f} ema9={ema9:.2f} ema21={ema21:.2f}")
+            candidates.append(
+                {
+                    "symbol": sym,
+                    "side": "BUY",
+                    "entry": last,
+                    "vwap": vwap,
+                    "ema9": ema9,
+                    "ema21": ema21,
+                    "signal_score": float(score),
+                    "strategy_tag": "vwap_ema",
+                }
+            )
+        except Exception as e:
+            append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            continue
+
+    if not candidates:
+        append_log("INFO", "SIG", "No VWAP+EMA signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"Best VWAP+EMA signal: {best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f} (evaluated {len(candidates)} candidates)")
+    return best

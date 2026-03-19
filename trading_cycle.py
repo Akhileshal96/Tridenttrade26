@@ -11,7 +11,7 @@ import config as CFG
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
-from strategy_engine import generate_signal, generate_mean_reversion_signal, generate_pullback_signal
+from strategy_engine import generate_signal, generate_mean_reversion_signal, generate_vwap_ema_signal, generate_pullback_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
 import risk_engine as RISK
@@ -234,7 +234,6 @@ def _ensure_day_key():
             STATE["day_peak_pnl"] = 0.0
             STATE["sector_map_cache"] = None
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
-
 
 
 def set_runtime_param(key, value):
@@ -2286,6 +2285,10 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
 
     def _signal_with_family(cands):
         sig = signal_fn(cands)
+        if not sig and signal_fn is generate_signal:
+            sig = generate_vwap_ema_signal(cands)
+        if not sig and signal_fn is generate_signal:
+            sig = generate_mean_reversion_signal(cands)
         if sig and strategy_family and not sig.get("strategy_family"):
             sig["strategy_family"] = strategy_family
         if sig and universe_source and not sig.get("universe_source"):

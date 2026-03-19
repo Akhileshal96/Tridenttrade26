@@ -143,7 +143,8 @@ async def _safe_invoke(handler_name, event, handlers):
         await _popup(event, f"Handler not configured: {handler_name}")
         return
     try:
-        out = fn(event)
+        target_event = getattr(event, "message", event)
+        out = fn(target_event)
         if hasattr(out, "__await__"):
             await out
     except Exception as e:
@@ -187,11 +188,6 @@ def register_control_panel(client, handlers):
             return
 
         if kind == "cmd":
-            sender_id = int(getattr(event, "sender_id", 0) or 0)
-            is_viewer = (handlers or {}).get("__is_viewer__")
-            if callable(is_viewer) and not is_viewer(sender_id):
-                await _popup(event, "❌ Not permitted. Use /myid and ask owner to grant Viewer/Trader access.")
-                return
             await _safe_invoke(key, event, handlers)
             return
 
