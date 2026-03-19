@@ -6,8 +6,14 @@ from instrument_store import token_for_symbol
 from log_store import append_log
 
 
+def _cfg_obj():
+    # Defensive local resolver for runtime environments that may hold stale module globals.
+    import config as cfg
+    return cfg
+
+
 def _cfg_float(name: str, default: float) -> float:
-    raw = getattr(CFG, name, None)
+    raw = getattr(_cfg_obj(), name, None)
     if raw is None:
         append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
         return float(default)
@@ -16,6 +22,18 @@ def _cfg_float(name: str, default: float) -> float:
     except Exception:
         append_log("WARN", "CONFIRM", f"invalid config for {name}={raw}; using default={default}")
         return float(default)
+
+
+def _cfg_int(name: str, default: int) -> int:
+    raw = getattr(_cfg_obj(), name, None)
+    if raw is None:
+        append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        append_log("WARN", "CONFIRM", f"invalid config for {name}={raw}; using default={default}")
+        return int(default)
 
 
 def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: str = "") -> float:
@@ -75,7 +93,7 @@ def generate_signal(universe):
                 append_log("WARN", "SIG", f"{sym} no candle data")
                 continue
 
-            core_min_bars = int(getattr(CFG, "SMA20_CORE_MIN_BARS", 20) or 20)
+            core_min_bars = _cfg_int("SMA20_CORE_MIN_BARS", 20)
             if len(df) < core_min_bars:
                 append_log("INFO", "SIG", f"{sym} skipped reason=insufficient_history_min_bars have={len(df)} need={core_min_bars}")
                 continue
