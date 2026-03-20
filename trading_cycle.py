@@ -57,6 +57,7 @@ STATE = {
     "active_no_setup_cycles": 0,
     "opening_mode": "OPEN_CLEAN",
     "opening_metrics": {},
+    "open_feed_retry_count": 0,
     "no_entry_cycles": 0,
     "fallback_mode_active": False,
     "eod_report_sent_date": "",
@@ -233,6 +234,7 @@ def _ensure_day_key():
             STATE["halt_for_day"] = False
             STATE["day_peak_pnl"] = 0.0
             STATE["sector_map_cache"] = None
+            STATE["open_feed_retry_count"] = 0
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -1269,6 +1271,29 @@ def get_opening_mode() -> tuple[str, dict]:
     if conf_meta.get("ignored"):
         append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
 
+    rng = float(m.get("first_5m_range_pct") or 0.0)
+    is_confirmed_zero_feed = (
+        float(m.get("gap_pct") or 0.0) == 0.0
+        and rng == 0.0
+        and spread_q == "UNKNOWN"
+        and volume_q == "UNKNOWN"
+    )
+    if is_confirmed_zero_feed:
+        retry_count = int(STATE.get("open_feed_retry_count") or 0)
+        if retry_count < 15:
+            retry_count += 1
+            STATE["open_feed_retry_count"] = retry_count
+            append_log("INFO", "OPEN", f"[OPEN] feed_retry attempt={retry_count}/15 waiting for valid data")
+            m["reason"] = "confirmed_broken_feed"
+            return "OPEN_FEED_RETRY", m
+        m["reason"] = "confirmed_broken_feed"
+        return "OPEN_HARD_BLOCK", m
+
+    retry_count = int(STATE.get("open_feed_retry_count") or 0)
+    if retry_count > 0 and (float(m.get("gap_pct") or 0.0) > 0.0 or rng > 0.0):
+        append_log("INFO", "OPEN", f"[OPEN] feed recovered after {retry_count} retries")
+        STATE["open_feed_retry_count"] = 0
+
     if bool(m.get("feed_error")):
         m["reason"] = "confirmed_broken_feed"
         return "OPEN_HARD_BLOCK", m
@@ -1955,6 +1980,17 @@ def _maybe_enter_from_signal(sig):
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
     research_universe = _active_trade_universe()
     allowed, reason, meta = is_market_entry_allowed(sym, regime, research_universe)
+    weak_score = float(sig.get("signal_score") or 0.0)
+    weak_score_min = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 0.75) or 0.75)
+    weak_size_mult = float(getattr(CFG, "WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
+    weak_long_allowed = True
+
+    if regime == "WEAK":
+        if weak_score >= weak_score_min:
+            append_log("INFO", "MARKET", f"[MARKET] WEAK regime long allowed sym={sym} score={weak_score:.2f} size_mult={weak_size_mult:.1f}")
+        else:
+            append_log("INFO", "SKIP", f"[SKIP] {sym} reason=weak_regime_score_too_low score={weak_score:.2f} threshold={weak_score_min:.2f}")
+            weak_long_allowed = False
 
     if regime in ("WEAK", "TRENDING_DOWN"):
         if not allowed:
@@ -1964,6 +2000,8 @@ def _maybe_enter_from_signal(sig):
             _apply_skip_cooldown(sym, "market_weak", minutes=weak_cd)
         else:
             append_log("INFO", "MARKET", f"regime={regime} → selective entry allowed for {sym} rank={meta.get('rank')} score={float(meta.get('score') or 0.0):.2f}")
+    if regime == "WEAK" and not weak_long_allowed:
+        return False
     elif regime == "UNKNOWN" and bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False)):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
@@ -1990,7 +2028,7 @@ def _maybe_enter_from_signal(sig):
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     strategy_tag = "primary_long"
     if regime in ("WEAK", "TRENDING_DOWN"):
-        mult = float(getattr(CFG, "WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
+        mult = weak_size_mult
         if mult > 0:
             reduced = max(1, int(math.floor(qty * mult)))
             if reduced < qty:
@@ -2014,10 +2052,19 @@ def _maybe_enter_from_signal(sig):
         return False
     if decision.get("tier") == "BLOCK":
         if str(decision.get("components", {}).get("htf") or "").lower() == "fail":
-            append_log("INFO", "CONFIRM", f"BUY blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
-        append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
-        return False
-    tier_mult = float(decision.get("size_mult") or 0.0)
+            dscore = float(decision.get("score") or 0.0)
+            if regime == "WEAK" and 30.0 <= dscore <= 60.0:
+                tier_mult = max(0.0, weak_size_mult)
+                append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_Score_Below_Req_for_WEAK score={dscore:.0f} size_mult={tier_mult:.2f}")
+            else:
+                append_log("INFO", "CONFIRM", f"BUY blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
+                append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
+                return False
+        else:
+            append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
+            return False
+    else:
+        tier_mult = float(decision.get("size_mult") or 0.0)
     qty = max(1, int(math.floor(qty * tier_mult))) if qty > 0 and tier_mult > 0 else 0
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
 
@@ -2399,9 +2446,13 @@ def tick():
             "OPEN_CLEAN": "NORMAL_TRADING",
             "OPEN_MODERATE": "REDUCED_TRADING",
             "OPEN_UNSAFE": "MICRO_TRADING",
+            "OPEN_FEED_RETRY": "WAIT_RETRY",
             "OPEN_HARD_BLOCK": "BLOCK_ALL",
         }.get(open_mode, "NORMAL_TRADING")
         append_log("INFO", "OPEN", f"state={open_mode} reason={reason} action={action} confidence={conf_i}")
+        if open_mode == "OPEN_FEED_RETRY":
+            time.sleep(20)
+            return
         if open_mode == "OPEN_HARD_BLOCK":
             append_log("WARN", "OPEN", f"state=OPEN_HARD_BLOCK reason={reason} action=BLOCK_ALL")
             _deactivate_micro_mode(reason)
