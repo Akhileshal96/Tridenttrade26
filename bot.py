@@ -47,6 +47,10 @@ HELP_TEXT = (
     "• /status     → status + daily caps\n"
     "• /pnl        → day P/L snapshot\n"
     "• /trailstatus → trailing lock details\n"
+    "• /top3       → active top 3 strategies\n"
+    "• /strategyscores → ranked strategy suitability\n"
+    "• /regime     → regime/bias snapshot\n"
+    "• /routestatus → route/top3 runtime state\n"
     "• /strategyreport → strategy analytics summary\n"
     "• /beststrategy → top strategy by net pnl\n"
     "• /worststrategy → worst strategy by net pnl\n"
@@ -311,6 +315,26 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
 
     if cmd_word == "/trailstatus":
         await event.reply(CYCLE.get_trailing_status_text())
+        return True
+
+    if cmd_word == "/top3":
+        append_log("INFO", "BOT", "command=/top3")
+        await event.reply(CYCLE.get_top3_text())
+        return True
+
+    if cmd_word == "/strategyscores":
+        append_log("INFO", "BOT", "command=/strategyscores")
+        await event.reply(CYCLE.get_strategy_scores_text())
+        return True
+
+    if cmd_word == "/regime":
+        append_log("INFO", "BOT", "command=/regime")
+        await event.reply(CYCLE.get_regime_text())
+        return True
+
+    if cmd_word == "/routestatus":
+        append_log("INFO", "BOT", "command=/routestatus")
+        await event.reply(CYCLE.get_route_status_text())
         return True
 
     if cmd_word == "/strategyreport":
@@ -755,6 +779,10 @@ async def main():
         "status": _mk_panel_handler("status"),
         "pnl": _mk_panel_handler("pnl"),
         "trailstatus": _mk_panel_handler("trailstatus"),
+        "top3": _mk_panel_handler("top3"),
+        "strategyscores": _mk_panel_handler("strategyscores"),
+        "regime": _mk_panel_handler("regime"),
+        "routestatus": _mk_panel_handler("routestatus"),
         "strategyreport": _mk_panel_handler("strategyreport"),
         "beststrategy": _mk_panel_handler("beststrategy"),
         "worststrategy": _mk_panel_handler("worststrategy"),

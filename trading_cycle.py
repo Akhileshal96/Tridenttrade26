@@ -66,6 +66,8 @@ STATE = {
     "active_strategy_last_reason": "",
     "strategy_scores_last": {},
     "strategy_selection_history": [],
+    "last_route_universe_source": "n/a",
+    "last_trend_direction": "UNKNOWN",
     "eod_report_sent_date": "",
     "confirm_strictness": "STRICT",
     "signals_seen_window": 0,
@@ -322,6 +324,8 @@ def _ensure_day_key():
             STATE["active_strategy_last_reason"] = ""
             STATE["strategy_scores_last"] = {}
             STATE["strategy_selection_history"] = []
+            STATE["last_route_universe_source"] = "n/a"
+            STATE["last_trend_direction"] = "UNKNOWN"
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -348,6 +352,8 @@ def manual_reset_day():
         STATE["active_strategy_last_reason"] = ""
         STATE["strategy_scores_last"] = {}
         STATE["strategy_selection_history"] = []
+        STATE["last_route_universe_source"] = "n/a"
+        STATE["last_trend_direction"] = "UNKNOWN"
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -1132,6 +1138,7 @@ def _scan_top3_families(universe: list, families: list[str], max_new: int, unive
     if not universe or max_new <= 0:
         return 0
     fams = [str(f).strip().lower() for f in families if str(f).strip()]
+    STATE["last_route_universe_source"] = str(universe_source or "n/a")
     append_log("INFO", "ROUTE", f"[ROUTE] scanning families={','.join(fams) if fams else 'none'} source={universe_source}")
     opened = 0
     for fam in fams:
@@ -2536,6 +2543,8 @@ def get_status_text():
     current_profit, current_loss = _current_open_pnl_breakdown()
     active_top3 = ",".join(list(STATE.get("active_strategy_families") or [])) or "none"
     selector_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
+    regime_now = str(STATE.get("last_regime") or "UNKNOWN")
+    bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
     return (
         "📟 Trident Status\n\n"
         f"Mode: {mode}\n"
@@ -2544,7 +2553,8 @@ def get_status_text():
         f"Universe(trading): {len(load_universe_trading())} symbols\n"
         f"Universe(live): {len(load_universe_live())} symbols\n"
         f"Open Positions: {_open_positions_count()}\n"
-        f"Last Regime: {STATE.get('last_regime','UNKNOWN')}\n"
+        f"Last Regime: {regime_now}\n"
+        f"Bias: {bias}\n"
         f"Active Top3 Families: {active_top3}\n"
         f"Top3 Refresh Reason: {selector_reason}\n"
         f"Opening Mode: {STATE.get('opening_mode','OPEN_CLEAN')}\n"
@@ -2581,6 +2591,72 @@ def get_strategy_selector_text() -> str:
         for fam, sc in ranked[:8]:
             lines.append(f"{fam}: {sc}")
     return "\n".join(lines)
+
+
+def get_top3_text() -> str:
+    regime_now = str(STATE.get("last_regime") or "UNKNOWN")
+    bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
+    fams = list(STATE.get("active_strategy_families") or [])
+    last_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
+    last_refresh = float(STATE.get("active_strategy_last_refresh") or 0.0)
+    last_refresh_txt = datetime.fromtimestamp(last_refresh, tz=IST).strftime("%H:%M:%S") if last_refresh > 0 else "n/a"
+    return (
+        "📌 Top 3 Strategies\n\n"
+        f"Regime: {regime_now}\n"
+        f"Bias: {bias}\n"
+        f"Top3: {','.join(fams) if fams else 'none'}\n"
+        f"Last Refresh: {last_refresh_txt}\n"
+        f"Reason: {last_reason}"
+    )
+
+
+def get_strategy_scores_text() -> str:
+    scores = dict(STATE.get("strategy_scores_last") or {})
+    top3 = set([str(x).strip().lower() for x in list(STATE.get("active_strategy_families") or [])])
+    if not scores:
+        return "🧠 Strategy Scores\n\nNo scores available yet."
+    rows = sorted(
+        [(str(fam), int((meta or {}).get("score") or 0)) for fam, meta in scores.items()],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    lines = ["🧠 Strategy Scores", ""]
+    for fam, sc in rows:
+        mark = "⭐" if fam.lower() in top3 else "•"
+        lines.append(f"{mark} {fam}: {sc}")
+    return "\n".join(lines[:20])
+
+
+def get_regime_text() -> str:
+    regime_now = str(STATE.get("last_regime") or "UNKNOWN")
+    bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
+    opening_mode = str(STATE.get("opening_mode") or "OPEN_CLEAN")
+    trend_direction = str(STATE.get("last_trend_direction") or "UNKNOWN")
+    return (
+        "🌐 Regime Snapshot\n\n"
+        f"Regime: {regime_now}\n"
+        f"Bias: {bias}\n"
+        f"Opening Mode: {opening_mode}\n"
+        f"Trend Direction: {trend_direction}"
+    )
+
+
+def get_route_status_text() -> str:
+    fams = list(STATE.get("active_strategy_families") or [])
+    route_source = str(STATE.get("last_route_universe_source") or "n/a")
+    fallback_active = bool(STATE.get("fallback_mode_active"))
+    dry_cycles = int(STATE.get("top3_dry_cycles") or 0)
+    micro_active = bool(STATE.get("micro_mode_active"))
+    last_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
+    return (
+        "📊 Route Status\n\n"
+        f"Active Top3: {','.join(fams) if fams else 'none'}\n"
+        f"Universe Source: {route_source}\n"
+        f"Fallback Active: {fallback_active}\n"
+        f"Top3 Dry Cycles: {dry_cycles}\n"
+        f"Micro Mode: {micro_active}\n"
+        f"Last Recompute Reason: {last_reason}"
+    )
 
 
 
@@ -2778,6 +2854,7 @@ def tick():
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
     trend_direction = str(snap.get("trend_direction", "UNKNOWN") or "UNKNOWN").upper()
+    STATE["last_trend_direction"] = trend_direction
     regime_u = regime
     if regime == "TRENDING":
         if trend_direction == "DOWN":

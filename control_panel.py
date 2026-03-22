@@ -100,6 +100,8 @@ def _help_buttons():
 
 def _analytics_buttons():
     return [
+        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Strategy Scores", b"cp:cmd:strategyscores")],
+        [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("📊 Route Status", b"cp:cmd:routestatus")],
         [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
         [Button.inline("🏆 Best Strategy", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst Strategy", b"cp:cmd:worststrategy")],
         [Button.inline("📈 Regime Report", b"cp:cmd:regimereport"), Button.inline("🏭 Sector Report", b"cp:cmd:sectorreport")],
