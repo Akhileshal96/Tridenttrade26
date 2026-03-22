@@ -314,7 +314,7 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     if cmd_word == "/strategyreport":
-        await event.reply(SA.strategy_report_text())
+        await event.reply(CYCLE.get_strategy_selector_text() + "\n\n" + SA.strategy_report_text())
         return True
 
     if cmd_word == "/beststrategy":

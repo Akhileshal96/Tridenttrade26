@@ -59,7 +59,13 @@ STATE = {
     "opening_metrics": {},
     "open_feed_retry_count": 0,
     "no_entry_cycles": 0,
+    "top3_dry_cycles": 0,
     "fallback_mode_active": False,
+    "active_strategy_families": [],
+    "active_strategy_last_refresh": None,
+    "active_strategy_last_reason": "",
+    "strategy_scores_last": {},
+    "strategy_selection_history": [],
     "eod_report_sent_date": "",
     "confirm_strictness": "STRICT",
     "signals_seen_window": 0,
@@ -86,6 +92,81 @@ RUNTIME = {
     "USE_BUCKET_SLABS": bool(getattr(CFG, "USE_BUCKET_SLABS", True)),
     "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
+
+STRATEGY_REGISTRY = [
+    {
+        "family": "trend_long",
+        "direction": "long",
+        "preferred_regimes": ["TRENDING_UP", "TRENDING"],
+        "preferred_market_structure": ["OPEN_CLEAN", "OPEN_MODERATE"],
+        "scan_function_name": "_scan_long_entries",
+        "signal_function_name": "generate_signal",
+        "class": "primary",
+    },
+    {
+        "family": "pullback_long",
+        "direction": "long",
+        "preferred_regimes": ["TRENDING_UP", "TRENDING"],
+        "preferred_market_structure": ["OPEN_CLEAN", "OPEN_MODERATE"],
+        "scan_function_name": "_scan_long_entries",
+        "signal_function_name": "generate_pullback_signal",
+        "class": "primary",
+    },
+    {
+        "family": "short_breakdown",
+        "direction": "short",
+        "preferred_regimes": ["WEAK", "TRENDING_DOWN"],
+        "preferred_market_structure": ["OPEN_CLEAN", "OPEN_MODERATE", "OPEN_UNSAFE"],
+        "scan_function_name": "_scan_short_entries",
+        "signal_function_name": "generate_short_signal",
+        "class": "primary",
+    },
+    {
+        "family": "mean_reversion",
+        "direction": "long",
+        "preferred_regimes": ["SIDEWAYS", "UNKNOWN"],
+        "preferred_market_structure": ["OPEN_MODERATE", "OPEN_UNSAFE", "OPEN_CLEAN"],
+        "scan_function_name": "_scan_long_entries",
+        "signal_function_name": "generate_mean_reversion_signal",
+        "class": "primary",
+    },
+    {
+        "family": "fallback_long",
+        "direction": "long",
+        "preferred_regimes": ["UNKNOWN", "SIDEWAYS", "VOLATILE"],
+        "preferred_market_structure": ["OPEN_MODERATE", "OPEN_UNSAFE", "OPEN_CLEAN"],
+        "scan_function_name": "_scan_long_entries",
+        "signal_function_name": "generate_mean_reversion_signal",
+        "class": "fallback",
+    },
+    {
+        "family": "fallback_short",
+        "direction": "short",
+        "preferred_regimes": ["WEAK", "TRENDING_DOWN", "VOLATILE", "UNKNOWN"],
+        "preferred_market_structure": ["OPEN_MODERATE", "OPEN_UNSAFE", "OPEN_CLEAN"],
+        "scan_function_name": "_scan_short_entries",
+        "signal_function_name": "generate_short_signal",
+        "class": "fallback",
+    },
+    {
+        "family": "outlier_long",
+        "direction": "long",
+        "preferred_regimes": ["TRENDING_UP", "SIDEWAYS", "VOLATILE"],
+        "preferred_market_structure": ["OPEN_CLEAN", "OPEN_MODERATE"],
+        "scan_function_name": "_scan_long_entries",
+        "signal_function_name": "generate_vwap_ema_signal",
+        "class": "outlier",
+    },
+    {
+        "family": "outlier_short",
+        "direction": "short",
+        "preferred_regimes": ["WEAK", "TRENDING_DOWN", "SIDEWAYS", "VOLATILE"],
+        "preferred_market_structure": ["OPEN_CLEAN", "OPEN_MODERATE", "OPEN_UNSAFE"],
+        "scan_function_name": "_scan_short_entries",
+        "signal_function_name": "generate_short_signal",
+        "class": "outlier",
+    },
+]
 
 _NOTIFIER = None
 
@@ -235,6 +316,12 @@ def _ensure_day_key():
             STATE["day_peak_pnl"] = 0.0
             STATE["sector_map_cache"] = None
             STATE["open_feed_retry_count"] = 0
+            STATE["top3_dry_cycles"] = 0
+            STATE["active_strategy_families"] = []
+            STATE["active_strategy_last_refresh"] = None
+            STATE["active_strategy_last_reason"] = ""
+            STATE["strategy_scores_last"] = {}
+            STATE["strategy_selection_history"] = []
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -255,6 +342,12 @@ def manual_reset_day():
         STATE["halt_for_day"] = False
         STATE["day_peak_pnl"] = 0.0
         STATE["sector_map_cache"] = None
+        STATE["top3_dry_cycles"] = 0
+        STATE["active_strategy_families"] = []
+        STATE["active_strategy_last_refresh"] = None
+        STATE["active_strategy_last_reason"] = ""
+        STATE["strategy_scores_last"] = {}
+        STATE["strategy_selection_history"] = []
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -639,7 +732,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         PM.remove(sym)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
-        append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+        append_log("WARN", "EXIT", f"{sym} family={trade.get('strategy_family','-')} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
         SA.record_trade_exit(
             {
                 "entry_time": trade.get("entry_time") or "",
@@ -682,7 +775,7 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     PM.remove(sym)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
-    append_log("WARN", "EXIT", f"{sym} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+    append_log("WARN", "EXIT", f"{sym} family={trade.get('strategy_family','-')} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
     SA.record_trade_exit(
         {
             "entry_time": trade.get("entry_time") or "",
@@ -816,6 +909,236 @@ def _active_trade_universe() -> list:
         pass
     return out
 
+
+def _strategy_registry_map() -> dict:
+    return {str(x.get("family") or "").strip().lower(): dict(x) for x in STRATEGY_REGISTRY}
+
+
+def _recent_family_performance_score(family: str) -> float:
+    fam = str(family or "").strip().lower()
+    if not fam:
+        return 50.0
+    try:
+        rows = SA._read_csv_rows(SA.TRADE_HISTORY_PATH)  # type: ignore[attr-defined]
+    except Exception:
+        rows = []
+    if not rows:
+        return 50.0
+    hist = [r for r in rows if str(r.get("strategy_family") or "").strip().lower() == fam][-20:]
+    if not hist:
+        return 50.0
+    pnl = [float(r.get("pnl_inr") or 0.0) for r in hist]
+    wins = [x for x in pnl if x > 0]
+    win_rate = (len(wins) / len(pnl)) if pnl else 0.0
+    recent = sum(pnl[-8:]) if pnl else 0.0
+    score = (50.0 * win_rate) + (50.0 if recent > 0 else (30.0 if recent == 0 else 10.0))
+    return max(0.0, min(100.0, score))
+
+
+def _estimate_family_opportunity_count(family: str, symbols: list[str], sample_size: int = 14) -> int:
+    fam = str(family or "").strip().lower()
+    syms = list(dict.fromkeys([(s or "").strip().upper() for s in symbols if (s or "").strip()]))[: max(4, sample_size)]
+    if not syms:
+        return 0
+    count = 0
+    for sym in syms:
+        q = _quality_metrics(sym)
+        if not q.get("ok"):
+            continue
+        price = float(q.get("price") or 0.0)
+        sma = float(q.get("sma20") or 0.0)
+        sma_prev = float(q.get("sma20_prev") or 0.0)
+        vol = float(q.get("vol_score") or 0.0)
+        if price <= 0 or sma <= 0:
+            continue
+        dist_pct = ((price - sma) / sma) * 100.0
+        if fam in ("trend_long", "fallback_long"):
+            if price > sma and vol >= 1.0:
+                count += 1
+        elif fam == "pullback_long":
+            if price >= (sma * 0.998) and sma >= sma_prev and vol >= 0.9:
+                count += 1
+        elif fam == "mean_reversion":
+            if abs(dist_pct) <= 0.8 and vol >= 0.8:
+                count += 1
+        elif fam == "outlier_long":
+            if price > (sma * 1.003) and vol >= 1.2:
+                count += 1
+        elif fam in ("short_breakdown", "fallback_short"):
+            if price < sma and vol >= 1.0:
+                count += 1
+        elif fam == "outlier_short":
+            if price < (sma * 0.997) and vol >= 1.2:
+                count += 1
+    return int(count)
+
+
+def score_strategy_family(family: str, market_context: dict, universe_context: dict, recent_stats: dict | None = None) -> tuple[int, dict]:
+    fam = str(family or "").strip().lower()
+    registry = _strategy_registry_map().get(fam, {})
+    regime = str(market_context.get("regime") or "UNKNOWN").upper()
+    trend_direction = str(market_context.get("trend_direction") or "UNKNOWN").upper()
+    opening_mode = str(market_context.get("opening_mode") or "OPEN_CLEAN").upper()
+    volatility = str(market_context.get("volatility_state") or ("HIGH" if regime == "VOLATILE" else "NORMAL")).upper()
+    quality = float(market_context.get("quality_score") or 50.0)
+    sector_bias = float(universe_context.get("sector_bias") or 0.0)
+    opp_count = int(universe_context.get("opportunity_count") or 0)
+    htf_bias = float(market_context.get("htf_bias") or 0.0)
+    recent_perf = float((recent_stats or {}).get("recent_perf_score") or _recent_family_performance_score(fam))
+
+    preferred_regimes = [str(x).upper() for x in list(registry.get("preferred_regimes") or [])]
+    preferred_struct = [str(x).upper() for x in list(registry.get("preferred_market_structure") or [])]
+    direction = str(registry.get("direction") or "either").lower()
+
+    regime_fit = 30.0 if regime in preferred_regimes else (20.0 if regime == "UNKNOWN" else 8.0)
+    directional_fit = 12.0
+    if direction == "long":
+        directional_fit = 20.0 if trend_direction == "UP" else (10.0 if trend_direction == "UNKNOWN" else 4.0)
+    elif direction == "short":
+        directional_fit = 20.0 if trend_direction == "DOWN" else (10.0 if trend_direction == "UNKNOWN" else 4.0)
+    volatility_fit = 8.0
+    if regime == "VOLATILE":
+        volatility_fit = 10.0 if fam in ("outlier_long", "outlier_short", "fallback_short") else 4.0
+    elif volatility == "LOW":
+        volatility_fit = 10.0 if fam in ("trend_long", "pullback_long", "mean_reversion") else 6.0
+
+    opportunity_fit = min(15.0, float(opp_count) * 3.0)
+    sector_fit = 10.0 if ((sector_bias >= 0 and direction != "short") or (sector_bias < 0 and direction == "short")) else 5.0
+    htf_fit = 10.0 if ((htf_bias >= 0 and direction != "short") or (htf_bias < 0 and direction == "short")) else 4.0
+    perf_fit = max(0.0, min(5.0, recent_perf / 20.0))
+
+    if opening_mode not in preferred_struct:
+        regime_fit = max(2.0, regime_fit - 6.0)
+    if quality < 40 and fam in ("trend_long", "pullback_long"):
+        volatility_fit = max(1.0, volatility_fit - 3.0)
+    if regime in ("WEAK", "TRENDING_DOWN") and direction == "short":
+        directional_fit = min(20.0, directional_fit + 3.0)
+    if regime == "TRENDING_UP" and direction == "long":
+        directional_fit = min(20.0, directional_fit + 2.0)
+
+    total = regime_fit + directional_fit + volatility_fit + opportunity_fit + sector_fit + htf_fit + perf_fit
+    score = int(round(max(0.0, min(100.0, total))))
+    detail = {
+        "regime_fit": round(regime_fit, 2),
+        "directional_fit": round(directional_fit, 2),
+        "volatility_fit": round(volatility_fit, 2),
+        "opportunity_fit": round(opportunity_fit, 2),
+        "sector_fit": round(sector_fit, 2),
+        "htf_fit": round(htf_fit, 2),
+        "performance_fit": round(perf_fit, 2),
+        "opportunity_count": opp_count,
+    }
+    return score, detail
+
+
+def _refresh_active_strategy_families(reason: str, regime: str, trend_direction: str, active_universe: list, research_universe: list) -> list[str]:
+    market_context = {
+        "regime": str(regime or "UNKNOWN").upper(),
+        "trend_direction": str(trend_direction or "UNKNOWN").upper(),
+        "opening_mode": str(STATE.get("opening_mode") or "OPEN_CLEAN").upper(),
+        "quality_score": float(get_opening_confidence(STATE.get("opening_metrics") or {})[0] if STATE.get("opening_metrics") else 60.0),
+        "volatility_state": "HIGH" if str(regime).upper() == "VOLATILE" else "NORMAL",
+        "htf_bias": 1.0 if str(trend_direction).upper() == "UP" else (-1.0 if str(trend_direction).upper() == "DOWN" else 0.0),
+    }
+    sector_snapshot = _sector_strength_snapshot(active_universe[:10] if active_universe else research_universe[:10])
+    sector_bias = (sum(sector_snapshot.values()) / len(sector_snapshot)) if sector_snapshot else 0.0
+    source_symbols = active_universe or research_universe or []
+
+    scored = []
+    score_map = {}
+    append_log("INFO", "ROUTE", f"[ROUTE] recomputing top3 strategies reason={reason}")
+    for st in STRATEGY_REGISTRY:
+        fam = str(st.get("family") or "").strip().lower()
+        opp_n = _estimate_family_opportunity_count(fam, source_symbols)
+        universe_context = {"sector_bias": sector_bias, "opportunity_count": opp_n}
+        score, detail = score_strategy_family(fam, market_context, universe_context, recent_stats=None)
+        append_log("INFO", "ROUTE", f"[ROUTE] strategy_score family={fam} score={score}")
+        score_map[fam] = {"score": score, "detail": detail}
+        scored.append((fam, score))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    min_active = int(getattr(CFG, "STRATEGY_MIN_ACTIVE_SCORE", 40) or 40)
+    active = [fam for fam, sc in scored if sc >= min_active][:3]
+    STATE["active_strategy_families"] = list(active)
+    STATE["active_strategy_last_refresh"] = float(time.time())
+    STATE["active_strategy_last_reason"] = str(reason or "timer")
+    STATE["strategy_scores_last"] = score_map
+    hist = list(STATE.get("strategy_selection_history") or [])
+    hist.append(
+        {
+            "ts": datetime.now(IST).isoformat(timespec="seconds"),
+            "reason": str(reason or "timer"),
+            "regime": str(regime or "UNKNOWN"),
+            "top3": list(active),
+        }
+    )
+    STATE["strategy_selection_history"] = hist[-200:]
+    append_log("INFO", "ROUTE", f"[ROUTE] active_top3={','.join(active) if active else 'none'}")
+    return active
+
+
+def _maybe_refresh_active_strategy_families(regime: str, trend_direction: str, active_universe: list, research_universe: list) -> list[str]:
+    last = float(STATE.get("active_strategy_last_refresh") or 0.0)
+    refresh_min = int(getattr(CFG, "STRATEGY_SELECTION_REFRESH_MINUTES", 10) or 10)
+    elapsed_min = ((time.time() - last) / 60.0) if last > 0 else 999.0
+    prev_regime = str(STATE.get("strategy_last_regime") or "")
+    cur_regime = str(regime or "UNKNOWN").upper()
+    dry_n = int(STATE.get("top3_dry_cycles") or 0)
+    dry_thr = int(getattr(CFG, "TOP3_DRY_CYCLE_THRESHOLD", 5) or 5)
+    no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
+
+    reason = ""
+    if not list(STATE.get("active_strategy_families") or []):
+        reason = "init"
+    elif prev_regime and prev_regime != cur_regime:
+        reason = "regime_change"
+    elif elapsed_min >= max(1, refresh_min):
+        reason = "timer"
+    elif bool(STATE.get("fallback_mode_active")):
+        reason = "fallback_mode"
+    elif dry_n >= dry_thr:
+        reason = "top3_dry"
+    elif no_entry_cycles >= max(3, dry_thr):
+        reason = "no_entry_cycles"
+
+    STATE["strategy_last_regime"] = cur_regime
+    if reason:
+        return _refresh_active_strategy_families(reason, cur_regime, trend_direction, active_universe, research_universe)
+    return list(STATE.get("active_strategy_families") or [])
+
+
+def _scan_family(family: str, universe: list, max_new: int, universe_source: str) -> int:
+    fam = str(family or "").strip().lower()
+    if max_new <= 0:
+        return 0
+    if fam == "trend_long":
+        return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_signal, strategy_family=fam, universe_source=universe_source)
+    if fam == "pullback_long":
+        return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_pullback_signal, strategy_family=fam, universe_source=universe_source)
+    if fam == "mean_reversion":
+        return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_mean_reversion_signal, strategy_family=fam, universe_source=universe_source)
+    if fam == "fallback_long":
+        return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_mean_reversion_signal, strategy_family=fam, universe_source=universe_source)
+    if fam == "outlier_long":
+        return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_vwap_ema_signal, strategy_family=fam, universe_source=universe_source)
+    if fam in ("short_breakdown", "fallback_short", "outlier_short"):
+        if not bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
+            return 0
+        return _scan_short_entries(universe, max_new=max_new, strategy_family=fam, universe_source=universe_source)
+    return 0
+
+
+def _scan_top3_families(universe: list, families: list[str], max_new: int, universe_source: str) -> int:
+    if not universe or max_new <= 0:
+        return 0
+    fams = [str(f).strip().lower() for f in families if str(f).strip()]
+    append_log("INFO", "ROUTE", f"[ROUTE] scanning families={','.join(fams) if fams else 'none'} source={universe_source}")
+    opened = 0
+    for fam in fams:
+        if opened >= max_new:
+            break
+        opened += _scan_family(fam, universe, max_new=max_new - opened, universe_source=universe_source)
+    return opened
 
 def _load_research_universe_from_file() -> list:
     live_path = getattr(CFG, "UNIVERSE_LIVE_PATH", os.path.join(DATA_DIR, "universe_live.txt"))
@@ -1798,6 +2121,7 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
         fam = "short_breakdown"
     if not cond:
         return None
+    append_log("INFO", "SIG", f"family={fam} symbol={sym} setup=short_signal")
     return {
         "symbol": sym,
         "entry": price,
@@ -1954,7 +2278,7 @@ def _maybe_enter_short_from_signal(sig):
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     })
     _set_cooldown()
-    append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
+    append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} entry={booked_entry:.2f}")
     append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
         append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
@@ -2140,7 +2464,7 @@ def _maybe_enter_from_signal(sig):
     })
     _set_cooldown()
     append_log("INFO", "SIG", f"BUY trigger {sym}")
-    append_log("INFO", "TRADE", f"{mode} BUY {sym} family={strategy_family} tier={decision.get('tier')} qty={qty}")
+    append_log("INFO", "ENTRY", f"BUY {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} mode={mode}")
     append_log("INFO", "EXEC", f"symbol={sym} side=BUY size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
         append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
@@ -2210,6 +2534,8 @@ def get_status_text():
             f"tier={p.get('confidence_tier','-')} source={p.get('universe_source','-')} regime={p.get('market_regime','-')}"
         )
     current_profit, current_loss = _current_open_pnl_breakdown()
+    active_top3 = ",".join(list(STATE.get("active_strategy_families") or [])) or "none"
+    selector_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
     return (
         "📟 Trident Status\n\n"
         f"Mode: {mode}\n"
@@ -2219,6 +2545,8 @@ def get_status_text():
         f"Universe(live): {len(load_universe_live())} symbols\n"
         f"Open Positions: {_open_positions_count()}\n"
         f"Last Regime: {STATE.get('last_regime','UNKNOWN')}\n"
+        f"Active Top3 Families: {active_top3}\n"
+        f"Top3 Refresh Reason: {selector_reason}\n"
         f"Opening Mode: {STATE.get('opening_mode','OPEN_CLEAN')}\n"
         f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n"
         f"Current Profit (open): ₹{current_profit:.2f}\n"
@@ -2233,6 +2561,26 @@ def get_status_text():
         + ("\n".join(rows) if rows else "(none)")
         + "\n"
     )
+
+
+def get_strategy_selector_text() -> str:
+    fams = list(STATE.get("active_strategy_families") or [])
+    last_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
+    scores = dict(STATE.get("strategy_scores_last") or {})
+    lines = ["🧭 Strategy Selector", ""]
+    lines.append(f"Active Top3: {','.join(fams) if fams else 'none'}")
+    lines.append(f"Last Refresh Reason: {last_reason}")
+    if scores:
+        lines.append("")
+        lines.append("Latest Family Scores")
+        ranked = sorted(
+            [(fam, int((meta or {}).get('score') or 0)) for fam, meta in scores.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        for fam, sc in ranked[:8]:
+            lines.append(f"{fam}: {sc}")
+    return "\n".join(lines)
 
 
 
@@ -2340,6 +2688,12 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
             sig["strategy_family"] = strategy_family
         if sig and universe_source and not sig.get("universe_source"):
             sig["universe_source"] = universe_source
+        if sig:
+            append_log(
+                "INFO",
+                "SIG",
+                f"family={str(sig.get('strategy_family') or strategy_family)} symbol={str(sig.get('symbol') or '').strip().upper()} setup={str(sig.get('strategy_setup') or sig.get('strategy_tag') or 'n/a')}",
+            )
         return sig
 
     ee_process_entries(
@@ -2458,122 +2812,47 @@ def tick():
             _deactivate_micro_mode(reason)
             return
 
+    selected_families = _maybe_refresh_active_strategy_families(regime_u, trend_direction, active_universe, research_universe)
+    if not selected_families:
+        selected_families = ["mean_reversion"]
+        append_log("WARN", "ROUTE", "[ROUTE] no strategy met min score -> using micro fallback family=mean_reversion")
+
     opened = 0
     append_log("INFO", "UNIV", "scanning active universe")
-    if regime_u in ("WEAK", "TRENDING_DOWN"):
-        append_log("INFO", "MARKET", f"regime={regime_u} bias=SHORT_FIRST")
-        append_log("INFO", "ROUTE", f"regime={regime_u} prioritizing short_breakdown/outlier_short in active_universe")
-        if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=max_new, strategy_family="short_breakdown", universe_source="active")
-        if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_short", universe_source="active")
-        if opened < max_new:
-            opened += _scan_long_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_long", universe_source="active")
-    elif regime_u in ("TRENDING", "TRENDING_UP"):
-        append_log("INFO", "MARKET", "regime=TRENDING_UP bias=LONG_FIRST")
-        append_log("INFO", "ROUTE", "regime=TRENDING_UP prioritizing trend_long/pullback_long in active_universe")
-        opened += _scan_long_entries(active_universe, max_new=max_new, strategy_family="trend_long", universe_source="active")
-        if opened < max_new:
-            opened += _scan_long_entries(active_universe, max_new=max_new - opened, signal_fn=generate_pullback_signal, strategy_family="pullback_long", universe_source="active")
-        if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_short", universe_source="active")
-    elif regime_u == "SIDEWAYS":
-        append_log("INFO", "MARKET", "regime=SIDEWAYS bias=MEAN_REVERSION_FIRST")
-        append_log("INFO", "ROUTE", "regime=SIDEWAYS prioritizing mean_reversion candidates in active_universe")
-        half = max(1, max_new // 2)
-        opened += _scan_long_entries(active_universe, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion", universe_source="active")
-        if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=max_new - opened, strategy_family="fallback_short", universe_source="active")
-        elif opened < max_new:
-            opened += _scan_long_entries(active_universe, max_new=max_new - opened, strategy_family="outlier_long", universe_source="active")
-    elif regime_u == "VOLATILE":
-        append_log("INFO", "MARKET", "regime=VOLATILE bias=RISK_REDUCED")
-        vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-        append_log("INFO", "ROUTE", "regime=VOLATILE prioritizing selective outlier_long/outlier_short in active_universe")
-        opened += _scan_long_entries(active_universe, max_new=vol_cap, strategy_family="outlier_long", universe_source="active")
-        if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=vol_cap - opened, strategy_family="outlier_short", universe_source="active")
-    else:
-        append_log("INFO", "MARKET", f"regime={regime_u} bias=ADAPTIVE_DEFAULT")
-        append_log("INFO", "ROUTE", "regime=UNKNOWN prioritizing fallback_long/fallback_short micro participation")
-        opened += _scan_long_entries(active_universe, max_new=max_new, strategy_family="fallback_long", universe_source="active")
-        if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(active_universe, max_new=max_new - opened, strategy_family="fallback_short", universe_source="active")
+    opened += _scan_top3_families(active_universe, selected_families, max_new=max_new, universe_source="active_universe")
 
+    research_tail = [s for s in research_universe if s not in set(active_universe)]
     if opened <= 0:
         STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
-        append_log("INFO", "ROUTE", "no setup in active_universe -> expanding to research_universe")
-        research_tail = [s for s in research_universe if s not in set(active_universe)]
-        if regime_u in ("WEAK", "TRENDING_DOWN") and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(research_tail, max_new=max_new, strategy_family="short_breakdown", universe_source="research")
-            if opened < max_new:
-                opened += _scan_short_entries(research_tail, max_new=max_new - opened, strategy_family="outlier_short", universe_source="research")
-            if opened < max_new:
-                opened += _scan_long_entries(research_tail, max_new=max_new - opened, universe_source="research")
-        elif regime_u in ("TRENDING", "TRENDING_UP"):
-            opened += _scan_long_entries(research_tail, max_new=max_new, strategy_family="trend_long", universe_source="research")
-            if opened < max_new:
-                opened += _scan_long_entries(research_tail, max_new=max_new - opened, signal_fn=generate_pullback_signal, strategy_family="pullback_long", universe_source="research")
-            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(research_tail, max_new=max_new - opened, strategy_family="outlier_short", universe_source="research")
-        elif regime_u == "SIDEWAYS":
-            half = max(1, max_new // 2)
-            opened += _scan_long_entries(research_tail, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion", universe_source="research")
-            if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(research_tail, max_new=max_new - opened, strategy_family="fallback_short", universe_source="research")
-            elif opened < max_new:
-                opened += _scan_long_entries(research_tail, max_new=max_new - opened, strategy_family="outlier_long", universe_source="research")
-        elif regime_u == "VOLATILE":
-            vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-            opened += _scan_long_entries(research_tail, max_new=vol_cap, strategy_family="outlier_long", universe_source="research")
-            if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(research_tail, max_new=vol_cap - opened, strategy_family="outlier_short", universe_source="research")
-        else:
-            opened += _scan_long_entries(research_tail, max_new=max_new, strategy_family="fallback_long", universe_source="research")
-            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(research_tail, max_new=max_new - opened, strategy_family="fallback_short", universe_source="research")
+        opened += _scan_top3_families(research_tail, selected_families, max_new=max_new - opened, universe_source="research_universe")
 
     expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
         append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
-        append_log("INFO", "ROUTE", "no trend setup in active_universe -> expanding to fallback_universe")
         expanded = list(research_universe)
-        if regime_u in ("WEAK", "TRENDING_DOWN") and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-            opened += _scan_short_entries(expanded, max_new=max_new, strategy_family="short_breakdown", universe_source="expanded")
-            if opened < max_new:
-                opened += _scan_short_entries(expanded, max_new=max_new - opened, strategy_family="outlier_short", universe_source="expanded")
-            if opened < max_new:
-                opened += _scan_long_entries(expanded, max_new=max_new - opened, universe_source="expanded")
-        elif regime_u in ("TRENDING", "TRENDING_UP"):
-            opened += _scan_long_entries(expanded, max_new=max_new, strategy_family="trend_long", universe_source="expanded")
-            if opened < max_new:
-                opened += _scan_long_entries(expanded, max_new=max_new - opened, signal_fn=generate_pullback_signal, strategy_family="pullback_long", universe_source="expanded")
-            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(expanded, max_new=max_new - opened, strategy_family="outlier_short", universe_source="expanded")
-        elif regime_u == "SIDEWAYS":
-            half = max(1, max_new // 2)
-            opened += _scan_long_entries(expanded, max_new=half, signal_fn=generate_mean_reversion_signal, strategy_family="mean_reversion", universe_source="expanded")
-            if bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(expanded, max_new=max_new - opened, strategy_family="fallback_short", universe_source="expanded")
-            elif opened < max_new:
-                opened += _scan_long_entries(expanded, max_new=max_new - opened, strategy_family="outlier_long", universe_source="expanded")
-        elif regime_u == "VOLATILE":
-            vol_cap = max(1, int(math.ceil(max_new * 0.5)))
-            opened += _scan_long_entries(expanded, max_new=vol_cap, strategy_family="outlier_long", universe_source="expanded")
-            if opened < vol_cap and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(expanded, max_new=vol_cap - opened, strategy_family="outlier_short", universe_source="expanded")
-        else:
-            opened += _scan_long_entries(expanded, max_new=max_new, strategy_family="fallback_long", universe_source="expanded")
-            if opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                opened += _scan_short_entries(expanded, max_new=max_new - opened, strategy_family="fallback_short", universe_source="expanded")
+        opened += _scan_top3_families(expanded, selected_families, max_new=max_new - opened, universe_source="expanded_universe")
 
     if opened <= 0:
         STATE["no_entry_cycles"] = int(STATE.get("no_entry_cycles") or 0) + 1
+        STATE["top3_dry_cycles"] = int(STATE.get("top3_dry_cycles") or 0) + 1
     else:
         STATE["no_entry_cycles"] = 0
+        STATE["top3_dry_cycles"] = 0
         STATE["active_no_setup_cycles"] = 0
         STATE["fallback_mode_active"] = False
+
+    dry_thr = int(getattr(CFG, "TOP3_DRY_CYCLE_THRESHOLD", 5) or 5)
+    if int(STATE.get("top3_dry_cycles") or 0) >= dry_thr:
+        append_log("WARN", "HEALTH", f"[HEALTH] top3 dry for {dry_thr} cycles -> recomputing")
+        selected_families = _refresh_active_strategy_families(
+            "top3_dry",
+            regime_u,
+            trend_direction,
+            active_universe,
+            research_universe,
+        )
+        append_log("INFO", "HEALTH", "[HEALTH] top3 dry -> expanding to fallback universe")
 
     trigger_n = int(getattr(CFG, "FALLBACK_TRIGGER_CYCLES", 5) or 5)
     if STATE.get("no_entry_cycles", 0) >= trigger_n:
@@ -2585,12 +2864,10 @@ def tick():
     if STATE.get("fallback_mode_active"):
         fb = list(STATE.get("fallback_universe") or [])
         if fb:
-            append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)} strategy=MEAN_REVERSION")
+            append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)} strategy=TOP3")
             fb_opened = 0
-            append_log("INFO", "ROUTE", "fallback_universe active -> mean_reversion/fallback_long/fallback_short routing")
-            fb_opened += _scan_long_entries(fb, max_new=max_new, signal_fn=generate_mean_reversion_signal, strategy_family="fallback_long", universe_source="fallback")
-            if fb_opened < max_new and bool(getattr(CFG, "ENABLE_SHORT_MODE", True)):
-                fb_opened += _scan_short_entries(fb, max_new=max_new - fb_opened, strategy_family="fallback_short", universe_source="fallback")
+            append_log("INFO", "ROUTE", "fallback_universe active -> top3 routing")
+            fb_opened += _scan_top3_families(fb, list(STATE.get("active_strategy_families") or selected_families), max_new=max_new, universe_source="fallback_universe")
             if fb_opened > 0:
                 append_log(
                     "INFO",
@@ -2613,6 +2890,13 @@ def run_loop_forever():
         f"weak mode config top_n={int(getattr(CFG, 'WEAK_MARKET_TOP_N', 10) or 10)} "
         f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
         f"size_multiplier={float(getattr(CFG, 'WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+    )
+    append_log(
+        "INFO",
+        "ROUTE",
+        f"top3 selector min_score={int(getattr(CFG, 'STRATEGY_MIN_ACTIVE_SCORE', 40) or 40)} "
+        f"refresh_min={int(getattr(CFG, 'STRATEGY_SELECTION_REFRESH_MINUTES', 10) or 10)} "
+        f"dry_threshold={int(getattr(CFG, 'TOP3_DRY_CYCLE_THRESHOLD', 5) or 5)}",
     )
     append_log(
         "INFO",

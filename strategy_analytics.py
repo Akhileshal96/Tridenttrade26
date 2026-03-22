@@ -108,11 +108,13 @@ def _calc_stats(rows: list[dict]) -> dict:
 def rebuild_strategy_stats() -> dict:
     rows = _read_csv_rows(TRADE_HISTORY_PATH)
     by_strategy = defaultdict(list)
+    by_family = defaultdict(list)
     by_regime = defaultdict(list)
     by_sector = defaultdict(list)
     by_symbol = defaultdict(list)
     for r in rows:
         by_strategy[str(r.get("strategy_tag") or "unknown")].append(r)
+        by_family[str(r.get("strategy_family") or "unknown")].append(r)
         by_regime[str(r.get("market_regime") or "UNKNOWN")].append(r)
         by_sector[str(r.get("sector") or "OTHER")].append(r)
         by_symbol[str(r.get("symbol") or "")].append(r)
@@ -120,6 +122,7 @@ def rebuild_strategy_stats() -> dict:
     out = {
         "updated_at": _now_iso(),
         "strategy": {k: _calc_stats(v) for k, v in by_strategy.items()},
+        "family": {k: _calc_stats(v) for k, v in by_family.items()},
         "regime": {k: _calc_stats(v) for k, v in by_regime.items()},
         "sector": {k: _calc_stats(v) for k, v in by_sector.items()},
         "symbol": {k: _calc_stats(v) for k, v in by_symbol.items()},
@@ -211,8 +214,10 @@ def get_strategy_multiplier(strategy_tag: str, cfg) -> tuple[float, str]:
 
 
 def strategy_report_text(limit: int = 8) -> str:
-    stats = load_strategy_stats().get("strategy", {})
-    if not stats:
+    loaded = load_strategy_stats()
+    stats = loaded.get("strategy", {})
+    fam_stats = loaded.get("family", {})
+    if not stats and not fam_stats:
         return "📊 Strategy Report\n\nNo strategy stats yet."
     items = sorted(stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)), reverse=True)[:limit]
     lines = ["📊 Strategy Report", ""]
@@ -220,6 +225,13 @@ def strategy_report_text(limit: int = 8) -> str:
         lines.append(
             f"{k}: trades={v.get('trades',0)} win={float(v.get('win_rate',0)):.1f}% net=₹{float(v.get('net_pnl',0)):.2f} exp={float(v.get('expectancy',0)):.2f}"
         )
+    if fam_stats:
+        lines.append("")
+        lines.append("Family Performance")
+        for k, v in sorted(fam_stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)), reverse=True)[:limit]:
+            lines.append(
+                f"{k}: trades={v.get('trades',0)} win={float(v.get('win_rate',0)):.1f}% net=₹{float(v.get('net_pnl',0)):.2f}"
+            )
     return "\n".join(lines)
 
 
@@ -407,6 +419,20 @@ def generate_eod_report_text(state: dict) -> str:
     for s in skips:
         by_reason[str(s.get("reason") or "unknown")] += 1
 
+    selection_hist = list((state or {}).get("strategy_selection_history") or [])
+    family_active_count = defaultdict(int)
+    switch_count = 0
+    prev_top3 = None
+    for row in selection_hist:
+        top3 = tuple(str(x).strip().lower() for x in list((row or {}).get("top3") or []) if str(x).strip())
+        if not top3:
+            continue
+        for fam in top3:
+            family_active_count[fam] += 1
+        if prev_top3 is not None and top3 != prev_top3:
+            switch_count += 1
+        prev_top3 = top3
+
     top_sector = "N/A"
     if by_sector:
         top_sector = max(by_sector.items(), key=lambda x: x[1])[0]
@@ -445,6 +471,9 @@ def generate_eod_report_text(state: dict) -> str:
     if by_strategy:
         best_st = max(by_strategy.items(), key=lambda x: x[1])
         insights.append(f"{best_st[0]} was the strongest contributor today.")
+    if by_family:
+        best_fam = max(by_family.items(), key=lambda x: x[1])
+        insights.append(f"Top family by PnL: {best_fam[0]}.")
     if by_reason:
         top_skip = max(by_reason.items(), key=lambda x: x[1])
         insights.append(f"Most skipped signals were due to {top_skip[0]} ({top_skip[1]}).")
@@ -458,6 +487,9 @@ def generate_eod_report_text(state: dict) -> str:
             insights.append(f"Filter {protective[0]} was protective on average blocked moves.")
         if over:
             insights.append(f"Filter {over[0]} may be over-restrictive based on missed upside.")
+    if switch_count > 0:
+        helped = "helped" if net > 0 else "was mixed"
+        insights.append(f"Family switching occurred {switch_count} times and {helped}.")
     insights = insights[:6]
 
     def _fmt_p(x):
@@ -492,6 +524,12 @@ def generate_eod_report_text(state: dict) -> str:
         for k, v in sorted(by_family.items(), key=lambda x: x[1], reverse=True)[:8]:
             count = sum(1 for t in trades if str(t.get("strategy_family") or "unknown") == k)
             lines.append(f"{k} → {_fmt_p(v)} ({count})")
+    if family_active_count:
+        lines.append("")
+        lines.append("Strategy Selection Summary")
+        for fam, ct in sorted(family_active_count.items(), key=lambda x: x[1], reverse=True)[:8]:
+            lines.append(f"{fam} active_cycles={ct}")
+        lines.append(f"family_switches={switch_count}")
     lines.append("")
     lines.append("Sector Performance")
     for k, v in sorted(by_sector.items(), key=lambda x: x[1], reverse=True)[:5]:
