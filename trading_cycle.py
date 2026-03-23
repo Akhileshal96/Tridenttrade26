@@ -1601,28 +1601,9 @@ def get_opening_mode() -> tuple[str, dict]:
     if conf_meta.get("ignored"):
         append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
 
-    rng = float(m.get("first_5m_range_pct") or 0.0)
-    is_confirmed_zero_feed = (
-        float(m.get("gap_pct") or 0.0) == 0.0
-        and rng == 0.0
-        and spread_q == "UNKNOWN"
-        and volume_q == "UNKNOWN"
-    )
-    if is_confirmed_zero_feed:
-        retry_count = int(STATE.get("open_feed_retry_count") or 0)
-        if retry_count < 15:
-            retry_count += 1
-            STATE["open_feed_retry_count"] = retry_count
-            append_log("INFO", "OPEN", f"[OPEN] feed_retry attempt={retry_count}/15 waiting for valid data")
-            m["reason"] = "confirmed_broken_feed"
-            return "OPEN_FEED_RETRY", m
-        m["reason"] = "confirmed_broken_feed"
-        return "OPEN_HARD_BLOCK", m
-
-    retry_count = int(STATE.get("open_feed_retry_count") or 0)
-    if retry_count > 0 and (float(m.get("gap_pct") or 0.0) > 0.0 or rng > 0.0):
-        append_log("INFO", "OPEN", f"[OPEN] feed recovered after {retry_count} retries")
-        STATE["open_feed_retry_count"] = 0
+    # Missing/unknown opening metrics (volume/spread/opening_range) must remain
+    # an incomplete-data state and never escalate to confirmed_broken_feed.
+    STATE["open_feed_retry_count"] = 0
 
     if bool(m.get("feed_error")):
         m["reason"] = "confirmed_broken_feed"
