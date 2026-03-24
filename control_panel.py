@@ -30,7 +30,7 @@ def _main_buttons(handlers=None):
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📈 Analytics", b"cp:cmd:analytics"), Button.inline(pnl_label, b"cp:cmd:pnlsofar")],
         [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
-        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("📊 Route Status", b"cp:cmd:routestatus")],
+        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🌐 Route Status", b"cp:cmd:routestatus")],
         [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
@@ -105,7 +105,7 @@ def _analytics_buttons():
     return [
         [Button.inline("📈 Analytics", b"cp:cmd:analytics"), Button.inline("💰 P/L So Far", b"cp:cmd:pnlsofar")],
         [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Strategy Scores", b"cp:cmd:strategyscores")],
-        [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("📊 Route Status", b"cp:cmd:routestatus")],
+        [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("🌐 Route Status", b"cp:cmd:routestatus")],
         [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
         [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
         [Button.inline("🏆 Best Strategy", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst Strategy", b"cp:cmd:worststrategy")],

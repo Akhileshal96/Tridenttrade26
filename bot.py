@@ -193,6 +193,20 @@ def _tail_night_lines(n=120):
     return "\n".join(lines[-n:]) if lines else "(no NIGHT lines yet)"
 
 
+def _latest_ops_summary(n=180):
+    txt = tail_text(n) or ""
+    if not txt:
+        return "(no logs)"
+    keep = []
+    tags = ("[ENTRY]", "[EXIT]", "[ORDER]", "[FILL]", "[ROUTE]", "[UNIV]", "[UNIV_CHANGE]", "[RECON]", "[RISK]")
+    for ln in txt.splitlines():
+        if any(t in ln for t in tags):
+            keep.append(ln)
+    if not keep:
+        return "(no execution/route/universe events yet)"
+    return "\n".join(keep[-20:])
+
+
 def _read_universe(path, limit=40):
     if not path or not os.path.exists(path):
         return []
@@ -297,6 +311,7 @@ async def _restart_bot_process(event) -> None:
 
 
 async def _dispatch_command(event, sender, cmd_word, cmd_arg):
+    append_log("INFO", "BOT", f"command={cmd_word} sender={sender}")
     if cmd_word == "/myid":
         await event.reply(f"🆔 Your Telegram ID: `{int(sender)}`")
         return True
@@ -472,9 +487,11 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     # ===== Logs (Viewer+) =====
-    if cmd_word == "/logs":
+    if cmd_word in ("/logs", "/log"):
+        ops = _latest_ops_summary()
         await event.reply(
-            "📜 Log Options\n\n"
+            "📜 Log Options + Latest Ops\n\n"
+            f"{ops}\n\n"
             "• /dailylog -> today's logs\n"
             "• /logs20 -> last 20 lines\n"
             "• /logs30 -> last 30 lines\n"
@@ -864,7 +881,12 @@ async def main():
             await event.reply("❌ Not permitted. Use /myid and ask owner to grant Viewer/Trader access.")
             return
 
-        handled = await _dispatch_command(event, sender, cmd_word, cmd_arg)
+        try:
+            handled = await _dispatch_command(event, sender, cmd_word, cmd_arg)
+        except Exception as e:
+            append_log("ERROR", "BOT", f"command_failed={cmd_word} err={e}")
+            await event.reply(f"❌ Command failed: {cmd_word}\n{e}")
+            return
         if not handled:
             await event.reply("Unknown command. Use /help")
 
