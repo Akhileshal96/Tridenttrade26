@@ -77,6 +77,15 @@ STATE = {
     "micro_mode_active": False,
     "micro_mode_trade_count": 0,
     "micro_mode_regime": "",
+    "realized_today": 0.0,
+    "unrealized_now": 0.0,
+    "pnl_so_far": 0.0,
+    "trade_events": [],
+    "research_events": [],
+    "universe_changes_today": [],
+    "route_changes_today": [],
+    "recent_entries": [],
+    "recent_exits": [],
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -185,6 +194,52 @@ def _notify(msg: str):
         _NOTIFIER(msg)
     except Exception as e:
         append_log("WARN", "NOTIFY", f"Notifier error: {e}")
+
+
+def _append_runtime_event(bucket: str, payload: dict, limit: int = 300):
+    if not isinstance(payload, dict):
+        return
+    ts = datetime.now(IST).isoformat(timespec="seconds")
+    rec = {"ts": ts}
+    rec.update(payload)
+    events = STATE.setdefault(bucket, [])
+    if not isinstance(events, list):
+        events = []
+        STATE[bucket] = events
+    events.append(rec)
+    if len(events) > limit:
+        del events[:-limit]
+
+
+def _log_trade_event(event_tag: str, trade: dict):
+    tr = dict(trade or {})
+    sym = str(tr.get("symbol") or "").strip().upper()
+    side = str(tr.get("side") or "BUY").upper()
+    fam = str(tr.get("strategy_family") or "unknown")
+    tier = str(tr.get("confidence_tier") or "n/a")
+    qty = int(tr.get("qty") or tr.get("quantity") or 0)
+    entry = float(tr.get("entry") or tr.get("entry_price") or 0.0)
+    exit_px = float(tr.get("exit_price") or tr.get("exit") or 0.0) if tr.get("exit_price") is not None or tr.get("exit") is not None else None
+    oid = tr.get("order_id")
+    entry_ts = str(tr.get("entry_time") or "-")
+    exit_ts = str(tr.get("exit_time") or "-")
+    exit_reason = str(tr.get("exit_reason") or tr.get("reason") or "-")
+    parts = [
+        f"symbol={sym}",
+        f"side={side}",
+        f"family={fam}",
+        f"tier={tier}",
+        f"qty={qty}",
+        f"entry={entry:.2f}",
+        f"order_id={oid or '-'}",
+        f"entry_ts={entry_ts}",
+    ]
+    if exit_px is not None:
+        parts.append(f"exit={float(exit_px):.2f}")
+    parts.append(f"exit_ts={exit_ts}")
+    parts.append(f"exit_reason={exit_reason}")
+    append_log("INFO", event_tag, " ".join(parts))
+    _append_runtime_event("trade_events", {"event": event_tag, **tr})
 
 
 def _positions():
@@ -738,7 +793,14 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         PM.remove(sym)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
+        exit_time = datetime.now(IST).isoformat(timespec="seconds")
+        enriched = dict(trade)
+        enriched.update({"symbol": sym, "qty": qty, "entry": entry, "exit_price": ltp, "exit_time": exit_time, "exit_reason": reason})
+        _log_trade_event("CLOSE", enriched)
+        _log_trade_event("TRADE", {**enriched, "pnl_inr": pnl, "pnl_pct": pnl_pct})
         append_log("WARN", "EXIT", f"{sym} family={trade.get('strategy_family','-')} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+        append_log("INFO", "RISK", f"symbol={sym} loss_streak={int(STATE.get('loss_streak') or 0)} halt_for_day={bool(STATE.get('halt_for_day'))}")
+        _append_runtime_event("recent_exits", {"symbol": sym, "side": side, "qty": qty, "entry": entry, "exit": ltp, "reason": reason, "pnl_inr": pnl, "ts": exit_time}, limit=40)
         SA.record_trade_exit(
             {
                 "entry_time": trade.get("entry_time") or "",
@@ -781,7 +843,14 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     PM.remove(sym)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
+    exit_time = datetime.now(IST).isoformat(timespec="seconds")
+    enriched = dict(trade)
+    enriched.update({"symbol": sym, "qty": qty, "entry": entry, "exit_price": ltp, "exit_time": exit_time, "exit_reason": reason})
+    _log_trade_event("CLOSE", enriched)
+    _log_trade_event("TRADE", {**enriched, "pnl_inr": pnl, "pnl_pct": pnl_pct})
     append_log("WARN", "EXIT", f"{sym} family={trade.get('strategy_family','-')} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
+    append_log("INFO", "RISK", f"symbol={sym} loss_streak={int(STATE.get('loss_streak') or 0)} halt_for_day={bool(STATE.get('halt_for_day'))}")
+    _append_runtime_event("recent_exits", {"symbol": sym, "side": side, "qty": qty, "entry": entry, "exit": ltp, "reason": reason, "pnl_inr": pnl, "ts": exit_time}, limit=40)
     SA.record_trade_exit(
         {
             "entry_time": trade.get("entry_time") or "",
@@ -1038,6 +1107,7 @@ def score_strategy_family(family: str, market_context: dict, universe_context: d
 
 
 def _refresh_active_strategy_families(reason: str, regime: str, trend_direction: str, active_universe: list, research_universe: list) -> list[str]:
+    prev_active = list(STATE.get("active_strategy_families") or [])
     market_context = {
         "regime": str(regime or "UNKNOWN").upper(),
         "trend_direction": str(trend_direction or "UNKNOWN").upper(),
@@ -1080,6 +1150,19 @@ def _refresh_active_strategy_families(reason: str, regime: str, trend_direction:
     )
     STATE["strategy_selection_history"] = hist[-200:]
     append_log("INFO", "ROUTE", f"[ROUTE] active_top3={','.join(active) if active else 'none'}")
+    if tuple(prev_active) != tuple(active):
+        _append_runtime_event(
+            "route_changes_today",
+            {
+                "reason": str(reason or "timer"),
+                "from_top3": prev_active,
+                "to_top3": list(active),
+                "regime": str(regime or "UNKNOWN"),
+                "trend_direction": str(trend_direction or "UNKNOWN"),
+            },
+            limit=240,
+        )
+        _record_research_event("top3_change", f"reason={reason}", from_top3=prev_active, to_top3=list(active))
     return active
 
 
@@ -1138,7 +1221,15 @@ def _scan_top3_families(universe: list, families: list[str], max_new: int, unive
     if not universe or max_new <= 0:
         return 0
     fams = [str(f).strip().lower() for f in families if str(f).strip()]
+    prev_source = str(STATE.get("last_route_universe_source") or "n/a")
     STATE["last_route_universe_source"] = str(universe_source or "n/a")
+    if prev_source != STATE["last_route_universe_source"]:
+        _append_runtime_event(
+            "route_changes_today",
+            {"reason": "universe_source_change", "from_source": prev_source, "to_source": STATE["last_route_universe_source"], "families": list(fams)},
+            limit=240,
+        )
+        _record_research_event("route_change", f"source={prev_source}->{STATE['last_route_universe_source']}", active_top3=list(fams))
     append_log("INFO", "ROUTE", f"[ROUTE] scanning families={','.join(fams) if fams else 'none'} source={universe_source}")
     opened = 0
     for fam in fams:
@@ -1164,17 +1255,45 @@ def _resolve_trade_universe() -> list:
     dyn = _active_trade_universe()
     if dyn:
         append_log("INFO", "UNIV", f"Research universe loaded size={len(dyn)}")
+        _record_research_event("night_or_live_universe", f"source=runtime size={len(dyn)}")
         return dyn
 
     from_file = _load_research_universe_from_file()
     if from_file:
         append_log("INFO", "UNIV", f"Research universe loaded size={len(from_file)}")
+        _record_research_event("night_or_live_universe", f"source=file size={len(from_file)}")
         return from_file
 
     fallback = load_universe_trading()
     if fallback:
         append_log("INFO", "UNIV", f"Fallback static size={len(fallback)}")
+        _record_research_event("fallback_activation", f"source=trading_file size={len(fallback)}")
     return fallback
+
+
+def _record_research_event(event_type: str, message: str, **extra):
+    payload = {"event": event_type, "message": message}
+    if extra:
+        payload.update(extra)
+    _append_runtime_event("research_events", payload, limit=400)
+    append_log("INFO", "RESEARCH", f"[RESEARCH] {event_type} {message}")
+
+
+def _record_universe_change(reason: str, source: str, added: list[str], removed: list[str], fallback_active: bool = False):
+    rec = {
+        "reason": reason,
+        "source": source,
+        "added": list(added or []),
+        "removed": list(removed or []),
+        "fallback_active": bool(fallback_active),
+    }
+    _append_runtime_event("universe_changes_today", rec, limit=240)
+    append_log(
+        "INFO",
+        "UNIV",
+        f"[UNIV_CHANGE] reason={reason} source={source} added={','.join(added or []) or '-'} removed={','.join(removed or []) or '-'} fallback={bool(fallback_active)}",
+    )
+    _record_research_event("universe_change", f"reason={reason} source={source}", added=added, removed=removed, fallback_active=bool(fallback_active))
 
 
 def _sector_strength_snapshot(research_universe: list) -> dict:
@@ -1215,8 +1334,11 @@ def _active_score_metrics(symbol: str, sector_strength: dict) -> dict:
 
 def build_active_universe(research_universe: list) -> list:
     base = [str(s).strip().upper() for s in (research_universe or []) if str(s).strip()]
+    prev = list(STATE.get("active_universe") or [])
     if not base:
         STATE["active_universe"] = []
+        if prev:
+            _record_universe_change("active_universe_empty", "active_universe", [], prev, fallback_active=bool(STATE.get("fallback_mode_active")))
         return []
     n = int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)
     sec_strength = _sector_strength_snapshot(base)
@@ -1232,6 +1354,11 @@ def build_active_universe(research_universe: list) -> list:
     STATE["active_universe"] = out
     STATE["active_universe_last_refresh"] = datetime.now(IST)
     append_log("INFO", "UNIV", f"Active universe refreshed size={len(out)}")
+    prev_set, out_set = set(prev), set(out)
+    added = sorted(list(out_set - prev_set))
+    removed = sorted(list(prev_set - out_set))
+    if added or removed:
+        _record_universe_change("active_universe_refresh", "active_universe", added, removed, fallback_active=bool(STATE.get("fallback_mode_active")))
     return out
 
 
@@ -2238,10 +2365,12 @@ def _maybe_enter_short_from_signal(sig):
         now_price = _ltp(kite, sym)
         if now_price is not None:
             booked_entry = now_price
+        append_log("INFO", "ORDER", f"symbol={sym} side=SELL family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
         oid = _place_live_order(kite, sym, "SELL", qty)
         if not oid:
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
+        append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
         "symbol": sym,
@@ -2266,6 +2395,10 @@ def _maybe_enter_short_from_signal(sig):
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     })
     _set_cooldown()
+    _log_trade_event("ORDER", {**dict(_positions().get(sym) or {}), "symbol": sym})
+    _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
+    _log_trade_event("TRADE", {**dict(_positions().get(sym) or {}), "symbol": sym, "exit_reason": "-"})
+    _append_runtime_event("recent_entries", {"symbol": sym, "side": "SHORT", "qty": qty, "entry": booked_entry, "family": strategy_family, "tier": str(decision.get("tier") or "n/a"), "ts": datetime.now(IST).isoformat(timespec="seconds")}, limit=40)
     append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} entry={booked_entry:.2f}")
     append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
@@ -2423,10 +2556,12 @@ def _maybe_enter_from_signal(sig):
                 append_log("INFO", "SKIP", f"{sym} reason=slippage")
                 return False
             booked_entry = now_price
+        append_log("INFO", "ORDER", f"symbol={sym} side=BUY family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
         oid = _place_live_order(kite, sym, "BUY", qty)
         if not oid:
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
+        append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
         "symbol": sym,
@@ -2451,6 +2586,10 @@ def _maybe_enter_from_signal(sig):
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     })
     _set_cooldown()
+    _log_trade_event("ORDER", {**dict(_positions().get(sym) or {}), "symbol": sym})
+    _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
+    _log_trade_event("TRADE", {**dict(_positions().get(sym) or {}), "symbol": sym, "exit_reason": "-"})
+    _append_runtime_event("recent_entries", {"symbol": sym, "side": "BUY", "qty": qty, "entry": booked_entry, "family": strategy_family, "tier": str(decision.get("tier") or "n/a"), "ts": datetime.now(IST).isoformat(timespec="seconds")}, limit=40)
     append_log("INFO", "SIG", f"BUY trigger {sym}")
     append_log("INFO", "ENTRY", f"BUY {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} mode={mode}")
     append_log("INFO", "EXEC", f"symbol={sym} side=BUY size={int(round(tier_mult * 100))}%")
@@ -2508,6 +2647,19 @@ def _current_open_pnl_breakdown():
     return float(profit_inr), float(loss_inr_abs)
 
 
+def _refresh_runtime_pnl_fields():
+    _ensure_day_key()
+    realized = float(STATE.get("today_pnl") or 0.0)
+    prof, loss_abs = _current_open_pnl_breakdown()
+    unrealized = float(prof - loss_abs)
+    total = realized + unrealized
+    STATE["realized_today"] = realized
+    STATE["unrealized_now"] = unrealized
+    STATE["pnl_so_far"] = total
+    append_log("INFO", "PNL", f"realized_today={realized:.2f} unrealized_now={unrealized:.2f} pnl_so_far={total:.2f}")
+    return realized, unrealized, total
+
+
 def get_status_text():
     _ensure_day_key()
     RISK.sync_wallet(STATE)
@@ -2521,7 +2673,7 @@ def get_status_text():
             f"strategy={p.get('strategy_tag','-')} family={p.get('strategy_family','-')} "
             f"tier={p.get('confidence_tier','-')} source={p.get('universe_source','-')} regime={p.get('market_regime','-')}"
         )
-    current_profit, current_loss = _current_open_pnl_breakdown()
+    realized, unrealized, pnl_so_far = _refresh_runtime_pnl_fields()
     active_top3 = ",".join(list(STATE.get("active_strategy_families") or [])) or "none"
     selector_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
     regime_now = str(STATE.get("last_regime") or "UNKNOWN")
@@ -2539,9 +2691,9 @@ def get_status_text():
         f"Active Top3 Families: {active_top3}\n"
         f"Top3 Refresh Reason: {selector_reason}\n"
         f"Opening Mode: {STATE.get('opening_mode','OPEN_CLEAN')}\n"
-        f"Today PnL: {float(STATE.get('today_pnl') or 0.0):.2f}\n"
-        f"Current Profit (open): ₹{current_profit:.2f}\n"
-        f"Current Loss (open): ₹{current_loss:.2f}\n\n"
+        f"Realized Today: ₹{realized:.2f}\n"
+        f"Unrealized Now: ₹{unrealized:.2f}\n"
+        f"P/L So Far: ₹{pnl_so_far:.2f}\n\n"
         "Wallet/Caps:\n"
         f"- Wallet Net: ₹{float(STATE.get('wallet_net_inr') or 0):.2f}\n"
         f"- Wallet Available: ₹{float(STATE.get('wallet_available_inr') or 0):.2f}\n"
@@ -2551,6 +2703,84 @@ def get_status_text():
         "Open Trades:\n"
         + ("\n".join(rows) if rows else "(none)")
         + "\n"
+    )
+
+
+def get_pnl_so_far_text() -> str:
+    realized, unrealized, total = _refresh_runtime_pnl_fields()
+    wallet = float(STATE.get("wallet_net_inr") or STATE.get("last_wallet") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    pct = (total / wallet * 100.0) if wallet > 0 else 0.0
+    icon = "🟢" if total >= 0 else "🔴"
+    return (
+        "💰 P/L So Far\n\n"
+        f"Realized Today: ₹{realized:.2f}\n"
+        f"Unrealized Now: ₹{unrealized:.2f}\n"
+        f"{icon} Total (So Far): ₹{total:.2f} ({pct:+.2f}%)"
+    )
+
+
+def get_research_text(limit: int = 16) -> str:
+    events = list(STATE.get("research_events") or [])[-max(1, int(limit)) :]
+    rep = dict(STATE.get("research_last_report") or {})
+    lines = ["🔬 Research", ""]
+    if rep:
+        lines.append(
+            f"Night Research: generated={rep.get('generated_at','-')} selected={int(rep.get('selected_count') or 0)}"
+        )
+        lines.append(f"Top Symbols: {','.join(list(rep.get('top_symbols') or [])[:8]) or 'n/a'}")
+        lines.append("")
+    if not events:
+        lines.append("No runtime research events yet.")
+        return "\n".join(lines)
+    for e in events:
+        ts = str(e.get("ts") or "-")
+        et = str(e.get("event") or "event")
+        msg = str(e.get("message") or "")
+        lines.append(f"- [{ts}] {et}: {msg}")
+    return "\n".join(lines)
+
+
+def get_universe_changes_text(limit: int = 14) -> str:
+    rows = list(STATE.get("universe_changes_today") or [])[-max(1, int(limit)) :]
+    if not rows:
+        return "🌌 Universe Changes\n\nNo universe changes tracked yet today."
+    lines = ["🌌 Universe Changes", ""]
+    for r in rows:
+        ts = str(r.get("ts") or "-")
+        reason = str(r.get("reason") or "n/a")
+        src = str(r.get("source") or "n/a")
+        add = ",".join(list(r.get("added") or [])) or "-"
+        rem = ",".join(list(r.get("removed") or [])) or "-"
+        fb = bool(r.get("fallback_active"))
+        lines.append(f"- [{ts}] reason={reason} src={src} add={add} remove={rem} fallback={fb}")
+    return "\n".join(lines)
+
+
+def get_analytics_text() -> str:
+    realized, unrealized, total = _refresh_runtime_pnl_fields()
+    regime_now = str(STATE.get("last_regime") or "UNKNOWN")
+    bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
+    top3 = ",".join(list(STATE.get("active_strategy_families") or [])) or "none"
+    active_uni = ",".join(list(STATE.get("active_universe") or [])[:12]) or "none"
+    open_rows = []
+    for sym, p in sorted(_positions().items()):
+        e, q = _trade_entry_qty(p)
+        open_rows.append(f"{sym}:{str(p.get('side') or 'BUY').upper()} qty={q} entry={e:.2f}")
+    entries = list(STATE.get("recent_entries") or [])[-5:]
+    exits = list(STATE.get("recent_exits") or [])[-5:]
+    univ_changes = len(list(STATE.get("universe_changes_today") or []))
+    route_changes = len(list(STATE.get("route_changes_today") or []))
+    return (
+        "📈 Analytics\n\n"
+        f"Regime/Bias: {regime_now} / {bias}\n"
+        f"Top3: {top3}\n"
+        f"Active Universe: {active_uni}\n"
+        f"Open Trades: {len(open_rows)}\n"
+        f"Realized/Unrealized/Total: ₹{realized:.2f} / ₹{unrealized:.2f} / ₹{total:.2f}\n"
+        f"Recent Entries: {len(entries)} | Recent Exits: {len(exits)}\n"
+        f"Universe Changes Today: {univ_changes}\n"
+        f"Route Changes Today: {route_changes}\n\n"
+        f"Open Trade Snapshot: {('; '.join(open_rows[:6]) if open_rows else 'none')}"
     )
 
 
@@ -2732,6 +2962,58 @@ def _maybe_send_eod_report():
         append_log("WARN", "EOD", f"report generation failed: {e}")
 
 
+def reconcile_broker_positions():
+    if not is_live_enabled():
+        return
+    try:
+        kite = get_kite()
+        net_positions = (kite.positions() or {}).get("net") or []
+    except Exception as e:
+        append_log("WARN", "RECON", f"broker position fetch failed: {e}")
+        return
+    local = _positions()
+    now_ts = datetime.now(IST).isoformat(timespec="seconds")
+    broker_map = {}
+    for p in net_positions:
+        sym = str((p or {}).get("tradingsymbol") or "").strip().upper()
+        qty = int((p or {}).get("quantity") or 0)
+        if not sym or qty == 0:
+            continue
+        avg = float((p or {}).get("average_price") or 0.0)
+        side = "BUY" if qty > 0 else "SHORT"
+        broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side}
+    for sym, bp in broker_map.items():
+        if sym in local:
+            continue
+        PM.set(sym, {
+            "symbol": sym,
+            "side": bp["side"],
+            "entry": float(bp["avg"] or 0.0),
+            "entry_price": float(bp["avg"] or 0.0),
+            "qty": int(bp["qty"]),
+            "quantity": int(bp["qty"]),
+            "peak": 0.0,
+            "peak_pct": 0.0,
+            "peak_pnl_inr": 0.0,
+            "trail_active": False,
+            "trailing_active": False,
+            "order_id": None,
+            "strategy_tag": "reconciled_external",
+            "strategy_family": "reconciled_external",
+            "confidence_tier": "RECON",
+            "opening_mode": str(STATE.get("opening_mode") or "OPEN_CLEAN"),
+            "market_regime": str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN"),
+            "universe_source": "broker_reconciled",
+            "sector": _sector_for_symbol(sym),
+            "entry_time": now_ts,
+        })
+        append_log("INFO", "RECON", f"synced_broker_open symbol={sym} side={bp['side']} qty={bp['qty']} entry={bp['avg']:.2f}")
+        _log_trade_event("FILL", {**dict(local.get(sym) or {}), "symbol": sym})
+    for sym in list(local.keys()):
+        if sym not in broker_map and sym in _positions():
+            append_log("WARN", "RECON", f"local_open_missing_on_broker symbol={sym}")
+
+
 def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, strategy_family: str = "trend_long", universe_source: str = "primary") -> int:
     before = _open_positions_count()
 
@@ -2766,6 +3048,8 @@ def tick():
     _ensure_day_key()
     RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
+    reconcile_broker_positions()
+    _refresh_runtime_pnl_fields()
     RISK.check_day_drawdown_guard(STATE)
 
     if _past_force_exit_time() and _positions():
@@ -2826,10 +3110,12 @@ def tick():
     if not research_universe:
         append_log("WARN", "UNIV", "Trading universe empty. Run /nightnow or ensure live universe exists.")
         return
+    _record_research_event("night_or_live_universe", f"resolved_size={len(research_universe)}")
 
     active_universe = refresh_active_universe_if_due(research_universe)
     if not active_universe:
         active_universe = list(research_universe[: int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)])
+        _record_universe_change("active_universe_fallback", "research_universe", active_universe, [], fallback_active=bool(STATE.get("fallback_mode_active")))
 
     max_new = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
     snap = get_market_regime_snapshot() or {}
@@ -2883,12 +3169,14 @@ def tick():
     if opened <= 0:
         STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
+        _record_research_event("route_change", "route_scan=research_universe", active_top3=selected_families)
         opened += _scan_top3_families(research_tail, selected_families, max_new=max_new - opened, universe_source="research_universe")
 
     expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
         append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
         expanded = list(research_universe)
+        _record_research_event("route_change", "route_scan=expanded_universe", active_top3=selected_families)
         opened += _scan_top3_families(expanded, selected_families, max_new=max_new - opened, universe_source="expanded_universe")
 
     if opened <= 0:
@@ -2918,6 +3206,7 @@ def tick():
             append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
             build_fallback_universe()
             STATE["fallback_mode_active"] = True
+            _record_research_event("fallback_activation", f"trigger_n={trigger_n}")
 
     if STATE.get("fallback_mode_active"):
         fb = list(STATE.get("fallback_universe") or [])
@@ -2925,6 +3214,7 @@ def tick():
             append_log("INFO", "UNIV", f"scanning fallback universe size={len(fb)} strategy=TOP3")
             fb_opened = 0
             append_log("INFO", "ROUTE", "fallback_universe active -> top3 routing")
+            _record_research_event("route_change", "route_scan=fallback_universe", active_top3=list(STATE.get("active_strategy_families") or selected_families))
             fb_opened += _scan_top3_families(fb, list(STATE.get("active_strategy_families") or selected_families), max_new=max_new, universe_source="fallback_universe")
             if fb_opened > 0:
                 append_log(

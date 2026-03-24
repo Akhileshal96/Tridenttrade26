@@ -46,7 +46,11 @@ HELP_TEXT = (
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /pnl        → day P/L snapshot\n"
+    "• /pnlsofar   → realized + unrealized + total P/L\n"
     "• /trailstatus → trailing lock details\n"
+    "• /analytics  → runtime analytics panel\n"
+    "• /research   → unified runtime research timeline\n"
+    "• /universechanges → universe change timeline\n"
     "• /top3       → active top 3 strategies\n"
     "• /strategyscores → ranked strategy suitability\n"
     "• /regime     → regime/bias snapshot\n"
@@ -312,6 +316,9 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         icon = "🟢" if day_pnl >= 0 else "🔴"
         await event.reply(f"{icon} Day P/L: ₹{day_pnl:.2f} ({pct:+.2f}%)")
         return True
+    if cmd_word == "/pnlsofar":
+        await event.reply(CYCLE.get_pnl_so_far_text())
+        return True
 
     if cmd_word == "/trailstatus":
         await event.reply(CYCLE.get_trailing_status_text())
@@ -335,6 +342,18 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
     if cmd_word == "/routestatus":
         append_log("INFO", "BOT", "command=/routestatus")
         await event.reply(CYCLE.get_route_status_text())
+        return True
+    if cmd_word == "/analytics":
+        append_log("INFO", "BOT", "command=/analytics")
+        await event.reply(CYCLE.get_analytics_text())
+        return True
+    if cmd_word == "/research":
+        append_log("INFO", "BOT", "command=/research")
+        await event.reply(CYCLE.get_research_text())
+        return True
+    if cmd_word == "/universechanges":
+        append_log("INFO", "BOT", "command=/universechanges")
+        await event.reply(CYCLE.get_universe_changes_text())
         return True
 
     if cmd_word == "/strategyreport":
@@ -778,7 +797,11 @@ async def main():
         "stoploop": _mk_panel_handler("stoploop"),
         "status": _mk_panel_handler("status"),
         "pnl": _mk_panel_handler("pnl"),
+        "pnlsofar": _mk_panel_handler("pnlsofar"),
         "trailstatus": _mk_panel_handler("trailstatus"),
+        "analytics": _mk_panel_handler("analytics"),
+        "research": _mk_panel_handler("research"),
+        "universechanges": _mk_panel_handler("universechanges"),
         "top3": _mk_panel_handler("top3"),
         "strategyscores": _mk_panel_handler("strategyscores"),
         "regime": _mk_panel_handler("regime"),

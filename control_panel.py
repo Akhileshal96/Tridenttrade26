@@ -18,7 +18,7 @@ ANALYTICS_TITLE = "📊 **ANALYTICS PANEL**"
 
 
 def _main_buttons(handlers=None):
-    pnl_label = "📉 P/L So Far"
+    pnl_label = "💰 P/L So Far"
     try:
         provider = (handlers or {}).get("__pnl_so_far_label__")
         if callable(provider):
@@ -30,7 +30,7 @@ def _main_buttons(handlers=None):
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
-        [Button.inline(pnl_label, b"cp:cmd:pnl")],
+        [Button.inline(pnl_label, b"cp:cmd:pnlsofar")],
         [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
@@ -42,6 +42,7 @@ def _research_buttons():
         [Button.inline("🌃 Night Now", b"cp:cmd:nightnow"), Button.inline("📦 Universe", b"cp:cmd:universe")],
         [Button.inline("📡 Universe Live", b"cp:cmd:universe_live"), Button.inline("🧪 Night Report", b"cp:cmd:nightreport")],
         [Button.inline("📝 Night Log", b"cp:cmd:nightlog"), Button.inline("🔄 Promote Status", b"cp:cmd:promotestatus")],
+        [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
         [Button.inline("⬆ Promote Now", b"cp:cmd:promote_now")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]
@@ -100,8 +101,10 @@ def _help_buttons():
 
 def _analytics_buttons():
     return [
+        [Button.inline("📈 Analytics", b"cp:cmd:analytics"), Button.inline("💰 P/L So Far", b"cp:cmd:pnlsofar")],
         [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Strategy Scores", b"cp:cmd:strategyscores")],
         [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("📊 Route Status", b"cp:cmd:routestatus")],
+        [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
         [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
         [Button.inline("🏆 Best Strategy", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst Strategy", b"cp:cmd:worststrategy")],
         [Button.inline("📈 Regime Report", b"cp:cmd:regimereport"), Button.inline("🏭 Sector Report", b"cp:cmd:sectorreport")],
