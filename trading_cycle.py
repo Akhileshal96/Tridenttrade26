@@ -846,6 +846,8 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     exit_time = datetime.now(IST).isoformat(timespec="seconds")
     enriched = dict(trade)
     enriched.update({"symbol": sym, "qty": qty, "entry": entry, "exit_price": ltp, "exit_time": exit_time, "exit_reason": reason})
+    if oid:
+        enriched["order_id"] = oid
     _log_trade_event("CLOSE", enriched)
     _log_trade_event("TRADE", {**enriched, "pnl_inr": pnl, "pnl_pct": pnl_pct})
     append_log("WARN", "EXIT", f"{sym} family={trade.get('strategy_family','-')} reason={reason} pnl_inr={pnl:.2f} pnl_pct={pnl_pct:.2f}%")
@@ -1230,6 +1232,13 @@ def _scan_top3_families(universe: list, families: list[str], max_new: int, unive
             limit=240,
         )
         _record_research_event("route_change", f"source={prev_source}->{STATE['last_route_universe_source']}", active_top3=list(fams))
+        _record_universe_change(
+            "route_driven_universe_change",
+            STATE["last_route_universe_source"],
+            [],
+            [],
+            fallback_active=bool(STATE.get("fallback_mode_active")),
+        )
     append_log("INFO", "ROUTE", f"[ROUTE] scanning families={','.join(fams) if fams else 'none'} source={universe_source}")
     opened = 0
     for fam in fams:
@@ -2768,6 +2777,8 @@ def get_analytics_text() -> str:
         open_rows.append(f"{sym}:{str(p.get('side') or 'BUY').upper()} qty={q} entry={e:.2f}")
     entries = list(STATE.get("recent_entries") or [])[-5:]
     exits = list(STATE.get("recent_exits") or [])[-5:]
+    ent_txt = "; ".join([f"{e.get('symbol')} {e.get('side')} q={e.get('qty')} @ {float(e.get('entry') or 0.0):.2f}" for e in entries]) if entries else "none"
+    ex_txt = "; ".join([f"{e.get('symbol')} {e.get('side')} q={e.get('qty')} exit={float(e.get('exit') or 0.0):.2f} reason={e.get('reason')}" for e in exits]) if exits else "none"
     univ_changes = len(list(STATE.get("universe_changes_today") or []))
     route_changes = len(list(STATE.get("route_changes_today") or []))
     return (
@@ -2779,7 +2790,9 @@ def get_analytics_text() -> str:
         f"Realized/Unrealized/Total: ₹{realized:.2f} / ₹{unrealized:.2f} / ₹{total:.2f}\n"
         f"Recent Entries: {len(entries)} | Recent Exits: {len(exits)}\n"
         f"Universe Changes Today: {univ_changes}\n"
-        f"Route Changes Today: {route_changes}\n\n"
+        f"Route Changes Today: {route_changes}\n"
+        f"Recent Entry Detail: {ent_txt}\n"
+        f"Recent Exit Detail: {ex_txt}\n\n"
         f"Open Trade Snapshot: {('; '.join(open_rows[:6]) if open_rows else 'none')}"
     )
 
@@ -2984,6 +2997,12 @@ def reconcile_broker_positions():
         broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side}
     for sym, bp in broker_map.items():
         if sym in local:
+            tr = dict(local.get(sym) or {})
+            lqty = int(tr.get("qty") or tr.get("quantity") or 0)
+            lside = str(tr.get("side") or "BUY").upper()
+            if lqty != int(bp["qty"]) or lside != str(bp["side"]):
+                PM.set(sym, {**tr, "qty": int(bp["qty"]), "quantity": int(bp["qty"]), "side": str(bp["side"])})
+                append_log("INFO", "RECON", f"synced_broker_qty symbol={sym} local_qty={lqty} broker_qty={bp['qty']} local_side={lside} broker_side={bp['side']}")
             continue
         PM.set(sym, {
             "symbol": sym,
@@ -3012,6 +3031,9 @@ def reconcile_broker_positions():
     for sym in list(local.keys()):
         if sym not in broker_map and sym in _positions():
             append_log("WARN", "RECON", f"local_open_missing_on_broker symbol={sym}")
+            tr = dict(_positions().get(sym) or {})
+            PM.remove(sym)
+            _log_trade_event("CLOSE", {**tr, "symbol": sym, "exit_reason": "RECON_BROKER_FLAT", "exit_time": now_ts})
 
 
 def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, strategy_family: str = "trend_long", universe_source: str = "primary") -> int:
