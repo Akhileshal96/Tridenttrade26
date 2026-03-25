@@ -58,6 +58,8 @@ STATE = {
     "opening_mode": "OPEN_CLEAN",
     "opening_metrics": {},
     "open_feed_retry_count": 0,
+    "mean_reversion_dry_cycles": 0,
+    "entry_tier_for_cooldown": None,
     "no_entry_cycles": 0,
     "top3_dry_cycles": 0,
     "fallback_mode_active": False,
@@ -742,7 +744,21 @@ def _place_live_order(kite, sym, side, qty):
 
 def _set_cooldown():
     sec = int(getattr(CFG, "COOLDOWN_SECONDS", 120))
+    # Slightly relax cooldown after 09:30 for repeated valid MICRO/REDUCED entries.
+    tier = str(STATE.get("entry_tier_for_cooldown") or "").upper()
+    now = datetime.now(IST)
+    post_0930 = now.time() >= dt_time(9, 30)
+    if post_0930 and tier in ("MICRO", "REDUCED"):
+        streak_key = "post0930_valid_tier_streak"
+        streak = int(STATE.get(streak_key) or 0) + 1
+        STATE[streak_key] = streak
+        if streak >= 2:
+            sec = max(60, int(round(sec * 0.75)))
+            append_log("INFO", "RISK", f"cooldown_refined tier={tier} streak={streak} sec={sec}")
+    else:
+        STATE["post0930_valid_tier_streak"] = 0
     STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
+    STATE["entry_tier_for_cooldown"] = None
 
 
 def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3, side: str = "BUY", signal_price: float | None = None, strategy_tag: str = ""):
@@ -1779,7 +1795,7 @@ def confirm_long_htf(symbol: str, regime: str | None = None) -> bool:
         return True
     rg = str(regime or (get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN").upper()
     htf_status = _htf_alignment_status(symbol, "BUY", rg)
-    htf_score = 2 if htf_status == "FULL" else (1 if htf_status == "PARTIAL" else 0)
+    htf_score = 2 if htf_status == "PASS" else (1 if htf_status == "PARTIAL" else (1 if htf_status == "INSUFFICIENT_HISTORY" else 0))
 
     if rg in ("TRENDING", "TRENDING_UP"):
         ok = htf_score >= 2
@@ -1946,15 +1962,15 @@ def _session_quality_score() -> float:
 
 def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
     if not bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
-        return "FULL"
+        return "PASS"
     df = _htf_fetch(symbol)
     if df.empty or "close" not in df.columns:
-        return "FAIL"
+        return "INSUFFICIENT_HISTORY"
     ma_n = int(getattr(CFG, "HTF_CONFIRM_MA", 20) or 20)
     close = df["close"].astype(float)
     ma = close.rolling(ma_n).mean().dropna()
     if len(ma) < 2:
-        return "FAIL"
+        return "INSUFFICIENT_HISTORY"
 
     px = float(close.iloc[-1])
     ma_now = float(ma.iloc[-1])
@@ -1968,16 +1984,16 @@ def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
         partial = px < ma_now
         full = partial and ma_now < ma_prev
         if rg in ("WEAK", "TRENDING_DOWN"):
-            return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+            return "PASS" if full else ("PARTIAL" if partial else "FAIL")
         if bucket == "EARLY" or strictness == "MODERATE":
             return "PARTIAL" if partial else "FAIL"
-        return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+        return "PASS" if full else ("PARTIAL" if partial else "FAIL")
 
     partial = px > ma_now
     full = partial and ma_now > ma_prev
     if rg in ("TRENDING", "TRENDING_UP"):
         if strictness == "STRICT" and bucket != "EARLY":
-            return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+            return "PASS" if full else ("PARTIAL" if partial else "FAIL")
         return "PARTIAL" if partial else "FAIL"
     if rg == "SIDEWAYS":
         return "PARTIAL" if partial else "FAIL"
@@ -1986,18 +2002,18 @@ def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
         q = _quality_metrics(symbol)
         vol_score = float(q.get("vol_score") or 0.0) if q.get("ok") else 0.0
         if full and vol_score >= vol_req:
-            return "FULL"
+            return "PASS"
         return "FAIL"
     if rg in ("WEAK", "TRENDING_DOWN"):
         q = _quality_metrics(symbol)
         exceptional = bool(q.get("ok")) and float(q.get("vol_score") or 0.0) >= 1.3 and float(q.get("price") or 0.0) > float(q.get("sma20") or 0.0)
         if full and exceptional:
-            return "FULL"
+            return "PASS"
         return "PARTIAL" if partial and exceptional else "FAIL"
 
     if bucket == "EARLY" or strictness == "MODERATE":
         return "PARTIAL" if partial else "FAIL"
-    return "FULL" if full else ("PARTIAL" if partial else "FAIL")
+    return "PASS" if full else ("PARTIAL" if partial else "FAIL")
 
 
 def _entry_tier_from_score(score: int) -> str:
@@ -2039,10 +2055,16 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
 
     htf_status = _htf_alignment_status(symbol, side, regime)
     comps["htf"] = htf_status.lower()
-    if htf_status == "FULL":
+    if htf_status == "PASS":
         total += w_htf
     elif htf_status == "PARTIAL":
         total += (w_htf * 0.6)
+    elif htf_status == "INSUFFICIENT_HISTORY":
+        # Missing HTF history should be a moderate reduction, not a hard fail.
+        if str(regime or "UNKNOWN").upper() == "SIDEWAYS":
+            total += (w_htf * 0.5)
+        else:
+            total += (w_htf * 0.35)
 
     rg = str(regime or "UNKNOWN").upper()
     side_u = str(side or "BUY").upper()
@@ -2327,7 +2349,8 @@ def _maybe_enter_short_from_signal(sig):
         append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
         return False
     if decision.get("tier") == "BLOCK":
-        if str(decision.get("components", {}).get("htf") or "").lower() == "fail":
+        htf_comp = str(decision.get("components", {}).get("htf") or "").lower()
+        if htf_comp == "fail":
             append_log("INFO", "CONFIRM", f"SHORT blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
         append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
         return False
@@ -2403,6 +2426,7 @@ def _maybe_enter_short_from_signal(sig):
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     })
+    STATE["entry_tier_for_cooldown"] = str(decision.get("tier") or "").upper()
     _set_cooldown()
     _log_trade_event("ORDER", {**dict(_positions().get(sym) or {}), "symbol": sym})
     _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
@@ -2505,7 +2529,8 @@ def _maybe_enter_from_signal(sig):
         append_log("WARN", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason={decision['hard_block']}")
         return False
     if decision.get("tier") == "BLOCK":
-        if str(decision.get("components", {}).get("htf") or "").lower() == "fail":
+        htf_comp = str(decision.get("components", {}).get("htf") or "").lower()
+        if htf_comp == "fail":
             dscore = float(decision.get("score") or 0.0)
             if regime == "WEAK" and 30.0 <= dscore <= 60.0:
                 tier_mult = max(0.0, weak_size_mult)
@@ -2514,6 +2539,10 @@ def _maybe_enter_from_signal(sig):
                 append_log("INFO", "CONFIRM", f"BUY blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
                 append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
                 return False
+        elif regime == "SIDEWAYS" and htf_comp in ("partial", "insufficient_history"):
+            tier_mult = max(0.0, _entry_tier_multiplier("MICRO"))
+            decision["tier"] = "MICRO"
+            append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_{htf_comp.upper()}_SIDEWAYS tier=MICRO")
         else:
             append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
             return False
@@ -2594,6 +2623,7 @@ def _maybe_enter_from_signal(sig):
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
     })
+    STATE["entry_tier_for_cooldown"] = str(decision.get("tier") or "").upper()
     _set_cooldown()
     _log_trade_event("ORDER", {**dict(_positions().get(sym) or {}), "symbol": sym})
     _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
@@ -3193,6 +3223,15 @@ def tick():
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
         _record_research_event("route_change", "route_scan=research_universe", active_top3=selected_families)
         opened += _scan_top3_families(research_tail, selected_families, max_new=max_new - opened, universe_source="research_universe")
+
+    if regime_u == "SIDEWAYS":
+        if opened <= 0 and "mean_reversion" in selected_families:
+            STATE["mean_reversion_dry_cycles"] = int(STATE.get("mean_reversion_dry_cycles") or 0) + 1
+            if int(STATE.get("mean_reversion_dry_cycles") or 0) >= 2:
+                selected_families = [f for f in selected_families if f != "mean_reversion"] + ["mean_reversion"]
+                append_log("INFO", "ROUTE", "SIDEWAYS mean_reversion dry -> allowing next-ranked family sooner")
+        else:
+            STATE["mean_reversion_dry_cycles"] = 0
 
     expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
