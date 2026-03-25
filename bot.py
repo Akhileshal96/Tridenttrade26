@@ -794,8 +794,19 @@ async def main():
 
     def _mk_panel_handler(command_name):
         async def _run(message_event):
-            sender = int(message_event.sender_id)
-            await _dispatch_command(message_event, sender, f"/{command_name}", "")
+            sender = int(getattr(message_event, "sender_id", 0) or 0)
+            dispatch_event = message_event
+            if not hasattr(message_event, "reply") and hasattr(message_event, "respond"):
+                class _PanelDispatchEvent:
+                    def __init__(self, ev):
+                        self._ev = ev
+                        self.sender_id = getattr(ev, "sender_id", None)
+
+                    async def reply(self, text):
+                        return await self._ev.respond(text)
+
+                dispatch_event = _PanelDispatchEvent(message_event)
+            await _dispatch_command(dispatch_event, sender, f"/{command_name}", "")
         return _run
 
     def _pnl_so_far_button_label():
