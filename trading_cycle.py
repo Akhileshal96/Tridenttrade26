@@ -106,6 +106,26 @@ RUNTIME = {
     "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
 
+
+def _cfg_obj():
+    """Runtime-safe config resolver for loop/thread contexts."""
+    try:
+        return CFG
+    except NameError:
+        import config as cfg_mod
+        globals()["CFG"] = cfg_mod
+        append_log("INFO", "CONFIRM", "using config default for CFG_module_binding=runtime_reload")
+        return cfg_mod
+
+
+def _cfg_get(name: str, default):
+    cfg = _cfg_obj()
+    val = getattr(cfg, name, None)
+    if val is None:
+        append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
+        return default
+    return val
+
 STRATEGY_REGISTRY = [
     {
         "family": "trend_long",
@@ -743,7 +763,7 @@ def _place_live_order(kite, sym, side, qty):
 
 
 def _set_cooldown():
-    sec = int(getattr(CFG, "COOLDOWN_SECONDS", 120))
+    sec = int(_cfg_get("COOLDOWN_SECONDS", 120))
     # Slightly relax cooldown after 09:30 for repeated valid MICRO/REDUCED entries.
     tier = str(STATE.get("entry_tier_for_cooldown") or "").upper()
     now = datetime.now(IST)
@@ -1548,7 +1568,7 @@ def _htf_fetch(symbol: str, days: int = 20) -> pd.DataFrame:
             token,
             pd.Timestamp.now() - pd.Timedelta(days=days),
             pd.Timestamp.now(),
-            str(getattr(CFG, "HTF_INTERVAL", "15m") or "15m"),
+            str(_cfg_get("HTF_INTERVAL", "15m") or "15m"),
         )
         return pd.DataFrame(data)
     except Exception:
@@ -2017,11 +2037,11 @@ def _htf_alignment_status(symbol: str, side: str, regime: str) -> str:
 
 
 def _entry_tier_from_score(score: int) -> str:
-    if score >= int(getattr(CFG, "ENTRY_FULL_MIN_SCORE", 80) or 80):
+    if score >= int(_cfg_get("ENTRY_FULL_MIN_SCORE", 80) or 80):
         return "FULL"
-    if score >= int(getattr(CFG, "ENTRY_REDUCED_MIN_SCORE", 60) or 60):
+    if score >= int(_cfg_get("ENTRY_REDUCED_MIN_SCORE", 60) or 60):
         return "REDUCED"
-    if score >= int(getattr(CFG, "ENTRY_MICRO_MIN_SCORE", 45) or 45):
+    if score >= int(_cfg_get("ENTRY_MICRO_MIN_SCORE", 45) or 45):
         return "MICRO"
     return "BLOCK"
 
@@ -2029,21 +2049,21 @@ def _entry_tier_from_score(score: int) -> str:
 def _entry_tier_multiplier(tier: str) -> float:
     t = str(tier or "BLOCK").upper()
     if t == "FULL":
-        return float(getattr(CFG, "ENTRY_FULL_SIZE_MULTIPLIER", 1.0) or 1.0)
+        return float(_cfg_get("ENTRY_FULL_SIZE_MULTIPLIER", 1.0) or 1.0)
     if t == "REDUCED":
-        return float(getattr(CFG, "ENTRY_REDUCED_SIZE_MULTIPLIER", 0.5) or 0.5)
+        return float(_cfg_get("ENTRY_REDUCED_SIZE_MULTIPLIER", 0.5) or 0.5)
     if t == "MICRO":
-        return float(getattr(CFG, "ENTRY_MICRO_SIZE_MULTIPLIER", 0.25) or 0.25)
+        return float(_cfg_get("ENTRY_MICRO_SIZE_MULTIPLIER", 0.25) or 0.25)
     return 0.0
 
 
 def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, research_universe: list) -> dict:
-    w_ltf = int(getattr(CFG, "CONFIRM_WEIGHT_LTF", 30) or 30)
-    w_htf = int(getattr(CFG, "CONFIRM_WEIGHT_HTF", 25) or 25)
-    w_reg = int(getattr(CFG, "CONFIRM_WEIGHT_REGIME", 15) or 15)
-    w_rank = int(getattr(CFG, "CONFIRM_WEIGHT_RANK", 15) or 15)
-    w_sec = int(getattr(CFG, "CONFIRM_WEIGHT_SECTOR", 10) or 10)
-    w_vol = int(getattr(CFG, "CONFIRM_WEIGHT_VOLUME", 5) or 5)
+    w_ltf = int(_cfg_get("CONFIRM_WEIGHT_LTF", 30) or 30)
+    w_htf = int(_cfg_get("CONFIRM_WEIGHT_HTF", 25) or 25)
+    w_reg = int(_cfg_get("CONFIRM_WEIGHT_REGIME", 15) or 15)
+    w_rank = int(_cfg_get("CONFIRM_WEIGHT_RANK", 15) or 15)
+    w_sec = int(_cfg_get("CONFIRM_WEIGHT_SECTOR", 10) or 10)
+    w_vol = int(_cfg_get("CONFIRM_WEIGHT_VOLUME", 5) or 5)
 
     comps = {}
     total = 0.0
@@ -3097,6 +3117,7 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
     return max(0, _open_positions_count() - before)
 
 def tick():
+    _cfg_obj()
     _ensure_day_key()
     RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
@@ -3292,26 +3313,27 @@ def tick():
 
 
 def run_loop_forever():
+    _cfg_obj()
     append_log("INFO", "LOOP", "Trading loop started")
     append_log(
         "INFO",
         "MARKET",
-        f"weak mode config top_n={int(getattr(CFG, 'WEAK_MARKET_TOP_N', 10) or 10)} "
-        f"min_score={float(getattr(CFG, 'WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
-        f"size_multiplier={float(getattr(CFG, 'WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+        f"weak mode config top_n={int(_cfg_get('WEAK_MARKET_TOP_N', 10) or 10)} "
+        f"min_score={float(_cfg_get('WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
+        f"size_multiplier={float(_cfg_get('WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
     append_log(
         "INFO",
         "ROUTE",
-        f"top3 selector min_score={int(getattr(CFG, 'STRATEGY_MIN_ACTIVE_SCORE', 40) or 40)} "
-        f"refresh_min={int(getattr(CFG, 'STRATEGY_SELECTION_REFRESH_MINUTES', 10) or 10)} "
-        f"dry_threshold={int(getattr(CFG, 'TOP3_DRY_CYCLE_THRESHOLD', 5) or 5)}",
+        f"top3 selector min_score={int(_cfg_get('STRATEGY_MIN_ACTIVE_SCORE', 40) or 40)} "
+        f"refresh_min={int(_cfg_get('STRATEGY_SELECTION_REFRESH_MINUTES', 10) or 10)} "
+        f"dry_threshold={int(_cfg_get('TOP3_DRY_CYCLE_THRESHOLD', 5) or 5)}",
     )
     append_log(
         "INFO",
         "OPEN",
-        f"adaptive opening filter enabled unsafe_mult={float(getattr(CFG, 'OPEN_UNSAFE_SIZE_MULTIPLIER', 0.25) or 0.25):.2f} "
-        f"moderate_mult={float(getattr(CFG, 'OPEN_MODERATE_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+        f"adaptive opening filter enabled unsafe_mult={float(_cfg_get('OPEN_UNSAFE_SIZE_MULTIPLIER', 0.25) or 0.25):.2f} "
+        f"moderate_mult={float(_cfg_get('OPEN_MODERATE_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
     if not _active_trade_universe():
         _load_research_universe_from_file()
@@ -3320,4 +3342,4 @@ def run_loop_forever():
             tick()
         except Exception as e:
             append_log("ERROR", "LOOP", str(e))
-        time.sleep(int(CFG.TICK_SECONDS))
+        time.sleep(int(_cfg_get("TICK_SECONDS", 20)))
