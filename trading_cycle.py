@@ -723,19 +723,63 @@ def _bucket_inr(wallet_net: float) -> float:
     return max(bmin, min(bucket, bmax))
 
 
-def _calc_qty(symbol: str, price: float):
+def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float = 1.0):
     wallet = float(STATE.get("wallet_net_inr") or 0.0)
     if wallet <= 0:
         wallet = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
         append_log("WARNING", "BUCKET", "Wallet unavailable → fallback capital used")
-    qty, bucket, bucket_qty, risk_qty = RISK.get_position_size(price, wallet)
+    wallet_available = float(STATE.get("wallet_available_inr") or wallet)
+    open_exposure = float(_current_exposure_inr())
+    open_count = int(_open_positions_count())
+    max_concurrent = max(1, int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8))
+    remaining_slots = max(1, max_concurrent - open_count)
+
+    deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 60.0) or 60.0)))
+    deployable_capital = wallet * (deployable_pct / 100.0)
+    remaining_capital = max(0.0, deployable_capital - open_exposure)
+    base_slot_capital = (remaining_capital / remaining_slots) if remaining_slots > 0 else remaining_capital
+
+    no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
+    sig_seen = int(STATE.get("signals_seen_window") or 0)
+    ent_done = int(STATE.get("entries_executed_window") or 0)
+    fill_rate = (float(ent_done) / float(sig_seen)) if sig_seen > 0 else 0.0
+    opportunity_bias = 1.0
+    if remaining_slots >= 3 and no_entry_cycles <= 1:
+        opportunity_bias = 0.90
+    elif remaining_slots <= 1 or no_entry_cycles >= 4:
+        opportunity_bias = 1.15
+    if sig_seen >= 10 and remaining_slots >= 3:
+        opportunity_bias = min(opportunity_bias, 0.85)
+    elif sig_seen >= 6 and fill_rate <= 0.15:
+        opportunity_bias = max(opportunity_bias, 1.20)
+
+    tier_u = str(tier or "FULL").upper()
+    tw = float(tier_weight or 1.0)
+    target_capital = base_slot_capital * max(0.1, tw) * opportunity_bias
+    max_symbol_pct = max(1.0, min(100.0, float(_cfg_get("MAX_SYMBOL_ALLOCATION_PCT", 20.0) or 20.0)))
+    symbol_cap = wallet * (max_symbol_pct / 100.0)
+    capital_cap = min(max(0.0, wallet_available), remaining_capital, symbol_cap)
+    target_capital = max(0.0, min(target_capital, capital_cap))
+
+    qty_from_capital = int(target_capital / price) if price > 0 else 0
+    stoploss_pct = max(0.01, float(_cfg_get("STOPLOSS_PCT", 2.0) or 2.0))
+    risk_per_trade_pct = max(0.01, float(_cfg_get("RISK_PER_TRADE_PCT", 1.0) or 1.0))
+    risk_amount = wallet * (risk_per_trade_pct / 100.0)
+    per_share_risk = price * (stoploss_pct / 100.0) if price > 0 else 0.0
+    risk_qty = int(risk_amount / per_share_risk) if per_share_risk > 0 else 0
+
+    qty = min(max(0, qty_from_capital), max(0, risk_qty))
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
     if size_factor < 1.0:
         qty = int(qty * max(0.1, size_factor))
     qty = qty if qty >= 1 else 0
-    append_log("INFO", "BUCKET", f"wallet={wallet:.2f} slab_bucket={bucket:.2f} exposure={_current_exposure_inr():.2f}/{_max_exposure_inr():.2f}")
-    append_log("INFO", "SIZE", f"{symbol} price={price:.2f} qty={qty} bucket_qty={bucket_qty} risk_qty={risk_qty}")
-    return qty, bucket_qty, risk_qty
+    append_log(
+        "INFO",
+        "SIZE",
+        f"[SIZE] wallet={wallet:.2f} open_exposure={open_exposure:.2f} remaining_capital={remaining_capital:.2f} "
+        f"remaining_slots={remaining_slots} tier={tier_u} weight={tw:.2f} target_capital={target_capital:.2f} final_qty={qty}",
+    )
+    return qty, qty_from_capital, risk_qty
 
 
 def _ltp(kite, sym):
@@ -774,7 +818,7 @@ def _set_cooldown():
         STATE[streak_key] = streak
         if streak >= 2:
             sec = max(60, int(round(sec * 0.75)))
-            append_log("INFO", "RISK", f"cooldown_refined tier={tier} streak={streak} sec={sec}")
+            append_log("INFO", "COOLDOWN", f"[COOLDOWN] refinement applied tier={tier} streak={streak} sec={sec}")
     else:
         STATE["post0930_valid_tier_streak"] = 0
     STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
@@ -785,7 +829,12 @@ def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3, side: str = "B
     sym = (sym or "").strip().upper()
     if not sym:
         return
-    until = datetime.now(IST) + timedelta(minutes=max(1, int(minutes)))
+    post_0930 = datetime.now(IST).time() >= dt_time(9, 30)
+    refined_minutes = int(minutes)
+    if post_0930 and reason in ("qty_zero", "opening_filter_low_confidence", "risk_guard"):
+        refined_minutes = max(1, int(round(refined_minutes * 0.67)))
+        append_log("INFO", "COOLDOWN", f"[COOLDOWN] refinement applied symbol={sym} reason={reason} minutes={refined_minutes}")
+    until = datetime.now(IST) + timedelta(minutes=max(1, refined_minutes))
     STATE.setdefault("skip_cooldown", {})[sym] = until
     append_log("INFO", "SKIP", f"{sym} cooldown applied reason={reason}")
     try:
@@ -969,7 +1018,7 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=already_held")
         return False
 
-    max_pos = int(os.getenv("MAX_OPEN_POSITIONS", "20"))
+    max_pos = int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8)
     if _open_positions_count() >= max_pos:
         append_log("INFO", "SKIP", f"{sym} reason=max_positions")
         return False
@@ -1793,7 +1842,13 @@ def get_opening_mode() -> tuple[str, dict]:
         m["reason"] = "incomplete_opening_data"
         return "OPEN_MODERATE", m
 
+    now = datetime.now(IST)
+    pre_0930 = now.time() < dt_time(9, 30)
     if conf < 40:
+        if pre_0930 and ("opening_range" in (conf_meta.get("ignored") or []) or spread_q == "UNKNOWN" or volume_q == "UNKNOWN"):
+            m["reason"] = "pre0930_incomplete_data_softened"
+            append_log("INFO", "OPEN", "pre-09:30 reduced entry allowed due to incomplete opening data")
+            return "OPEN_MODERATE", m
         m["reason"] = "unstable_open"
         return "OPEN_UNSAFE", m
     if conf < 70:
@@ -2049,11 +2104,11 @@ def _entry_tier_from_score(score: int) -> str:
 def _entry_tier_multiplier(tier: str) -> float:
     t = str(tier or "BLOCK").upper()
     if t == "FULL":
-        return float(_cfg_get("ENTRY_FULL_SIZE_MULTIPLIER", 1.0) or 1.0)
+        return float(_cfg_get("FULL_TIER_WEIGHT", 1.25) or 1.25)
     if t == "REDUCED":
-        return float(_cfg_get("ENTRY_REDUCED_SIZE_MULTIPLIER", 0.5) or 0.5)
+        return float(_cfg_get("REDUCED_TIER_WEIGHT", 1.0) or 1.0)
     if t == "MICRO":
-        return float(_cfg_get("ENTRY_MICRO_SIZE_MULTIPLIER", 0.25) or 0.25)
+        return float(_cfg_get("MICRO_TIER_WEIGHT", 0.6) or 0.6)
     return 0.0
 
 
@@ -2088,6 +2143,7 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
 
     rg = str(regime or "UNKNOWN").upper()
     side_u = str(side or "BUY").upper()
+    append_log("INFO", "HTF", f"[HTF] status={htf_status} symbol={symbol} side={side_u} regime={rg}")
     allowed, _reason, _meta = is_market_entry_allowed(symbol, rg, research_universe)
     comps["regime"] = "ok" if allowed else "weak"
     if rg in ("TRENDING", "TRENDING_UP"):
@@ -2177,6 +2233,12 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
     size_mult = _entry_tier_multiplier(tier)
     if _is_micro_mode_active() and tier == "MICRO":
         size_mult = min(size_mult, float(getattr(CFG, "MICRO_MODE_SIZE_MULTIPLIER", 0.25) or 0.25))
+
+    if tier == "BLOCK" and rg == "SIDEWAYS" and htf_status in ("PARTIAL", "INSUFFICIENT_HISTORY") and ltf_ok:
+        tier = "MICRO"
+        score = max(score, int(_cfg_get("ENTRY_MICRO_MIN_SCORE", 45) or 45))
+        size_mult = _entry_tier_multiplier("MICRO")
+        comps["sideways_htf_softened"] = htf_status.lower()
 
     return {
         "score": score,
@@ -2347,14 +2409,6 @@ def _maybe_enter_short_from_signal(sig):
         append_log("WARN", "RISK", "max short positions reached")
         return False
 
-    qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
-    mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
-    qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
-    strategy_tag = "short_breakdown"
-    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
-        strategy_tag = "mtf_confirmed_short"
-    qty = _apply_strategy_allocation(qty, strategy_tag)
-
     research_universe = _active_trade_universe()
     regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN")
     decision = _build_entry_confidence(sym, "SHORT", sig, regime, research_universe)
@@ -2375,8 +2429,14 @@ def _maybe_enter_short_from_signal(sig):
         append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
         return False
     tier_mult = float(decision.get("size_mult") or 0.0)
-    qty = max(1, int(math.floor(qty * tier_mult))) if qty > 0 and tier_mult > 0 else 0
-    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
+    strategy_tag = "short_breakdown"
+    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
+        strategy_tag = "mtf_confirmed_short"
+    qty, bucket_qty, risk_qty = _calc_qty(sym, entry, tier=str(decision.get("tier") or "BLOCK"), tier_weight=tier_mult)
+    mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
+    qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
+    qty = _apply_strategy_allocation(qty, strategy_tag)
+    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
@@ -2523,20 +2583,7 @@ def _maybe_enter_from_signal(sig):
     momentum_threshold = float(getattr(CFG, "REENTRY_MOMENTUM_MIN_PCT", 0.0))
     momentum_positive = momentum_pct > momentum_threshold
 
-    qty, bucket_qty, risk_qty = _calc_qty(sym, entry)
     strategy_tag = "primary_long"
-    if regime in ("WEAK", "TRENDING_DOWN"):
-        mult = weak_size_mult
-        if mult > 0:
-            reduced = max(1, int(math.floor(qty * mult)))
-            if reduced < qty:
-                qty = reduced
-                append_log("INFO", "MARKET", f"regime={regime} → size reduced multiplier={mult}")
-        strategy_tag = "weak_market_long"
-    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
-        strategy_tag = "mtf_confirmed_long"
-    qty = _apply_strategy_allocation(qty, strategy_tag)
-
     decision = _build_entry_confidence(sym, "BUY", sig, regime, research_universe)
     append_log(
         "INFO",
@@ -2568,8 +2615,19 @@ def _maybe_enter_from_signal(sig):
             return False
     else:
         tier_mult = float(decision.get("size_mult") or 0.0)
-    qty = max(1, int(math.floor(qty * tier_mult))) if qty > 0 and tier_mult > 0 else 0
-    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} reduced_size_applied mult={tier_mult:.2f}")
+    qty, bucket_qty, risk_qty = _calc_qty(sym, entry, tier=str(decision.get("tier") or "BLOCK"), tier_weight=tier_mult)
+    if regime in ("WEAK", "TRENDING_DOWN"):
+        mult = weak_size_mult
+        if mult > 0:
+            reduced = max(1, int(math.floor(qty * mult)))
+            if reduced < qty:
+                qty = reduced
+                append_log("INFO", "MARKET", f"regime={regime} → size reduced multiplier={mult}")
+        strategy_tag = "weak_market_long"
+    if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
+        strategy_tag = "mtf_confirmed_long"
+    qty = _apply_strategy_allocation(qty, strategy_tag)
+    append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
@@ -3190,7 +3248,13 @@ def tick():
         active_universe = list(research_universe[: int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)])
         _record_universe_change("active_universe_fallback", "research_universe", active_universe, [], fallback_active=bool(STATE.get("fallback_mode_active")))
 
-    max_new = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
+    max_new_cfg = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
+    max_concurrent = int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8)
+    remaining_slots = max(0, max_concurrent - _open_positions_count())
+    max_new = max(0, min(max_new_cfg, remaining_slots))
+    if max_new <= 0:
+        append_log("INFO", "RISK", "max concurrent trade slots consumed; skipping new entries")
+        return
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
     trend_direction = str(snap.get("trend_direction", "UNKNOWN") or "UNKNOWN").upper()
@@ -3248,9 +3312,14 @@ def tick():
     if regime_u == "SIDEWAYS":
         if opened <= 0 and "mean_reversion" in selected_families:
             STATE["mean_reversion_dry_cycles"] = int(STATE.get("mean_reversion_dry_cycles") or 0) + 1
-            if int(STATE.get("mean_reversion_dry_cycles") or 0) >= 2:
-                selected_families = [f for f in selected_families if f != "mean_reversion"] + ["mean_reversion"]
-                append_log("INFO", "ROUTE", "SIDEWAYS mean_reversion dry -> allowing next-ranked family sooner")
+            dry_cycles = int(STATE.get("mean_reversion_dry_cycles") or 0)
+            if dry_cycles >= 2:
+                next_ranked = [f for f in selected_families if f != "mean_reversion"]
+                selected_families = next_ranked + ["mean_reversion"]
+                append_log("INFO", "ROUTE", f"[ROUTE] family switch after dry cycles dry={dry_cycles} switched_to={','.join(next_ranked) if next_ranked else 'none'}")
+                if next_ranked and opened < max_new:
+                    append_log("INFO", "ROUTE", "SIDEWAYS mean_reversion dry -> activating second-ranked family in same cycle")
+                    opened += _scan_top3_families(active_universe, next_ranked, max_new=max_new - opened, universe_source="sideways_dry_fallback")
         else:
             STATE["mean_reversion_dry_cycles"] = 0
 
