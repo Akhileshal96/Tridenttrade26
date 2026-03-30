@@ -122,10 +122,8 @@ def _help_buttons():
 
 def _analytics_buttons():
     return [
-        [Button.inline("📈 Analytics", b"cp:cmd:analytics"), Button.inline("💰 P/L So Far", b"cp:cmd:pnlsofar")],
         [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Strategy Scores", b"cp:cmd:strategyscores")],
         [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("🌐 Route Status", b"cp:cmd:routestatus")],
-        [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
         [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
         [Button.inline("🏆 Best Strategy", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst Strategy", b"cp:cmd:worststrategy")],
         [Button.inline("📈 Regime Report", b"cp:cmd:regimereport"), Button.inline("🏭 Sector Report", b"cp:cmd:sectorreport")],
@@ -179,7 +177,8 @@ async def _safe_invoke(handler_name, event, handlers):
 def register_control_panel(client, handlers):
     async def _render_panel(event, panel_name: str, edit=False):
         title, button_fn = _PANEL_MAP.get(panel_name, _PANEL_MAP["main"])
-        btns = button_fn(handlers) if panel_name == "main" else button_fn()
+        raw_btns = button_fn(handlers) if panel_name == "main" else button_fn()
+        btns = _dedupe_rows(raw_btns)
         if edit:
             await event.edit(title, buttons=btns)
         else:
