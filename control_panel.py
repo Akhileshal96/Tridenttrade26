@@ -17,6 +17,25 @@ LOGS_TITLE = "📜 **LOGS PANEL**"
 ANALYTICS_TITLE = "📊 **ANALYTICS PANEL**"
 
 
+def _dedupe_rows(rows):
+    seen = set()
+    out = []
+    for row in rows:
+        new_row = []
+        for btn in row:
+            try:
+                key = btn.data if isinstance(btn.data, bytes) else str(btn.data).encode()
+            except Exception:
+                key = str(getattr(btn, "text", "")).encode()
+            if key in seen:
+                continue
+            seen.add(key)
+            new_row.append(btn)
+        if new_row:
+            out.append(new_row)
+    return out
+
+
 def _main_buttons(handlers=None):
     pnl_label = "💰 P/L So Far"
     try:
@@ -25,7 +44,7 @@ def _main_buttons(handlers=None):
             pnl_label = str(provider() or pnl_label)
     except Exception:
         pass
-    return [
+    rows = [
         # Core runtime actions
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
@@ -36,6 +55,7 @@ def _main_buttons(handlers=None):
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
     ]
+    return _dedupe_rows(rows)
 
 
 def _research_buttons():
