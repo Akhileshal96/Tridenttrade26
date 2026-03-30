@@ -28,6 +28,14 @@ def close_position(close_position_fn, sym: str, reason: str, ltp_override=None):
     return close_position_fn(sym, reason=reason, ltp_override=ltp_override)
 
 
+def _calc_trail_activate_inr(entry: float, qty: int) -> float:
+    position_value = float(entry) * max(1, int(qty))
+    pct = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4)) / 100.0
+    dynamic = position_value * pct
+    floor = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 2.0) or 2.0)
+    return max(floor, dynamic)
+
+
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
     ok = True
     for sym in list((positions or {}).keys()):
@@ -36,8 +44,6 @@ def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
 
 
 def monitor_positions(state: dict, positions: dict, get_ltp, close_position, force_exit_check):
-    min_activate_inr = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 8.0))
-    activate_pct_of_position = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4))
     trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
     trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
 
@@ -77,7 +83,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         trade["peak_pct"] = peak_pct
         trade["peak"] = peak_pct
 
-        activate_inr = max(min_activate_inr, position_value * activate_pct_of_position / 100.0)
+        activate_inr = _calc_trail_activate_inr(entry, qty)
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
         if (not trail_active) and pnl_inr >= activate_inr:
@@ -95,9 +101,9 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         append_log(
             "INFO",
             "RISK",
-            f"{sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
+            f"[RISK] {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
             f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} "
-            f"activate_inr={activate_inr:.2f} trigger_inr={trigger_inr:.2f}",
+            f"trail_activate_inr={activate_inr:.2f} trigger_inr={trigger_inr:.2f}",
         )
 
         if check_trailing(trade, pnl_inr, trigger_inr):

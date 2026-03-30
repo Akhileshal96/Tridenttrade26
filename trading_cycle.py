@@ -1,7 +1,7 @@
 import math
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -88,6 +88,7 @@ STATE = {
     "route_changes_today": [],
     "recent_entries": [],
     "recent_exits": [],
+    "force_exit_done": False,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -403,6 +404,7 @@ def _ensure_day_key():
             STATE["strategy_selection_history"] = []
             STATE["last_route_universe_source"] = "n/a"
             STATE["last_trend_direction"] = "UNKNOWN"
+            STATE["force_exit_done"] = False
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -431,6 +433,7 @@ def manual_reset_day():
         STATE["strategy_selection_history"] = []
         STATE["last_route_universe_source"] = "n/a"
         STATE["last_trend_direction"] = "UNKNOWN"
+        STATE["force_exit_done"] = False
     append_log("INFO", "DAY", "Manual day reset executed")
     return True
 
@@ -1608,6 +1611,19 @@ def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[f
         pnl_inr = (ltp - entry) * qty
         pnl_pct = ((ltp - entry) / entry * 100.0) if entry > 0 else 0.0
     return float(pnl_inr), float(pnl_pct)
+
+
+def _calc_trail_activate_inr(entry: float, qty: int) -> float:
+    """
+    Dynamically calculate trailing stop activation threshold
+    as a percentage of position value.
+    Minimum floor of ₹2 regardless of position size.
+    """
+    position_value = float(entry) * max(1, int(qty))
+    pct = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4)) / 100.0
+    dynamic = position_value * pct
+    floor = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 2.0) or 2.0)
+    return max(floor, dynamic)
 
 
 def _htf_fetch(symbol: str, days: int = 20) -> pd.DataFrame:
@@ -3015,12 +3031,9 @@ def get_trailing_status_text():
         peak_pnl_inr = float(t.get("peak_pnl_inr") or 0.0)
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
 
-        min_activate_inr = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 8.0))
-        activate_pct_of_position = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4))
         trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
         trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
-
-        activate_inr = max(min_activate_inr, value * activate_pct_of_position / 100.0)
+        activate_inr = _calc_trail_activate_inr(entry, qty)
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
 
@@ -3184,19 +3197,24 @@ def tick():
     RISK.check_day_drawdown_guard(STATE)
 
     if _past_force_exit_time() and _positions():
-        append_log("WARN", "TIME", "FORCE_EXIT triggered")
-        positions_before = _open_positions_count()
-        ee_force_exit_all(_positions(), _close_position, reason="TIME")
-        STATE["paused"] = True
-        day_pnl = float(STATE.get("today_pnl") or 0.0)
-        pnl_label = "Profit" if day_pnl >= 0 else "Loss"
-        _notify(
-            "🧾 Trading Day Brief\n"
-            f"- Positions Closed (TIME): {positions_before}\n"
-            f"- Day {pnl_label}: ₹{abs(day_pnl):.2f}\n"
-            f"- Net Day PnL: ₹{day_pnl:.2f}\n"
-            f"- Open Positions Now: {_open_positions_count()}"
-        )
+        if not STATE.get("force_exit_done"):
+            STATE["force_exit_done"] = True
+            append_log("WARN", "TIME", "FORCE_EXIT triggered")
+            positions_before = _open_positions_count()
+            ee_force_exit_all(_positions(), _close_position, reason="TIME")
+            STATE["paused"] = True
+            day_pnl = float(STATE.get("today_pnl") or 0.0)
+            pnl_label = "Profit" if day_pnl >= 0 else "Loss"
+            _notify(
+                "🧾 Trading Day Brief\n"
+                f"- Positions Closed (TIME): {positions_before}\n"
+                f"- Day {pnl_label}: ₹{abs(day_pnl):.2f}\n"
+                f"- Net Day PnL: ₹{day_pnl:.2f}\n"
+                f"- Open Positions Now: {_open_positions_count()}"
+            )
+            append_log("INFO", "TIME", "FORCE_EXIT completed for today")
+        else:
+            append_log("INFO", "TIME", "FORCE_EXIT already done today — skipping")
 
 
     # even when paused, force-exit check above still runs
