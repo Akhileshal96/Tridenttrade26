@@ -376,21 +376,37 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     if cmd_word == "/beststrategy":
-        best, _ = SA.best_worst_strategy()
-        await event.reply(best)
+        try:
+            best, _ = SA.best_worst_strategy()
+            await event.reply(best)
+        except Exception as e:
+            append_log("WARN", "BOT", f"beststrategy failed: {e}")
+            await event.reply("🏆 Best Strategy\n\nNo strategy stats yet.")
         return True
 
     if cmd_word == "/worststrategy":
-        _, worst = SA.best_worst_strategy()
-        await event.reply(worst)
+        try:
+            _, worst = SA.best_worst_strategy()
+            await event.reply(worst)
+        except Exception as e:
+            append_log("WARN", "BOT", f"worststrategy failed: {e}")
+            await event.reply("⚠️ Worst Strategy\n\nNo strategy stats yet.")
         return True
 
     if cmd_word == "/regimereport":
-        await event.reply(SA.regime_report_text())
+        try:
+            await event.reply(SA.regime_report_text())
+        except Exception as e:
+            append_log("WARN", "BOT", f"regimereport failed: {e}")
+            await event.reply("📈 Regime Report\n\nNo regime stats yet.")
         return True
 
     if cmd_word == "/sectorreport":
-        await event.reply(SA.sector_report_text())
+        try:
+            await event.reply(SA.sector_report_text())
+        except Exception as e:
+            append_log("WARN", "BOT", f"sectorreport failed: {e}")
+            await event.reply("🏭 Sector Report\n\nNo sector stats yet.")
         return True
 
     if cmd_word in ("/addtrader", "/removetrader", "/addviewer", "/removeviewer", "/setslip", "/exclude", "/include", "/token") and not cmd_arg:

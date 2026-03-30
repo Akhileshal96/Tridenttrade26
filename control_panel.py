@@ -26,15 +26,13 @@ def _main_buttons(handlers=None):
     except Exception:
         pass
     return [
+        # Core runtime actions
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
-        [Button.inline("📈 Analytics", b"cp:cmd:analytics"), Button.inline(pnl_label, b"cp:cmd:pnlsofar")],
-        [Button.inline("🔬 Research", b"cp:cmd:research"), Button.inline("🌌 Universe Changes", b"cp:cmd:universechanges")],
-        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🌐 Route Status", b"cp:cmd:routestatus")],
-        [Button.inline("🧠 Strategy Scores", b"cp:cmd:strategyscores"), Button.inline("🌐 Regime", b"cp:cmd:regime")],
-        [Button.inline("📈 Trail", b"cp:cmd:trailstatus"), Button.inline("📜 Logs", b"cp:panel:logs")],
-        [Button.inline("🧠 Analytics", b"cp:panel:analytics")],
-        [Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("🔐 Token", b"cp:panel:token")],
+        [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
+        # Category panels
+        [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research")],
+        [Button.inline("📜 Logs", b"cp:panel:logs"), Button.inline("🔐 Token", b"cp:panel:token")],
         [Button.inline("🛡 Live Safety", b"cp:panel:live"), Button.inline("🚨 Emergency", b"cp:panel:emergency")],
         [Button.inline("⚙ Admin", b"cp:panel:admin"), Button.inline("🆘 Help", b"cp:panel:help")],
     ]
