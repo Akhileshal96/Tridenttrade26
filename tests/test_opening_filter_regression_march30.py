@@ -101,3 +101,36 @@ def test_incomplete_data_never_sets_broken_feed_reason(monkeypatch):
     assert mode == "OPEN_MODERATE"
     assert metrics.get("reason") != "confirmed_broken_feed"
     assert metrics.get("decision_path") == "incomplete_data"
+
+
+def test_short_rejection_reason_is_deterministic(monkeypatch):
+    monkeypatch.setattr(
+        tc,
+        "_quality_metrics",
+        lambda _s: {"ok": True, "price": 105.0, "sma20": 100.0, "sma20_prev": 99.0, "vol_score": 1.4, "rs_vs_nifty": -0.5},
+    )
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    sig = tc.generate_short_signal("SBIN", strategy_family="short_breakdown")
+    assert sig is None
+    assert tc.STATE.get("last_short_reject_reasons", {}).get("SBIN") == "price_not_below_sma20"
+
+
+def test_short_scan_records_symbol_level_skip_reason(monkeypatch):
+    monkeypatch.setattr(tc, "_positions", lambda: {})
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        tc,
+        "_quality_metrics",
+        lambda _s: {"ok": True, "price": 98.0, "sma20": 100.0, "sma20_prev": 101.0, "vol_score": 0.5, "rs_vs_nifty": -0.6},
+    )
+
+    rec = {}
+    monkeypatch.setattr(tc.SA, "record_skipped_signal", lambda d: rec.update(d))
+    monkeypatch.setattr(tc, "_maybe_enter_short_from_signal", lambda _sig: False)
+
+    out = tc._scan_short_entries(["AXISBANK"], max_new=1, strategy_family="short_breakdown")
+    assert out == 0
+    assert rec.get("symbol") == "AXISBANK"
+    assert rec.get("reason") == "volume_score_below_threshold"

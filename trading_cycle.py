@@ -91,6 +91,7 @@ STATE = {
     "route_changes_today": [],
     "recent_entries": [],
     "recent_exits": [],
+    "last_short_reject_reasons": {},
     "force_exit_done": False,
     "ip_current": "",
     "ip_expected": str(getattr(CFG, "KITE_STATIC_IP", "") or "").strip(),
@@ -2481,6 +2482,8 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
     sym = (symbol or "").strip().upper()
     q = _quality_metrics(sym)
     if not q.get("ok"):
+        STATE.setdefault("last_short_reject_reasons", {})[sym] = "quality_metrics_unavailable"
+        append_log("INFO", "SIG", f"family={strategy_family} symbol={sym} reject=quality_metrics_unavailable")
         return None
     price = float(q["price"])
     sma20 = float(q["sma20"])
@@ -2490,19 +2493,56 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
     max_rs_short = float(getattr(CFG, "SHORT_RS_MAX_VS_NIFTY", -0.2) or -0.2)
     base_rs_ok = (rs_vs_nifty is None) or (float(rs_vs_nifty) <= max_rs_short)
     fam = str(strategy_family or "short_breakdown").strip().lower()
+    reason = ""
     if fam == "outlier_short":
         outlier_rs = (rs_vs_nifty is None) or (float(rs_vs_nifty) <= (max_rs_short - 0.3))
         outlier_vol = vol_score > max(1.4, float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2))
         outlier_dist = price < (sma20 * 0.997)
         cond = price < sma20 and sma20 < sma20_prev and outlier_vol and outlier_rs and outlier_dist
+        if not cond:
+            if not (price < sma20):
+                reason = "price_not_below_sma20"
+            elif not (sma20 < sma20_prev):
+                reason = "sma20_not_bearish"
+            elif not outlier_vol:
+                reason = "volume_score_below_threshold"
+            elif not outlier_rs:
+                reason = "rs_vs_nifty_not_weak_enough"
+            else:
+                reason = "strategy_family_conditions_not_met"
     elif fam == "fallback_short":
         fallback_vol = vol_score > float(getattr(CFG, "FALLBACK_MIN_VOLUME_SCORE", 1.2) or 1.2)
         cond = price < sma20 and fallback_vol and base_rs_ok
+        if not cond:
+            if not (price < sma20):
+                reason = "price_not_below_sma20"
+            elif not fallback_vol:
+                reason = "volume_score_below_threshold"
+            elif not base_rs_ok:
+                reason = "rs_vs_nifty_not_weak_enough"
+            else:
+                reason = "strategy_family_conditions_not_met"
     else:
-        cond = price < sma20 and sma20 < sma20_prev and vol_score > float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2) and base_rs_ok
+        short_vol_thr = float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2)
+        cond = price < sma20 and sma20 < sma20_prev and vol_score > short_vol_thr and base_rs_ok
         fam = "short_breakdown"
+        if not cond:
+            if not (price < sma20):
+                reason = "price_not_below_sma20"
+            elif not (sma20 < sma20_prev):
+                reason = "sma20_not_bearish"
+            elif not (vol_score > short_vol_thr):
+                reason = "volume_score_below_threshold"
+            elif not base_rs_ok:
+                reason = "rs_vs_nifty_not_weak_enough"
+            else:
+                reason = "strategy_family_conditions_not_met"
     if not cond:
+        rej = reason or "strategy_family_conditions_not_met"
+        STATE.setdefault("last_short_reject_reasons", {})[sym] = rej
+        append_log("INFO", "SIG", f"family={fam} symbol={sym} reject={rej}")
         return None
+    STATE.setdefault("last_short_reject_reasons", {}).pop(sym, None)
     append_log("INFO", "SIG", f"family={fam} symbol={sym} setup=short_signal")
     return {
         "symbol": sym,
@@ -3198,11 +3238,12 @@ def _scan_short_entries(universe: list, max_new: int, strategy_family: str = "sh
         append_log("INFO", "SCAN", f"Scanning {sym}")
         sig = generate_short_signal(sym, strategy_family=strategy_family)
         if not sig:
+            rej = str(STATE.get("last_short_reject_reasons", {}).get(sym) or "no_short_signal")
             SA.record_skipped_signal(
                 {
                     "symbol": sym,
                     "side": "SHORT",
-                    "reason": "no_short_signal",
+                    "reason": rej,
                     "strategy_tag": "short_breakdown",
                     "strategy_family": strategy_family,
                 }
