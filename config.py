@@ -40,6 +40,10 @@ KITE_API_KEY = _get_str("KITE_API_KEY", "")
 KITE_API_SECRET = _get_str("KITE_API_SECRET", "")
 KITE_ACCESS_TOKEN = _get_str("KITE_ACCESS_TOKEN", "")
 KITE_LOGIN_URL = _get_str("KITE_LOGIN_URL", "")
+KITE_STATIC_IP = _get_str("KITE_STATIC_IP", "")
+KITE_IP_RECHECK_SEC = _get_int("KITE_IP_RECHECK_SEC", "180")
+MARKET_PROTECTION = _get_float("MARKET_PROTECTION", "0.2")
+ORDER_RATE_LIMIT_PER_SEC = _get_int("ORDER_RATE_LIMIT_PER_SEC", "10")
 
 # ===== MODE & LOOP =====
 IS_LIVE = _get_bool("IS_LIVE", "false")

@@ -68,6 +68,7 @@ HELP_TEXT = (
     "• /tradinglog → today's trading-hours log as txt\n"
     "• /resetlogs  → truncate all logs (Owner)\n"
     "• /positions  → Zerodha net positions\n\n"
+    "• /ipstatus  → Kite static-IP compliance status\n\n"
     "RESEARCH [Trader/Owner]:\n"
     "• /nightnow       → rebuild live universe now\n"
     "• /universe       → show TRADING universe\n"
@@ -409,6 +410,10 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("🏭 Sector Report\n\nNo sector stats yet.")
         return True
 
+    if cmd_word == "/ipstatus":
+        await event.reply(CYCLE.get_ip_status_text())
+        return True
+
     if cmd_word in ("/addtrader", "/removetrader", "/addviewer", "/removeviewer", "/setslip", "/exclude", "/include", "/token") and not cmd_arg:
         await event.reply("Usage error: missing command argument.")
         return True
@@ -489,7 +494,11 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         with CYCLE.STATE_LOCK:
             CYCLE.STATE["initiated"] = True
             CYCLE.STATE["live_override"] = True
-        await event.reply("🟢 LIVE INITIATED (runtime override enabled). Use /disengage to stop.")
+        ok, msg = CYCLE.request_live_rearm()
+        if ok:
+            await event.reply("🟢 LIVE INITIATED (runtime override enabled). Use /disengage to stop.")
+        else:
+            await event.reply(f"🟠 LIVE initiate set, but order placement remains blocked.\n{msg}")
         return True
 
     if cmd_word in ("/disengage", "/disarm"):
@@ -855,6 +864,7 @@ async def main():
         "worststrategy": _mk_panel_handler("worststrategy"),
         "regimereport": _mk_panel_handler("regimereport"),
         "sectorreport": _mk_panel_handler("sectorreport"),
+        "ipstatus": _mk_panel_handler("ipstatus"),
         "logs": _mk_panel_handler("logs"),
         "logs20": _mk_panel_handler("logs20"),
         "logs30": _mk_panel_handler("logs30"),

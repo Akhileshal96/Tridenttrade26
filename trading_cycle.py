@@ -1,7 +1,10 @@
 import math
 import os
 import time
+import threading
+from collections import deque
 from datetime import datetime, timedelta, time as dt_time
+from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -89,6 +92,13 @@ STATE = {
     "recent_entries": [],
     "recent_exits": [],
     "force_exit_done": False,
+    "ip_current": "",
+    "ip_expected": str(getattr(CFG, "KITE_STATIC_IP", "") or "").strip(),
+    "ip_compliant": False,
+    "ip_last_error": "",
+    "ip_last_check_ts": 0.0,
+    "ip_manual_rearm_required": False,
+    "live_order_allowed": False,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -106,6 +116,9 @@ RUNTIME = {
     "USE_BUCKET_SLABS": bool(getattr(CFG, "USE_BUCKET_SLABS", True)),
     "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
+
+_ORDER_RATE_LOCK = threading.Lock()
+_ORDER_REQ_TS = deque(maxlen=256)
 
 
 def _cfg_obj():
@@ -440,6 +453,94 @@ def manual_reset_day():
 
 def is_live_enabled():
     return bool(STATE.get("initiated")) and bool(CFG.IS_LIVE or STATE.get("live_override"))
+
+
+def _fetch_public_ipv4(timeout_sec: float = 3.0) -> str:
+    try:
+        with urlopen("https://api.ipify.org", timeout=timeout_sec) as resp:
+            ip = (resp.read() or b"").decode("utf-8", errors="ignore").strip()
+            return ip
+    except Exception:
+        return ""
+
+
+def _ip_compliance_recheck_interval_sec() -> int:
+    return max(30, int(_cfg_get("KITE_IP_RECHECK_SEC", 180) or 180))
+
+
+def evaluate_ip_compliance(force: bool = False) -> bool:
+    now_ts = time.time()
+    last_ts = float(STATE.get("ip_last_check_ts") or 0.0)
+    if (not force) and (now_ts - last_ts) < _ip_compliance_recheck_interval_sec():
+        return bool(STATE.get("ip_compliant"))
+
+    expected = str(_cfg_get("KITE_STATIC_IP", "") or "").strip()
+    current = _fetch_public_ipv4()
+    STATE["ip_last_check_ts"] = now_ts
+    STATE["ip_expected"] = expected
+    STATE["ip_current"] = current
+
+    if not expected:
+        STATE["ip_compliant"] = True
+        STATE["ip_last_error"] = ""
+        if not bool(STATE.get("live_order_allowed")):
+            STATE["live_order_allowed"] = True
+        return True
+
+    if current and (current == expected):
+        STATE["ip_compliant"] = True
+        STATE["ip_last_error"] = ""
+        if bool(STATE.get("ip_manual_rearm_required")):
+            STATE["live_order_allowed"] = False
+        return True
+
+    STATE["ip_compliant"] = False
+    STATE["ip_last_error"] = "public_ip_mismatch_or_unavailable"
+    STATE["live_order_allowed"] = False
+    STATE["ip_manual_rearm_required"] = True
+    STATE["paused"] = True
+    STATE["live_override"] = False
+    append_log(
+        "ERROR",
+        "IP",
+        f"IP compliance mismatch expected={expected or 'unset'} current={current or 'unknown'} -> live orders blocked and loop paused",
+    )
+    return False
+
+
+def request_live_rearm() -> tuple[bool, str]:
+    evaluate_ip_compliance(force=True)
+    if not bool(STATE.get("ip_compliant")):
+        return False, "IP mismatch: live order placement remains blocked."
+    STATE["live_order_allowed"] = True
+    STATE["ip_manual_rearm_required"] = False
+    return True, "IP compliant. Live order placement re-armed."
+
+
+def get_ip_status_text() -> str:
+    evaluate_ip_compliance(force=True)
+    return (
+        "🌐 IP Status\n\n"
+        f"- Current Public IP: {STATE.get('ip_current') or 'unknown'}\n"
+        f"- Approved Static IP: {STATE.get('ip_expected') or 'not_set'}\n"
+        f"- Compliance: {'PASS' if STATE.get('ip_compliant') else 'FAIL'}\n"
+        f"- Live Order Placement Allowed: {bool(STATE.get('live_order_allowed'))}\n"
+        f"- Manual Rearm Required: {bool(STATE.get('ip_manual_rearm_required'))}"
+    )
+
+
+def _order_rate_limit_wait():
+    limit = max(1, int(_cfg_get("ORDER_RATE_LIMIT_PER_SEC", 10) or 10))
+    while True:
+        now = time.time()
+        with _ORDER_RATE_LOCK:
+            while _ORDER_REQ_TS and (now - _ORDER_REQ_TS[0]) >= 1.0:
+                _ORDER_REQ_TS.popleft()
+            if len(_ORDER_REQ_TS) < limit:
+                _ORDER_REQ_TS.append(now)
+                return
+            wait_s = max(0.01, 1.0 - (now - _ORDER_REQ_TS[0]))
+        time.sleep(wait_s)
 
 
 
@@ -794,16 +895,39 @@ def _ltp(kite, sym):
 
 
 def _place_live_order(kite, sym, side, qty):
+    evaluate_ip_compliance(force=False)
+    if not bool(STATE.get("live_order_allowed")):
+        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: ip_non_compliant_or_not_rearmed")
+        return None
+
+    market_protection = float(_cfg_get("MARKET_PROTECTION", 0.2) or 0.0)
+    if market_protection <= 0:
+        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_missing")
+        return None
+
+    retries = 3
+    backoff = 0.25
     try:
-        return kite.place_order(
-            variety=kite.VARIETY_REGULAR,
-            exchange=CFG.EXCHANGE,
-            tradingsymbol=sym,
-            transaction_type=kite.TRANSACTION_TYPE_BUY if side == "BUY" else kite.TRANSACTION_TYPE_SELL,
-            quantity=qty,
-            product=CFG.PRODUCT,
-            order_type=kite.ORDER_TYPE_MARKET,
-        )
+        for i in range(retries):
+            try:
+                _order_rate_limit_wait()
+                return kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=CFG.EXCHANGE,
+                    tradingsymbol=sym,
+                    transaction_type=kite.TRANSACTION_TYPE_BUY if side == "BUY" else kite.TRANSACTION_TYPE_SELL,
+                    quantity=qty,
+                    product=CFG.PRODUCT,
+                    order_type=kite.ORDER_TYPE_MARKET,
+                    market_protection=market_protection,
+                )
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg and i < (retries - 1):
+                    append_log("WARN", "ORDER", f"429 retry {i+1}/{retries} for {sym} {side}")
+                    time.sleep(backoff * (2 ** i))
+                    continue
+                raise
     except Exception as e:
         append_log("ERROR", "ORDER", f"Order failed {sym} {side} qty={qty}: {e}")
         return None
@@ -1345,6 +1469,10 @@ def _load_research_universe_from_file() -> list:
         append_log("INFO", "UNIV", f"Loaded from file size={len(syms)}")
     return syms
 
+    if STATE.get("halt_for_day"):
+        append_log("WARN", "RISK", "halt_for_day active. Pausing loop.")
+        STATE["paused"] = True
+        return
 
 def _resolve_trade_universe() -> list:
     if isinstance(getattr(RE, "research_state", {}).get("last_report"), dict):
@@ -3190,6 +3318,7 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
 def tick():
     _cfg_obj()
     _ensure_day_key()
+    evaluate_ip_compliance(force=False)
     RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
     reconcile_broker_positions()
@@ -3401,6 +3530,7 @@ def tick():
 
 def run_loop_forever():
     _cfg_obj()
+    evaluate_ip_compliance(force=True)
     append_log("INFO", "LOOP", "Trading loop started")
     append_log(
         "INFO",
