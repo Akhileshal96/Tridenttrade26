@@ -1469,10 +1469,6 @@ def _load_research_universe_from_file() -> list:
         append_log("INFO", "UNIV", f"Loaded from file size={len(syms)}")
     return syms
 
-    if STATE.get("halt_for_day"):
-        append_log("WARN", "RISK", "halt_for_day active. Pausing loop.")
-        STATE["paused"] = True
-        return
 
 def _resolve_trade_universe() -> list:
     if isinstance(getattr(RE, "research_state", {}).get("last_report"), dict):
@@ -1891,6 +1887,8 @@ def _compute_opening_metrics() -> dict:
 
 def get_opening_confidence(metrics: dict | None = None) -> tuple[int, dict]:
     m = dict(metrics or _compute_opening_metrics() or {})
+    if bool(m.get("feed_error")):
+        return 0, {"considered": [], "ignored": [], "data_state": "FEED_ERROR", "feed_error": True, "decision_path": "feed_error"}
     gap = abs(float(m.get("gap_pct") or 0.0))
     rng = float(m.get("first_5m_range_pct") or 0.0)
     max_gap = float(getattr(CFG, "MAX_SAFE_GAP_PCT", 0.8) or 0.8)
@@ -1939,6 +1937,7 @@ def get_opening_confidence(metrics: dict | None = None) -> tuple[int, dict]:
         "ignored": ignored,
         "data_state": str(m.get("data_state") or "INCOMPLETE"),
         "feed_error": bool(m.get("feed_error")),
+        "decision_path": "incomplete_data" if ignored else "complete_data",
     }
     return score, meta
 
@@ -1963,27 +1962,32 @@ def get_opening_mode() -> tuple[str, dict]:
     append_log("INFO", "OPEN", f"first_5m_range_pct={float(m.get('first_5m_range_pct') or 0.0):.2f}")
     append_log("INFO", "OPEN", f"spread_quality={spread_q}")
     append_log("INFO", "OPEN", f"volume_quality={volume_q}")
-    if conf_meta.get("ignored"):
-        append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
-
     # Missing/unknown opening metrics (volume/spread/opening_range) must remain
     # an incomplete-data state and never escalate to confirmed_broken_feed.
     STATE["open_feed_retry_count"] = 0
 
     if bool(m.get("feed_error")):
         m["reason"] = "confirmed_broken_feed"
+        m["decision_path"] = "feed_error"
         return "OPEN_HARD_BLOCK", m
 
     if gap > max_gap * 1.5:
         m["reason"] = "confirmed_extreme_gap"
+        m["decision_path"] = "extreme_gap"
         return "OPEN_HARD_BLOCK", m
 
     if not bool(m.get("valid")):
         m["reason"] = "incomplete_opening_data"
+        m["decision_path"] = "incomplete_data"
+        if conf_meta.get("ignored"):
+            append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
         return "OPEN_MODERATE", m
 
     if spread_q == "UNKNOWN" or volume_q == "UNKNOWN":
         m["reason"] = "incomplete_opening_data"
+        m["decision_path"] = "incomplete_data"
+        if conf_meta.get("ignored"):
+            append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
         return "OPEN_MODERATE", m
 
     now = datetime.now(IST)
@@ -1991,14 +1995,20 @@ def get_opening_mode() -> tuple[str, dict]:
     if conf < 40:
         if pre_0930 and ("opening_range" in (conf_meta.get("ignored") or []) or spread_q == "UNKNOWN" or volume_q == "UNKNOWN"):
             m["reason"] = "pre0930_incomplete_data_softened"
+            m["decision_path"] = "pre0930_incomplete_data"
             append_log("INFO", "OPEN", "pre-09:30 reduced entry allowed due to incomplete opening data")
             return "OPEN_MODERATE", m
         m["reason"] = "unstable_open"
+        m["decision_path"] = "unstable_open"
         return "OPEN_UNSAFE", m
     if conf < 70:
         m["reason"] = "incomplete_opening_data"
+        m["decision_path"] = "incomplete_data"
+        if conf_meta.get("ignored"):
+            append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
         return "OPEN_MODERATE", m
     m["reason"] = "opening_conditions_clean"
+    m["decision_path"] = "clean_open"
     return "OPEN_CLEAN", m
 
 
