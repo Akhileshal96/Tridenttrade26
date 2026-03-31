@@ -18,7 +18,8 @@ ANALYTICS_TITLE = "📊 **ANALYTICS PANEL**"
 
 
 def _dedupe_rows(rows):
-    seen = set()
+    seen_keys = set()
+    seen_labels = set()
     out = []
     for row in rows:
         new_row = []
@@ -27,9 +28,12 @@ def _dedupe_rows(rows):
                 key = btn.data if isinstance(btn.data, bytes) else str(btn.data).encode()
             except Exception:
                 key = str(getattr(btn, "text", "")).encode()
-            if key in seen:
+            label = str(getattr(btn, "text", "")).strip().lower()
+            if key in seen_keys or (label and label in seen_labels):
                 continue
-            seen.add(key)
+            seen_keys.add(key)
+            if label:
+                seen_labels.add(label)
             new_row.append(btn)
         if new_row:
             out.append(new_row)
