@@ -571,6 +571,7 @@ def include_symbol(sym):
         return f"✅ {sym} released from exclusions."
     return f"ℹ️ {sym} was not in exclusions."
 
+
 def _atomic_copy(src, dst):
     if not os.path.exists(src):
         return False
@@ -1468,6 +1469,10 @@ def _load_research_universe_from_file() -> list:
         append_log("INFO", "UNIV", f"Loaded from file size={len(syms)}")
     return syms
 
+    if STATE.get("halt_for_day"):
+        append_log("WARN", "RISK", "halt_for_day active. Pausing loop.")
+        STATE["paused"] = True
+        return
 
 def _resolve_trade_universe() -> list:
     if isinstance(getattr(RE, "research_state", {}).get("last_report"), dict):
