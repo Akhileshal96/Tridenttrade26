@@ -14,6 +14,7 @@ import config as CFG
 from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
+import strategy_engine as SE
 from strategy_engine import generate_signal, generate_mean_reversion_signal, generate_vwap_ema_signal, generate_pullback_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
 from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
@@ -1932,6 +1933,9 @@ def get_opening_confidence(metrics: dict | None = None) -> tuple[int, dict]:
         ignored.append("opening_range")
 
     score = int(round(sum(parts) / len(parts))) if parts else 55
+    if ignored and score >= 100:
+        # Incomplete opening inputs must never present as full confidence.
+        score = 69
     score = max(0, min(100, score))
     meta = {
         "considered": considered,
@@ -3345,6 +3349,18 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
             sig = generate_vwap_ema_signal(cands)
         if not sig and signal_fn is generate_signal:
             sig = generate_mean_reversion_signal(cands)
+        if not sig and cands:
+            sym = str(cands[0] or "").strip().upper()
+            rej = str(getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}).get(sym) or "no_long_signal")
+            SA.record_skipped_signal(
+                {
+                    "symbol": sym,
+                    "side": "BUY",
+                    "reason": rej,
+                    "strategy_tag": str(strategy_family or "trend_long"),
+                    "strategy_family": str(strategy_family or "trend_long"),
+                }
+            )
         if sig and strategy_family and not sig.get("strategy_family"):
             sig["strategy_family"] = strategy_family
         if sig and universe_source and not sig.get("universe_source"):
@@ -3420,7 +3436,7 @@ def tick():
             STATE["paused"] = True
             return
 
-    if getattr(CFG, "AUTO_PROMOTE_ENABLED", False) and not _positions() and _in_any_promote_window() and _cooldown_ok():
+    if bool(_cfg_get("AUTO_PROMOTE_ENABLED", False)) and not _positions() and _in_any_promote_window() and _cooldown_ok():
         if _market_stable():
             promote_universe(reason="AUTO_STABLE")
 
@@ -3443,7 +3459,7 @@ def tick():
 
     active_universe = refresh_active_universe_if_due(research_universe)
     if not active_universe:
-        active_universe = list(research_universe[: int(getattr(CFG, "ACTIVE_UNIVERSE_SIZE", 8) or 8)])
+        active_universe = list(research_universe[: int(_cfg_get("ACTIVE_UNIVERSE_SIZE", 8) or 8)])
         _record_universe_change("active_universe_fallback", "research_universe", active_universe, [], fallback_active=bool(STATE.get("fallback_mode_active")))
 
     max_new_cfg = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
@@ -3521,7 +3537,7 @@ def tick():
         else:
             STATE["mean_reversion_dry_cycles"] = 0
 
-    expand_cycles = int(getattr(CFG, "ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
+    expand_cycles = int(_cfg_get("ACTIVE_UNIVERSE_EXPAND_CYCLES", 3) or 3)
     if opened <= 0 and int(STATE.get("active_no_setup_cycles") or 0) >= expand_cycles:
         append_log("INFO", "SCAN", "active universe weak → expanding scan scope")
         expanded = list(research_universe)
@@ -3537,7 +3553,7 @@ def tick():
         STATE["active_no_setup_cycles"] = 0
         STATE["fallback_mode_active"] = False
 
-    dry_thr = int(getattr(CFG, "TOP3_DRY_CYCLE_THRESHOLD", 5) or 5)
+    dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 5) or 5)
     if int(STATE.get("top3_dry_cycles") or 0) >= dry_thr:
         append_log("WARN", "HEALTH", f"[HEALTH] top3 dry for {dry_thr} cycles -> recomputing")
         selected_families = _refresh_active_strategy_families(

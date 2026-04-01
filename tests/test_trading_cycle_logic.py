@@ -186,3 +186,39 @@ def test_run_loop_forever_logs_current_weak_config(monkeypatch):
     market_logs = [x for x in calls if len(x) >= 3 and x[1] == "MARKET"]
     assert market_logs
     assert "min_score=0.75" in market_logs[0][2]
+
+
+def test_tick_post_0930_path_does_not_raise_when_cfg_binding_missing(monkeypatch):
+    reset_state()
+    tc.STATE["paused"] = False
+    tc.STATE["halt_for_day"] = False
+    tc.STATE["today_pnl"] = 0.0
+    tc.STATE["daily_loss_cap_inr"] = 0.0
+    tc.STATE["daily_profit_milestone_inr"] = 0.0
+
+    monkeypatch.delattr(tc, "CFG", raising=False)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: None)
+    monkeypatch.setattr(tc.RISK, "sync_wallet", lambda _s: None)
+    monkeypatch.setattr(tc, "_sync_wallet_and_caps", lambda force=False: None)
+    monkeypatch.setattr(tc, "reconcile_broker_positions", lambda: None)
+    monkeypatch.setattr(tc, "_refresh_runtime_pnl_fields", lambda: None)
+    monkeypatch.setattr(tc.RISK, "check_day_drawdown_guard", lambda _s: None)
+    monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
+    monkeypatch.setattr(tc, "_positions", lambda: {})
+    monkeypatch.setattr(tc, "_in_any_promote_window", lambda: False)
+    monkeypatch.setattr(tc, "_cooldown_ok", lambda: False)
+    monkeypatch.setattr(tc, "_within_entry_window", lambda: True)
+    monkeypatch.setattr(tc, "_resolve_trade_universe", lambda: ["INFY"])
+    monkeypatch.setattr(tc, "refresh_active_universe_if_due", lambda _u: ["INFY"])
+    monkeypatch.setattr(tc, "_open_positions_count", lambda: 0)
+    monkeypatch.setattr(tc, "get_market_regime_snapshot", lambda: {"regime": "SIDEWAYS", "trend_direction": "UNKNOWN"})
+    monkeypatch.setattr(tc, "_is_micro_mode_active", lambda: False)
+    monkeypatch.setattr(tc, "get_opening_mode", lambda: ("OPEN_CLEAN", {"confidence": 60, "reason": "ok"}))
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda: False)
+    monkeypatch.setattr(tc, "_maybe_refresh_active_strategy_families", lambda *a, **k: ["mean_reversion"])
+    monkeypatch.setattr(tc, "_scan_top3_families", lambda *a, **k: 0)
+    monkeypatch.setattr(tc, "_record_research_event", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_refresh_active_strategy_families", lambda *a, **k: ["mean_reversion"])
+
+    tc.tick()

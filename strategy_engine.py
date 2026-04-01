@@ -6,6 +6,17 @@ from broker_zerodha import get_kite
 from instrument_store import token_for_symbol
 from log_store import append_log
 
+LAST_SIGNAL_REJECT_REASONS = {}
+
+
+def _reject_signal(symbol: str, family: str, reason: str):
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return
+    rej = str(reason or "conditions_not_met")
+    LAST_SIGNAL_REJECT_REASONS[sym] = rej
+    append_log("INFO", "SIG", f"family={family} symbol={sym} reject={rej}")
+
 
 def _cfg_obj():
     # Defensive local resolver for runtime environments that may hold stale module globals.
@@ -146,25 +157,25 @@ def generate_signal(universe):
 
             df = pd.DataFrame(data)
             if df.empty or "close" not in df.columns:
-                append_log("WARN", "SIG", f"{sym} no candle data")
+                _reject_signal(sym, "trend_long", "candle_data_unavailable")
                 continue
 
             core_min_bars = _cfg_int("SMA20_CORE_MIN_BARS", 20)
             if len(df) < core_min_bars:
-                append_log("INFO", "SIG", f"{sym} skipped reason=insufficient_history_min_bars have={len(df)} need={core_min_bars}")
+                _reject_signal(sym, "trend_long", "insufficient_history")
                 continue
 
             sma20 = df["close"].rolling(20).mean()
             last = float(df["close"].iloc[-1])
             avg_val = sma20.iloc[-1]
             if pd.isna(avg_val):
-                append_log("WARN", "SIG", f"{sym} SMA20 NA")
+                _reject_signal(sym, "trend_long", "sma20_unavailable")
                 continue
 
             avg = float(avg_val)
 
             if last <= 0 or avg <= 0:
-                append_log("WARN", "SIG", f"{sym} invalid prices last={last} sma20={avg}")
+                _reject_signal(sym, "trend_long", "invalid_price_data")
                 continue
 
             buffer = _compute_entry_buffer(df, last, avg, symbol=sym)
@@ -177,6 +188,7 @@ def generate_signal(universe):
 
             # Strict trigger: do not spam NEAR logs or emit attempts unless buffer is cleared.
             if last <= trigger:
+                _reject_signal(sym, "trend_long", "price_not_above_required_level")
                 continue
 
             if last > trigger:
@@ -211,9 +223,11 @@ def generate_signal(universe):
                     "strategy_family": "trend_long",
                     "signal_score": float(signal_score),
                 })
+                LAST_SIGNAL_REJECT_REASONS.pop(sym, None)
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            _reject_signal(sym, "trend_long", "signal_evaluation_error")
             continue
 
     if not candidates:
@@ -254,6 +268,7 @@ def generate_mean_reversion_signal(universe):
             time.sleep(0.5)
             df = pd.DataFrame(data)
             if df.empty or "close" not in df.columns or len(df) < 25:
+                _reject_signal(sym, "mean_reversion", "insufficient_history")
                 continue
 
             close = df["close"].astype(float)
@@ -262,6 +277,7 @@ def generate_mean_reversion_signal(universe):
             sma20 = close.rolling(20).mean()
             std20 = close.rolling(20).std()
             if pd.isna(sma20.iloc[-1]) or pd.isna(std20.iloc[-1]):
+                _reject_signal(sym, "mean_reversion", "bollinger_data_unavailable")
                 continue
 
             lower = float(sma20.iloc[-1] - (2.0 * std20.iloc[-1]))
@@ -273,6 +289,7 @@ def generate_mean_reversion_signal(universe):
             rsi_setup = rsi_last < 30.0
             bb_bounce_setup = prev <= prev_lower and last > lower
             if not (rsi_setup or bb_bounce_setup):
+                _reject_signal(sym, "mean_reversion", "mean_reversion_conditions_not_met")
                 continue
 
             bounce_size_pct = (((last - lower) / lower) * 100.0) if lower > 0 else 0.0
@@ -293,9 +310,11 @@ def generate_mean_reversion_signal(universe):
                 "lower_bb": lower,
                 "signal_score": float(signal_score),
             })
+            LAST_SIGNAL_REJECT_REASONS.pop(sym, None)
 
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
+            _reject_signal(sym, "mean_reversion", "signal_evaluation_error")
             continue
 
     if not candidates:
@@ -383,10 +402,10 @@ def _score_vwap_ema_setup(dist_above_vwap_pct: float, ema_sep_pct: float, rel_vo
 def generate_vwap_ema_signal(universe: list) -> dict | None:
     kite = get_kite()
     ist = ZoneInfo("Asia/Kolkata")
-    fast_n = int(getattr(CFG, "VWAP_EMA_FAST", 9) or 9)
-    slow_n = int(getattr(CFG, "VWAP_EMA_SLOW", 21) or 21)
-    min_rel_vol = float(getattr(CFG, "VWAP_EMA_MIN_VOL_SCORE", 1.5) or 1.5)
-    min_score = float(getattr(CFG, "VWAP_EMA_MIN_SCORE", 0.40) or 0.40)
+    fast_n = _cfg_int("VWAP_EMA_FAST", 9)
+    slow_n = _cfg_int("VWAP_EMA_SLOW", 21)
+    min_rel_vol = _cfg_float("VWAP_EMA_MIN_VOL_SCORE", 1.5)
+    min_score = _cfg_float("VWAP_EMA_MIN_SCORE", 0.40)
 
     candidates = []
     for sym in universe:

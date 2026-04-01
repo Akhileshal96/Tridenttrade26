@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.getcwd())
 
 import trading_cycle as tc
+import strategy_engine as se
 
 
 def test_missing_spread_volume_range_maps_to_moderate(monkeypatch):
@@ -134,3 +135,44 @@ def test_short_scan_records_symbol_level_skip_reason(monkeypatch):
     assert out == 0
     assert rec.get("symbol") == "AXISBANK"
     assert rec.get("reason") == "volume_score_below_threshold"
+
+
+def test_incomplete_opening_data_never_reports_confidence_100(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    monkeypatch.setattr(
+        tc,
+        "_compute_opening_metrics",
+        lambda: {
+            "gap_pct": 0.05,
+            "first_5m_range_pct": 0.0,
+            "direction_clear": False,
+            "spread_quality": "UNKNOWN",
+            "volume_quality": "UNKNOWN",
+            "valid": False,
+            "feed_error": False,
+        },
+    )
+
+    mode, metrics = tc.get_opening_mode()
+    assert mode == "OPEN_MODERATE"
+    assert int(metrics.get("confidence") or 0) < 100
+
+
+def test_scan_long_records_deterministic_skip_reason(monkeypatch):
+    monkeypatch.setattr(tc, "_open_positions_count", lambda: 0)
+    monkeypatch.setattr(tc, "_positions", lambda: {})
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "generate_vwap_ema_signal", lambda _u: None)
+    monkeypatch.setattr(tc, "generate_mean_reversion_signal", lambda _u: None)
+    monkeypatch.setattr(tc, "_maybe_enter_from_signal", lambda _sig: False)
+
+    rec = {}
+    monkeypatch.setattr(tc.SA, "record_skipped_signal", lambda d: rec.update(d))
+    se.LAST_SIGNAL_REJECT_REASONS["INFY"] = "mean_reversion_conditions_not_met"
+
+    out = tc._scan_long_entries(["INFY"], max_new=1, signal_fn=lambda _u: None, strategy_family="mean_reversion")
+    assert out == 0
+    assert rec.get("symbol") == "INFY"
+    assert rec.get("reason") == "mean_reversion_conditions_not_met"
