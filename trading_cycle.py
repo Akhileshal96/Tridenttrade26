@@ -2993,8 +2993,10 @@ def get_status_text():
     selector_reason = str(STATE.get("active_strategy_last_reason") or "n/a")
     regime_now = str(STATE.get("last_regime") or "UNKNOWN")
     bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
+    runtime_ver = str(_cfg_get("RUNTIME_VERSION", "unknown") or "unknown")
     return (
         "📟 Trident Status\n\n"
+        f"Runtime: {runtime_ver}\n"
         f"Mode: {mode}\n"
         f"Paused: {STATE.get('paused')}\n"
         f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
@@ -3075,6 +3077,7 @@ def get_analytics_text() -> str:
     realized, unrealized, total = _refresh_runtime_pnl_fields()
     regime_now = str(STATE.get("last_regime") or "UNKNOWN")
     bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
+    runtime_ver = str(_cfg_get("RUNTIME_VERSION", "unknown") or "unknown")
     top3 = ",".join(list(STATE.get("active_strategy_families") or [])) or "none"
     active_uni = ",".join(list(STATE.get("active_universe") or [])[:12]) or "none"
     open_rows = []
@@ -3089,6 +3092,7 @@ def get_analytics_text() -> str:
     route_changes = len(list(STATE.get("route_changes_today") or []))
     return (
         "📈 Analytics\n\n"
+        f"Runtime: {runtime_ver}\n"
         f"Regime/Bias: {regime_now} / {bias}\n"
         f"Top3: {top3}\n"
         f"Active Universe: {active_uni}\n"
@@ -3350,17 +3354,24 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
         if not sig and signal_fn is generate_signal:
             sig = generate_mean_reversion_signal(cands)
         if not sig and cands:
-            sym = str(cands[0] or "").strip().upper()
-            rej = str(getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}).get(sym) or "no_long_signal")
-            SA.record_skipped_signal(
-                {
-                    "symbol": sym,
-                    "side": "BUY",
-                    "reason": rej,
-                    "strategy_tag": str(strategy_family or "trend_long"),
-                    "strategy_family": str(strategy_family or "trend_long"),
-                }
-            )
+            reject_map = getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}) or {}
+            seen = set()
+            for raw_sym in cands:
+                sym = str(raw_sym or "").strip().upper()
+                if not sym or sym in seen:
+                    continue
+                seen.add(sym)
+                rej = str(reject_map.get(sym) or "family_conditions_not_met")
+                append_log("INFO", "SIG", f"family={str(strategy_family or 'trend_long')} symbol={sym} reject={rej}")
+                SA.record_skipped_signal(
+                    {
+                        "symbol": sym,
+                        "side": "BUY",
+                        "reason": rej,
+                        "strategy_tag": str(strategy_family or "trend_long"),
+                        "strategy_family": str(strategy_family or "trend_long"),
+                    }
+                )
         if sig and strategy_family and not sig.get("strategy_family"):
             sig["strategy_family"] = strategy_family
         if sig and universe_source and not sig.get("universe_source"):
@@ -3565,7 +3576,7 @@ def tick():
         )
         append_log("INFO", "HEALTH", "[HEALTH] top3 dry -> expanding to fallback universe")
 
-    trigger_n = int(getattr(CFG, "FALLBACK_TRIGGER_CYCLES", 5) or 5)
+    trigger_n = int(_cfg_get("FALLBACK_TRIGGER_CYCLES", 5) or 5)
     if STATE.get("no_entry_cycles", 0) >= trigger_n:
         if not STATE.get("fallback_mode_active"):
             append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
@@ -3585,7 +3596,7 @@ def tick():
                 append_log(
                     "INFO",
                     "UNIV",
-                    f"fallback entries allowed opened={fb_opened} size_multiplier={float(getattr(CFG, 'FALLBACK_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
+                    f"fallback entries allowed opened={fb_opened} size_multiplier={float(_cfg_get('FALLBACK_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
                 )
                 STATE["no_entry_cycles"] = 0
             else:
@@ -3598,6 +3609,7 @@ def tick():
 def run_loop_forever():
     _cfg_obj()
     evaluate_ip_compliance(force=True)
+    append_log("INFO", "BOOT", f"runtime_version={str(_cfg_get('RUNTIME_VERSION', 'unknown') or 'unknown')}")
     append_log("INFO", "LOOP", "Trading loop started")
     append_log(
         "INFO",

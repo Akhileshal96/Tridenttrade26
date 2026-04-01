@@ -31,6 +31,9 @@ def _get_float(key: str, default: str = "0") -> float:
 
 # ===== TELEGRAM =====
 TELEGRAM_BOT_TOKEN = _get_str("TELEGRAM_BOT_TOKEN", "")
+
+# Runtime fingerprint for deployment verification.
+RUNTIME_VERSION = _get_str("RUNTIME_VERSION", "2026.04.01-runtime-fix")
 TELEGRAM_API_ID = _get_int("TELEGRAM_API_ID", "0")
 TELEGRAM_API_HASH = _get_str("TELEGRAM_API_HASH", "")
 ADMIN_USER_ID = _get_int("ADMIN_USER_ID", "0")
