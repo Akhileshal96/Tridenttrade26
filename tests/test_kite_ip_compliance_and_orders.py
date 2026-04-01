@@ -87,6 +87,70 @@ def test_market_order_includes_market_protection(monkeypatch):
     assert float(got.get("market_protection") or 0.0) > 0.0
 
 
+def test_market_order_allows_market_protection_auto_minus_one(monkeypatch):
+    _reset_ip_state()
+    tc.STATE["live_order_allowed"] = True
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: True)
+    monkeypatch.setattr(tc, "_order_rate_limit_wait", lambda: None)
+    monkeypatch.setattr(
+        tc,
+        "_cfg_get",
+        lambda k, d=None: (-1 if k == "MARKET_PROTECTION" else d),
+    )
+
+    got = {}
+
+    class DummyKite:
+        VARIETY_REGULAR = "regular"
+        TRANSACTION_TYPE_BUY = "BUY"
+        TRANSACTION_TYPE_SELL = "SELL"
+        ORDER_TYPE_MARKET = "MARKET"
+        ORDER_TYPE_SLM = "SL-M"
+
+        def place_order(self, **kwargs):
+            got.update(kwargs)
+            return "OID-AUTO"
+
+    oid = tc._place_live_order(DummyKite(), "SBIN", "BUY", 1)
+    assert oid == "OID-AUTO"
+    assert float(got.get("market_protection")) == -1.0
+
+
+def test_market_order_rejects_market_protection_zero(monkeypatch):
+    _reset_ip_state()
+    tc.STATE["live_order_allowed"] = True
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: True)
+    monkeypatch.setattr(tc, "_cfg_get", lambda k, d=None: (0 if k == "MARKET_PROTECTION" else d))
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    class DummyKite:
+        ORDER_TYPE_MARKET = "MARKET"
+        ORDER_TYPE_SLM = "SL-M"
+
+        def place_order(self, **kwargs):
+            raise AssertionError("place_order should not be called when market_protection is invalid")
+
+    assert tc._place_live_order(DummyKite(), "SBIN", "BUY", 1) is None
+
+
+def test_market_order_rejects_invalid_market_protection_values(monkeypatch):
+    _reset_ip_state()
+    tc.STATE["live_order_allowed"] = True
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: True)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    class DummyKite:
+        ORDER_TYPE_MARKET = "MARKET"
+        ORDER_TYPE_SLM = "SL-M"
+
+        def place_order(self, **kwargs):
+            raise AssertionError("place_order should not be called when market_protection is invalid")
+
+    for bad in ("abc", -2, 101):
+        monkeypatch.setattr(tc, "_cfg_get", lambda k, d=None, _bad=bad: (_bad if k == "MARKET_PROTECTION" else d))
+        assert tc._place_live_order(DummyKite(), "SBIN", "BUY", 1) is None
+
+
 def test_order_path_retries_on_429_with_backoff(monkeypatch):
     _reset_ip_state()
     tc.STATE["live_order_allowed"] = True

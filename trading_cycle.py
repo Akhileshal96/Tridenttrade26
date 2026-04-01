@@ -902,9 +902,14 @@ def _place_live_order(kite, sym, side, qty):
         append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: ip_non_compliant_or_not_rearmed")
         return None
 
-    market_protection = float(_cfg_get("MARKET_PROTECTION", 0.2) or 0.0)
-    if market_protection <= 0:
-        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_missing")
+    mp_raw = _cfg_get("MARKET_PROTECTION", 0.2)
+    try:
+        market_protection = float(mp_raw)
+    except Exception:
+        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid value={mp_raw}")
+        return None
+    if not (market_protection == -1.0 or (0.0 < market_protection <= 100.0)):
+        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid value={market_protection}")
         return None
 
     retries = 3
@@ -913,16 +918,20 @@ def _place_live_order(kite, sym, side, qty):
         for i in range(retries):
             try:
                 _order_rate_limit_wait()
-                return kite.place_order(
+                order_type = kite.ORDER_TYPE_MARKET
+                kwargs = dict(
                     variety=kite.VARIETY_REGULAR,
                     exchange=CFG.EXCHANGE,
                     tradingsymbol=sym,
                     transaction_type=kite.TRANSACTION_TYPE_BUY if side == "BUY" else kite.TRANSACTION_TYPE_SELL,
                     quantity=qty,
                     product=CFG.PRODUCT,
-                    order_type=kite.ORDER_TYPE_MARKET,
-                    market_protection=market_protection,
                 )
+                kwargs["order_type"] = order_type
+                slm_const = getattr(kite, "ORDER_TYPE_SLM", "SL-M")
+                if order_type in (kite.ORDER_TYPE_MARKET, slm_const):
+                    kwargs["market_protection"] = market_protection
+                return kite.place_order(**kwargs)
             except Exception as e:
                 msg = str(e)
                 if "429" in msg and i < (retries - 1):
