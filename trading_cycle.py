@@ -2977,7 +2977,6 @@ def _refresh_runtime_pnl_fields():
 
 def get_status_text():
     _ensure_day_key()
-    RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
     mode = "LIVE ✅" if is_live_enabled() else "PAPER 🟡"
     rows = []
@@ -3397,7 +3396,6 @@ def tick():
     _cfg_obj()
     _ensure_day_key()
     evaluate_ip_compliance(force=False)
-    RISK.sync_wallet(STATE)
     _sync_wallet_and_caps(force=False)
     reconcile_broker_positions()
     _refresh_runtime_pnl_fields()

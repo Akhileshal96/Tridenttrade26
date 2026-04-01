@@ -222,3 +222,31 @@ def test_tick_post_0930_path_does_not_raise_when_cfg_binding_missing(monkeypatch
     monkeypatch.setattr(tc, "_refresh_active_strategy_families", lambda *a, **k: ["mean_reversion"])
 
     tc.tick()
+
+
+def test_tick_uses_single_wallet_sync_path(monkeypatch):
+    reset_state()
+    tc.STATE["paused"] = True
+
+    calls = {"n": 0}
+
+    def fake_sync_wallet_and_caps(force=False):
+        calls["n"] += 1
+
+    monkeypatch.setattr(tc, "_sync_wallet_and_caps", fake_sync_wallet_and_caps)
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: None)
+    monkeypatch.setattr(tc, "reconcile_broker_positions", lambda: None)
+    monkeypatch.setattr(tc, "_refresh_runtime_pnl_fields", lambda: None)
+    monkeypatch.setattr(tc.RISK, "check_day_drawdown_guard", lambda _s: None)
+    monkeypatch.setattr(tc, "_past_force_exit_time", lambda: False)
+    monkeypatch.setattr(tc, "_positions", lambda: {})
+    monkeypatch.setattr(tc, "_maybe_send_eod_report", lambda: None)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    def fail_sync_wallet(_state):
+        raise AssertionError("RISK.sync_wallet should not be called from tick")
+
+    monkeypatch.setattr(tc.RISK, "sync_wallet", fail_sync_wallet)
+
+    tc.tick()
+    assert calls["n"] == 1
