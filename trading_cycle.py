@@ -2,6 +2,7 @@ import math
 import os
 import time
 import threading
+import inspect
 from collections import deque
 from datetime import datetime, timedelta, time as dt_time
 from urllib.request import urlopen
@@ -121,6 +122,7 @@ RUNTIME = {
 
 _ORDER_RATE_LOCK = threading.Lock()
 _ORDER_REQ_TS = deque(maxlen=256)
+_KITE_MP_SUPPORT_CACHE = {}
 
 
 def _cfg_obj():
@@ -896,20 +898,78 @@ def _ltp(kite, sym):
         return None
 
 
+def _validated_market_protection(value) -> float | None:
+    try:
+        mp = float(value)
+    except Exception:
+        return None
+    if mp == -1.0 or (0.0 < mp <= 100.0):
+        return mp
+    return None
+
+
+def _kite_supports_market_protection(kite) -> bool:
+    global _KITE_MP_SUPPORT_CACHE
+    cache_key = kite.__class__
+    if cache_key in _KITE_MP_SUPPORT_CACHE:
+        return bool(_KITE_MP_SUPPORT_CACHE.get(cache_key))
+    supports = False
+    try:
+        sig = inspect.signature(getattr(kite, "place_order"))
+        supports = "market_protection" in sig.parameters
+        if not supports:
+            supports = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    except Exception:
+        supports = False
+    _KITE_MP_SUPPORT_CACHE[cache_key] = bool(supports)
+    return bool(supports)
+
+
+def _kite_client_version() -> str:
+    try:
+        import kiteconnect  # type: ignore
+
+        ver = getattr(kiteconnect, "__version__", None)
+        if isinstance(ver, str) and ver:
+            return ver
+        if ver is not None and hasattr(ver, "__dict__"):
+            return str(getattr(ver, "__version__", "") or "unknown")
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _place_order_http_fallback(kite, params: dict):
+    payload = {k: v for k, v in dict(params or {}).items() if v is not None}
+    res = kite._post("order.place", url_args={"variety": payload.get("variety")}, params=payload)
+    if isinstance(res, dict):
+        return res.get("order_id")
+    return res
+
+
+def place_order_safe(kite, **kwargs):
+    params = dict(kwargs or {})
+    order_type = str(params.get("order_type") or "").upper()
+    if order_type in (str(getattr(kite, "ORDER_TYPE_MARKET", "MARKET")).upper(), str(getattr(kite, "ORDER_TYPE_SLM", "SL-M")).upper()):
+        mp = _validated_market_protection(params.get("market_protection"))
+        if mp is None:
+            raise ValueError(f"invalid market_protection={params.get('market_protection')}")
+        params["market_protection"] = mp
+    if _kite_supports_market_protection(kite):
+        return kite.place_order(**params)
+    return _place_order_http_fallback(kite, params)
+
+
+
 def _place_live_order(kite, sym, side, qty):
     evaluate_ip_compliance(force=False)
     if not bool(STATE.get("live_order_allowed")):
         append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: ip_non_compliant_or_not_rearmed")
         return None
 
-    mp_raw = _cfg_get("MARKET_PROTECTION", 0.2)
-    try:
-        market_protection = float(mp_raw)
-    except Exception:
-        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid value={mp_raw}")
-        return None
-    if not (market_protection == -1.0 or (0.0 < market_protection <= 100.0)):
-        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid value={market_protection}")
+    market_protection = _validated_market_protection(_cfg_get("MARKET_PROTECTION", 0.2))
+    if market_protection is None:
+        append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid")
         return None
 
     retries = 3
@@ -931,7 +991,7 @@ def _place_live_order(kite, sym, side, qty):
                 slm_const = getattr(kite, "ORDER_TYPE_SLM", "SL-M")
                 if order_type in (kite.ORDER_TYPE_MARKET, slm_const):
                     kwargs["market_protection"] = market_protection
-                return kite.place_order(**kwargs)
+                return place_order_safe(kite, **kwargs)
             except Exception as e:
                 msg = str(e)
                 if "429" in msg and i < (retries - 1):
@@ -1831,6 +1891,7 @@ def _compute_opening_metrics() -> dict:
         "valid": False,
         "data_state": "INCOMPLETE",
         "feed_error": False,
+        "feed_exception": "",
     }
     try:
         d1 = yf.download("^NSEI", period="7d", interval="1d", auto_adjust=False, progress=False, threads=False)
@@ -1890,9 +1951,10 @@ def _compute_opening_metrics() -> dict:
             }
         )
         return out
-    except Exception:
+    except Exception as e:
         out["data_state"] = "FEED_ERROR"
         out["feed_error"] = True
+        out["feed_exception"] = str(e)
         return out
 
 
@@ -1976,14 +2038,23 @@ def get_opening_mode() -> tuple[str, dict]:
     append_log("INFO", "OPEN", f"first_5m_range_pct={float(m.get('first_5m_range_pct') or 0.0):.2f}")
     append_log("INFO", "OPEN", f"spread_quality={spread_q}")
     append_log("INFO", "OPEN", f"volume_quality={volume_q}")
+    if bool(m.get("feed_error")):
+        retries = int(STATE.get("open_feed_retry_count") or 0) + 1
+        STATE["open_feed_retry_count"] = retries
+        hard_after = int(_cfg_get("OPEN_FEED_HARD_BLOCK_RETRIES", 3) or 3)
+        m["decision_path"] = "feed_error"
+        if retries >= max(2, hard_after):
+            m["reason"] = "confirmed_broken_feed"
+            m["data_state"] = "FEED_ERROR_CONFIRMED"
+            append_log("WARN", "OPEN", f"decision_path={m.get('decision_path')} data_state={m.get('data_state')} feed_error=True exception={m.get('feed_exception') or ''}")
+            return "OPEN_HARD_BLOCK", m
+        m["reason"] = "transient_feed_error_soft"
+        m["data_state"] = "FEED_ERROR_RETRYING"
+        append_log("WARN", "OPEN", f"decision_path={m.get('decision_path')} data_state={m.get('data_state')} feed_error=True exception={m.get('feed_exception') or ''}")
+        return "OPEN_MODERATE", m
     # Missing/unknown opening metrics (volume/spread/opening_range) must remain
     # an incomplete-data state and never escalate to confirmed_broken_feed.
     STATE["open_feed_retry_count"] = 0
-
-    if bool(m.get("feed_error")):
-        m["reason"] = "confirmed_broken_feed"
-        m["decision_path"] = "feed_error"
-        return "OPEN_HARD_BLOCK", m
 
     if gap > max_gap * 1.5:
         m["reason"] = "confirmed_extreme_gap"
@@ -1993,15 +2064,19 @@ def get_opening_mode() -> tuple[str, dict]:
     if not bool(m.get("valid")):
         m["reason"] = "incomplete_opening_data"
         m["decision_path"] = "incomplete_data"
+        m["data_state"] = "INCOMPLETE"
         if conf_meta.get("ignored"):
             append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
+        append_log("INFO", "OPEN", f"decision_path={m.get('decision_path')} data_state={m.get('data_state')} feed_error=False exception=")
         return "OPEN_MODERATE", m
 
     if spread_q == "UNKNOWN" or volume_q == "UNKNOWN":
         m["reason"] = "incomplete_opening_data"
         m["decision_path"] = "incomplete_data"
+        m["data_state"] = "INCOMPLETE"
         if conf_meta.get("ignored"):
             append_log("INFO", "OPEN", f"missing data ignored: {','.join(conf_meta.get('ignored') or [])}")
+        append_log("INFO", "OPEN", f"decision_path={m.get('decision_path')} data_state={m.get('data_state')} feed_error=False exception=")
         return "OPEN_MODERATE", m
 
     now = datetime.now(IST)
@@ -2011,6 +2086,7 @@ def get_opening_mode() -> tuple[str, dict]:
             m["reason"] = "pre0930_incomplete_data_softened"
             m["decision_path"] = "pre0930_incomplete_data"
             append_log("INFO", "OPEN", "pre-09:30 reduced entry allowed due to incomplete opening data")
+            append_log("INFO", "OPEN", f"decision_path={m.get('decision_path')} data_state={m.get('data_state') or 'INCOMPLETE'} feed_error=False exception=")
             return "OPEN_MODERATE", m
         m["reason"] = "unstable_open"
         m["decision_path"] = "unstable_open"
@@ -3617,6 +3693,17 @@ def run_loop_forever():
     _cfg_obj()
     evaluate_ip_compliance(force=True)
     append_log("INFO", "BOOT", f"runtime_version={str(_cfg_get('RUNTIME_VERSION', 'unknown') or 'unknown')}")
+    kite_ver = _kite_client_version()
+    supports_mp = False
+    fallback_enabled = True
+    try:
+        supports_mp = _kite_supports_market_protection(get_kite())
+        fallback_enabled = not supports_mp
+    except Exception as e:
+        append_log("WARN", "BOOT", f"kite_runtime_probe_failed={e}")
+    append_log("INFO", "BOOT", f"kite_client_version={kite_ver}")
+    append_log("INFO", "BOOT", f"market_protection_signature_support={supports_mp}")
+    append_log("INFO", "BOOT", f"market_protection_http_fallback_enabled={fallback_enabled}")
     append_log("INFO", "LOOP", "Trading loop started")
     append_log(
         "INFO",

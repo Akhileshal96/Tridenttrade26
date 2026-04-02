@@ -151,6 +151,38 @@ def test_market_order_rejects_invalid_market_protection_values(monkeypatch):
         assert tc._place_live_order(DummyKite(), "SBIN", "BUY", 1) is None
 
 
+def test_market_order_uses_http_fallback_when_signature_missing_market_protection(monkeypatch):
+    _reset_ip_state()
+    tc.STATE["live_order_allowed"] = True
+    monkeypatch.setattr(tc, "evaluate_ip_compliance", lambda force=False: True)
+    monkeypatch.setattr(tc, "_order_rate_limit_wait", lambda: None)
+    monkeypatch.setattr(tc, "_cfg_get", lambda k, d=None: (1 if k == "MARKET_PROTECTION" else d))
+    monkeypatch.setattr(tc, "_KITE_MP_SUPPORT_CACHE", {})
+
+    got = {}
+
+    class DummyKite:
+        VARIETY_REGULAR = "regular"
+        TRANSACTION_TYPE_BUY = "BUY"
+        TRANSACTION_TYPE_SELL = "SELL"
+        ORDER_TYPE_MARKET = "MARKET"
+        ORDER_TYPE_SLM = "SL-M"
+
+        def place_order(self, variety, exchange, tradingsymbol, transaction_type, quantity, product, order_type):
+            raise AssertionError("legacy place_order path should not receive market_protection kwargs")
+
+        def _post(self, route, url_args=None, params=None, **_kwargs):
+            got["route"] = route
+            got["url_args"] = dict(url_args or {})
+            got["params"] = dict(params or {})
+            return {"order_id": "OID-FALLBACK"}
+
+    oid = tc._place_live_order(DummyKite(), "SBIN", "BUY", 1)
+    assert oid == "OID-FALLBACK"
+    assert got["route"] == "order.place"
+    assert float(got["params"]["market_protection"]) == 1.0
+
+
 def test_order_path_retries_on_429_with_backoff(monkeypatch):
     _reset_ip_state()
     tc.STATE["live_order_allowed"] = True

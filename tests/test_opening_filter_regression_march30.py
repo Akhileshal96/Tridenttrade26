@@ -31,10 +31,12 @@ def test_missing_spread_volume_range_maps_to_moderate(monkeypatch):
     assert metrics.get("decision_path") == "incomplete_data"
 
 
-def test_true_feed_exception_maps_to_hard_block_broken_feed(monkeypatch):
+def test_true_feed_exception_softens_before_hard_block(monkeypatch):
     monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
     monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(tc, "_cfg_get", lambda k, d=None: (3 if k == "OPEN_FEED_HARD_BLOCK_RETRIES" else d))
     monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    tc.STATE["open_feed_retry_count"] = 0
     monkeypatch.setattr(
         tc,
         "_compute_opening_metrics",
@@ -50,11 +52,41 @@ def test_true_feed_exception_maps_to_hard_block_broken_feed(monkeypatch):
     )
 
     mode, metrics = tc.get_opening_mode()
+    assert mode == "OPEN_MODERATE"
+    assert metrics.get("reason") == "transient_feed_error_soft"
+    assert metrics.get("decision_path") == "feed_error"
+    assert metrics.get("data_state") == "FEED_ERROR_RETRYING"
+    conf_meta = metrics.get("confidence_meta") or {}
+    assert conf_meta.get("ignored") == []
+    assert int(tc.STATE.get("open_feed_retry_count") or 0) == 1
+
+
+def test_repeated_feed_exception_maps_to_hard_block(monkeypatch):
+    monkeypatch.setattr(tc.CFG, "USE_ADAPTIVE_OPEN_FILTER", True, raising=False)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: True)
+    monkeypatch.setattr(tc, "_cfg_get", lambda k, d=None: (3 if k == "OPEN_FEED_HARD_BLOCK_RETRIES" else d))
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    tc.STATE["open_feed_retry_count"] = 2
+    monkeypatch.setattr(
+        tc,
+        "_compute_opening_metrics",
+        lambda: {
+            "gap_pct": 0.0,
+            "first_5m_range_pct": 0.0,
+            "spread_quality": "UNKNOWN",
+            "volume_quality": "UNKNOWN",
+            "valid": False,
+            "feed_error": True,
+            "data_state": "FEED_ERROR",
+            "feed_exception": "timeout",
+        },
+    )
+
+    mode, metrics = tc.get_opening_mode()
     assert mode == "OPEN_HARD_BLOCK"
     assert metrics.get("reason") == "confirmed_broken_feed"
     assert metrics.get("decision_path") == "feed_error"
-    conf_meta = metrics.get("confidence_meta") or {}
-    assert conf_meta.get("ignored") == []
+    assert metrics.get("data_state") == "FEED_ERROR_CONFIRMED"
 
 
 def test_extreme_gap_maps_to_hard_block(monkeypatch):
