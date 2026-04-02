@@ -5,6 +5,7 @@ import threading
 import inspect
 from collections import deque
 from datetime import datetime, timedelta, time as dt_time
+from urllib.parse import urljoin
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
@@ -941,7 +942,23 @@ def _kite_client_version() -> str:
 
 def _place_order_http_fallback(kite, params: dict):
     payload = {k: v for k, v in dict(params or {}).items() if v is not None}
-    res = kite._post("order.place", url_args={"variety": payload.get("variety")}, params=payload)
+    variety = str(payload.get("variety") or getattr(kite, "VARIETY_REGULAR", "regular")).lower()
+    sess = getattr(kite, "reqsession", None)
+    api_key = getattr(kite, "api_key", None)
+    access_token = getattr(kite, "access_token", None)
+    root = str(getattr(kite, "root", "https://api.kite.trade") or "https://api.kite.trade").rstrip("/")
+    if sess is not None and api_key and access_token:
+        url = urljoin(f"{root}/", f"orders/{variety}")
+        headers = {
+            "X-Kite-Version": "3",
+            "Authorization": f"token {api_key}:{access_token}",
+        }
+        resp = sess.post(url, data=payload, headers=headers, timeout=getattr(kite, "timeout", 7))
+        data = resp.json()
+        if int(resp.status_code) == 200 and isinstance(data, dict):
+            return ((data.get("data") or {}).get("order_id")) or data.get("order_id")
+        raise RuntimeError(f"http_fallback_failed status={resp.status_code} body={str(data)[:200]}")
+    res = kite._post("order.place", url_args={"variety": variety}, params=payload)
     if isinstance(res, dict):
         return res.get("order_id")
     return res
@@ -958,7 +975,6 @@ def place_order_safe(kite, **kwargs):
     if _kite_supports_market_protection(kite):
         return kite.place_order(**params)
     return _place_order_http_fallback(kite, params)
-
 
 
 def _place_live_order(kite, sym, side, qty):

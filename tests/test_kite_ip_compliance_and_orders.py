@@ -161,26 +161,40 @@ def test_market_order_uses_http_fallback_when_signature_missing_market_protectio
 
     got = {}
 
+    class DummyResp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"status": "success", "data": {"order_id": "OID-FALLBACK"}}
+
+    class DummySession:
+        def post(self, url, data=None, headers=None, timeout=7):
+            got["url"] = url
+            got["data"] = dict(data or {})
+            got["headers"] = dict(headers or {})
+            got["timeout"] = timeout
+            return DummyResp()
+
     class DummyKite:
         VARIETY_REGULAR = "regular"
         TRANSACTION_TYPE_BUY = "BUY"
         TRANSACTION_TYPE_SELL = "SELL"
         ORDER_TYPE_MARKET = "MARKET"
         ORDER_TYPE_SLM = "SL-M"
+        api_key = "k"
+        access_token = "t"
+        root = "https://api.kite.trade"
+        reqsession = DummySession()
 
         def place_order(self, variety, exchange, tradingsymbol, transaction_type, quantity, product, order_type):
             raise AssertionError("legacy place_order path should not receive market_protection kwargs")
 
-        def _post(self, route, url_args=None, params=None, **_kwargs):
-            got["route"] = route
-            got["url_args"] = dict(url_args or {})
-            got["params"] = dict(params or {})
-            return {"order_id": "OID-FALLBACK"}
-
     oid = tc._place_live_order(DummyKite(), "SBIN", "BUY", 1)
     assert oid == "OID-FALLBACK"
-    assert got["route"] == "order.place"
-    assert float(got["params"]["market_protection"]) == 1.0
+    assert got["url"].endswith("/orders/regular")
+    assert float(got["data"]["market_protection"]) == 1.0
+    assert got["headers"]["X-Kite-Version"] == "3"
 
 
 def test_order_path_retries_on_429_with_backoff(monkeypatch):
