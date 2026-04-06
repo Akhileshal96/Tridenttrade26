@@ -47,6 +47,8 @@ STATE = {
     "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0)),
     "profit_milestone_hit": False,
     "last_wallet_sync_ts": None,
+    "wallet_cached_mode_until": None,
+    "wallet_cached_mode_reason": "",
     "cooldown_until": None,
     "last_exit_ts": {},
     "skip_cooldown": {},
@@ -740,6 +742,14 @@ def _sync_wallet_and_caps(force=False):
 
     retries = max(1, int(getattr(CFG, "WALLET_SYNC_RETRIES", 3)))
     backoff = float(getattr(CFG, "WALLET_RETRY_BASE_SEC", 1.5))
+    auth_cooldown_sec = int(getattr(CFG, "WALLET_AUTH_COOLDOWN_SEC", 3600) or 3600)
+    cached_until = STATE.get("wallet_cached_mode_until")
+    if (not in_market) and (not force) and isinstance(cached_until, datetime) and now < cached_until:
+        wallet_net = _cached_wallet_value()
+        wallet_avail = wallet_net
+        STATE["wallet_net_inr"] = max(0.0, wallet_net)
+        STATE["wallet_available_inr"] = max(0.0, wallet_avail)
+        return
 
     wallet_net = _cached_wallet_value()
     wallet_avail = wallet_net
@@ -759,9 +769,22 @@ def _sync_wallet_and_caps(force=False):
                 wallet_avail = wallet_net
             STATE["last_wallet"] = max(0.0, wallet_net)
             append_log("INFO", "WALLET", f"Synced wallet={wallet_net:.2f}")
+            if STATE.get("wallet_cached_mode_until"):
+                append_log("INFO", "WALLET", "Recovered from cached-wallet mode")
+            STATE["wallet_cached_mode_until"] = None
+            STATE["wallet_cached_mode_reason"] = ""
             synced = True
             break
         except Exception as e:
+            emsg = str(e)
+            is_auth_error = any(x in emsg.lower() for x in ("token", "author", "login", "permission", "access"))
+            if (not in_market) and is_auth_error:
+                until = now + timedelta(seconds=max(300, auth_cooldown_sec))
+                if not STATE.get("wallet_cached_mode_until"):
+                    append_log("WARNING", "WALLET", f"Auth error off-market -> cached-wallet mode enabled until {until.isoformat(timespec='seconds')}")
+                STATE["wallet_cached_mode_until"] = until
+                STATE["wallet_cached_mode_reason"] = emsg[:200]
+                break
             append_log("WARNING", "WALLET", f"Attempt {attempt + 1} failed: {e}")
             if attempt + 1 < retries:
                 append_log("WARNING", "WALLET", f"Retry {attempt + 2}/{retries}")
@@ -1824,16 +1847,19 @@ def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[f
     return float(pnl_inr), float(pnl_pct)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int) -> float:
-    """
-    Dynamically calculate trailing stop activation threshold
-    as a percentage of position value.
-    Minimum floor of ₹2 regardless of position size.
-    """
+def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> float:
     position_value = float(entry) * max(1, int(qty))
-    pct = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4)) / 100.0
+    t = str(tier or "FULL").upper()
+    if t == "MICRO":
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.15) or 0.15) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_FLOOR_INR", 2.0) or 2.0)
+    elif t == "REDUCED":
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_PCT", 0.25) or 0.25) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_FLOOR_INR", 3.0) or 3.0)
+    else:
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
     dynamic = position_value * pct
-    floor = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 2.0) or 2.0)
     return max(floor, dynamic)
 
 
@@ -1909,18 +1935,29 @@ def _compute_opening_metrics() -> dict:
         "feed_error": False,
         "feed_exception": "",
     }
+    def _col_series(frame: pd.DataFrame, name: str) -> pd.Series:
+        col = frame[name]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        return pd.to_numeric(col, errors="coerce")
     try:
         d1 = yf.download("^NSEI", period="7d", interval="1d", auto_adjust=False, progress=False, threads=False)
         m5 = yf.download("^NSEI", period="2d", interval="5m", auto_adjust=False, progress=False, threads=False)
         if d1 is None or d1.empty or m5 is None or m5.empty:
             return out
+        if isinstance(d1.columns, pd.MultiIndex):
+            d1 = d1.droplevel(-1, axis=1)
+        if isinstance(m5.columns, pd.MultiIndex):
+            m5 = m5.droplevel(-1, axis=1)
         d1 = d1.dropna()
         m5 = m5.dropna()
         if len(d1) < 2 or len(m5) < 3:
             return out
 
-        prev_close = float(d1["Close"].astype(float).iloc[-2])
-        open_today = float(d1["Open"].astype(float).iloc[-1])
+        d1_close = _col_series(d1, "Close")
+        d1_open = _col_series(d1, "Open")
+        prev_close = float(d1_close.iloc[-2])
+        open_today = float(d1_open.iloc[-1])
         gap_pct = ((open_today - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
 
         # first intraday candle of current day
@@ -1936,15 +1973,16 @@ def _compute_opening_metrics() -> dict:
         if day_df.empty:
             return out
         first = day_df.iloc[0]
-        o5 = float(first.get("Open", 0.0) or 0.0)
-        h5 = float(first.get("High", 0.0) or 0.0)
-        l5 = float(first.get("Low", 0.0) or 0.0)
-        c_last = float(day_df["Close"].astype(float).iloc[-1])
-        ma3 = float(day_df["Close"].astype(float).rolling(3).mean().dropna().iloc[-1]) if len(day_df) >= 3 else c_last
+        o5 = float(pd.to_numeric(first.get("Open", 0.0), errors="coerce"))
+        h5 = float(pd.to_numeric(first.get("High", 0.0), errors="coerce"))
+        l5 = float(pd.to_numeric(first.get("Low", 0.0), errors="coerce"))
+        close_ser = _col_series(day_df, "Close")
+        c_last = float(close_ser.iloc[-1])
+        ma3 = float(close_ser.rolling(3).mean().dropna().iloc[-1]) if len(close_ser) >= 3 and not close_ser.dropna().empty else c_last
         first_5m_range_pct = ((h5 - l5) / o5 * 100.0) if o5 > 0 else 0.0
         direction_clear = abs((c_last - o5) / o5 * 100.0) >= 0.15 and ((c_last > ma3 and c_last > o5) or (c_last < ma3 and c_last < o5))
 
-        vol = day_df["Volume"].astype(float) if "Volume" in day_df.columns else pd.Series(dtype=float)
+        vol = _col_series(day_df, "Volume") if "Volume" in day_df.columns else pd.Series(dtype=float)
         volume_quality = "GOOD"
         if not vol.empty and len(vol) > 1:
             v0 = float(vol.iloc[0])
@@ -2835,6 +2873,7 @@ def _maybe_enter_from_signal(sig):
     # 1) Market regime check (requested before buy gating)
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()
+    trend_direction = str(snap.get("trend_direction", STATE.get("last_trend_direction", "UNKNOWN")) or "UNKNOWN").upper()
     research_universe = _active_trade_universe()
     allowed, reason, meta = is_market_entry_allowed(sym, regime, research_universe)
     weak_score = float(sig.get("signal_score") or 0.0)
@@ -2862,6 +2901,24 @@ def _maybe_enter_from_signal(sig):
     elif regime == "UNKNOWN" and bool(getattr(CFG, "BLOCK_ON_UNKNOWN_MARKET_REGIME", False)):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
+
+    if strategy_family in ("mean_reversion", "fallback_long") and regime == "SIDEWAYS" and trend_direction == "DOWN":
+        mode = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "BLOCK") or "BLOCK").upper()
+        hh, mm = _parse_hhmm(str(getattr(CFG, "MEAN_REVERSION_CUTOFF_HHMM", "11:30") or "11:30"))
+        now_t = datetime.now(IST).time()
+        cutoff_t = datetime.now(IST).replace(hour=hh, minute=mm, second=0, microsecond=0).time()
+        exceptional = float(sig.get("signal_score") or 0.0) >= float(getattr(CFG, "MEAN_REVERSION_EXCEPTIONAL_SCORE", 0.90) or 0.90)
+        q = _quality_metrics(sym)
+        reclaim_ok = bool(q.get("ok")) and float(q.get("price") or 0.0) > float(q.get("sma20") or 0.0) and float(q.get("vol_score") or 0.0) >= float(getattr(CFG, "MEAN_REVERSION_MIN_VOL_SCORE", 1.0) or 1.0)
+        if now_t >= cutoff_t and not exceptional:
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_cutoff_sideways_down trend={trend_direction}")
+            return False
+        if not reclaim_ok:
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_reclaim_missing trend={trend_direction}")
+            return False
+        if mode == "BLOCK":
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_sideways_down_block trend={trend_direction}")
+            return False
 
     # 2) Universe membership check against active dynamic universe (if available)
     active_dyn = _active_trade_universe()
@@ -2914,6 +2971,12 @@ def _maybe_enter_from_signal(sig):
             return False
     else:
         tier_mult = float(decision.get("size_mult") or 0.0)
+    if strategy_family in ("mean_reversion", "fallback_long") and regime == "SIDEWAYS" and trend_direction == "DOWN":
+        mode_sd = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "BLOCK") or "BLOCK").upper()
+        if mode_sd == "MICRO":
+            decision["tier"] = "MICRO"
+            tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier("MICRO"))
+            append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier=MICRO")
     qty, bucket_qty, risk_qty = _calc_qty(sym, entry, tier=str(decision.get("tier") or "BLOCK"), tier_weight=tier_mult)
     if regime in ("WEAK", "TRENDING_DOWN"):
         mult = weak_size_mult
@@ -3319,14 +3382,15 @@ def get_trailing_status_text():
 
         trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
         trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
-        activate_inr = _calc_trail_activate_inr(entry, qty)
+        tier = str(t.get("confidence_tier") or "FULL").upper()
+        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier)
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
 
         rows.append(
             f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} value={value:.2f} "
             f"pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} "
-            f"trail_active={trail_active} activate@₹{activate_inr:.2f} trigger<=₹{trigger_inr:.2f}"
+            f"trail_active={trail_active} tier={tier} activate@₹{activate_inr:.2f} trigger<=₹{trigger_inr:.2f}"
         )
 
     if not rows:

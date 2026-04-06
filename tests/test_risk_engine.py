@@ -40,6 +40,29 @@ def test_drawdown_guard_sets_pause():
         assert state["pause_entries_until"] > datetime.now(re.IST)
 
 
+def test_daily_loss_guard_does_not_trigger_on_positive_day():
+    state = {"today_pnl": 120.0, "day_peak_pnl": 150.0, "daily_loss_cap_inr": 200.0}
+    assert re.check_day_drawdown_guard(state) in (True, False)
+    assert state.get("day_guard_reason") != "daily_loss_guard"
+
+
+def test_profit_giveback_guard_triggers_on_positive_day_giveback(monkeypatch):
+    monkeypatch.setattr(re.CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 20.0, raising=False)
+    monkeypatch.setattr(re.CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 30.0, raising=False)
+    monkeypatch.setattr(re.CFG, "DAY_PROFIT_GIVEBACK_HALT_PCT", 60.0, raising=False)
+    state = {"today_pnl": 40.0, "day_peak_pnl": 100.0, "daily_loss_cap_inr": 200.0}
+    ok = re.check_day_drawdown_guard(state)
+    assert ok is False
+    assert state.get("day_guard_reason") == "profit_giveback_guard"
+
+
+def test_daily_loss_guard_triggers_only_on_negative_breach():
+    state = {"today_pnl": -220.0, "day_peak_pnl": 50.0, "daily_loss_cap_inr": 200.0}
+    ok = re.check_day_drawdown_guard(state)
+    assert ok is False
+    assert state.get("day_guard_reason") == "daily_loss_guard"
+
+
 def test_sector_exposure_limit(monkeypatch):
     monkeypatch.setenv("MAX_POSITIONS_PER_SECTOR", "2")
     positions = {

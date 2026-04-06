@@ -252,3 +252,41 @@ def test_tick_fallback_scans_mean_reversion_strategy(monkeypatch):
 
     tc.tick()
     assert called["fallback_mr"] is True
+
+
+def test_sideways_down_blocks_mean_reversion_long(monkeypatch):
+    tc.STATE["positions"] = {}
+    monkeypatch.setattr(tc, "_skip_cooldown_active", lambda _s: False)
+    monkeypatch.setattr(tc, "get_market_regime_snapshot", lambda: {"regime": "SIDEWAYS", "trend_direction": "DOWN"})
+    monkeypatch.setattr(tc, "is_market_entry_allowed", lambda *a, **k: (True, "ok", {}))
+    monkeypatch.setattr(tc, "_active_trade_universe", lambda: ["INFY"])
+    monkeypatch.setattr(tc, "_passes_sector_entry_filter", lambda _s: True)
+    monkeypatch.setattr(tc, "_quality_metrics", lambda _s: {"ok": True, "price": 99.0, "sma20": 100.0, "vol_score": 0.8})
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    sig = {"symbol": "INFY", "entry": 100.0, "strategy_family": "mean_reversion", "signal_score": 0.7}
+    assert tc._maybe_enter_from_signal(sig) is False
+
+
+def test_sideways_neutral_preserves_mean_reversion_path(monkeypatch):
+    tc.STATE["positions"] = {}
+    monkeypatch.setattr(tc, "_skip_cooldown_active", lambda _s: False)
+    monkeypatch.setattr(tc, "get_market_regime_snapshot", lambda: {"regime": "SIDEWAYS", "trend_direction": "UP"})
+    monkeypatch.setattr(tc, "is_market_entry_allowed", lambda *a, **k: (True, "ok", {}))
+    monkeypatch.setattr(tc, "_active_trade_universe", lambda: ["INFY"])
+    monkeypatch.setattr(tc, "_passes_sector_entry_filter", lambda _s: True)
+    monkeypatch.setattr(tc, "_build_entry_confidence", lambda *a, **k: {"score": 80, "tier": "FULL", "size_mult": 1.0, "components": {}, "hard_block": ""})
+    monkeypatch.setattr(tc, "_calc_qty", lambda *a, **k: (1, 1, 1))
+    monkeypatch.setattr(tc, "_apply_strategy_allocation", lambda q, _t: q)
+    monkeypatch.setattr(tc, "_in_open_filter_window", lambda *_a, **_k: False)
+    monkeypatch.setattr(tc, "_can_open_new_trade", lambda *a, **k: True)
+    monkeypatch.setattr(tc, "is_live_enabled", lambda: False)
+    monkeypatch.setattr(tc, "_set_cooldown", lambda: None)
+    monkeypatch.setattr(tc, "_log_trade_event", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_append_runtime_event", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_notify", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_record_entry_executed", lambda: None)
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+
+    sig = {"symbol": "INFY", "entry": 100.0, "strategy_family": "mean_reversion", "signal_score": 0.7}
+    assert tc._maybe_enter_from_signal(sig) is True

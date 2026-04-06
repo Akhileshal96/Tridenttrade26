@@ -150,24 +150,40 @@ def check_day_drawdown_guard(state: dict):
         peak = pnl
         state["day_peak_pnl"] = peak
         append_log("INFO", "DAY", f"peak_pnl={peak:.2f}")
+    realized = float(state.get("realized_today") or 0.0)
+    unrealized = float(state.get("unrealized_now") or 0.0)
+    giveback = max(0.0, peak - pnl)
+    state["day_giveback_inr"] = giveback
+    append_log("INFO", "DAY", f"daily_loss_guard pnl={pnl:.2f} peak={peak:.2f} realized={realized:.2f} unrealized={unrealized:.2f} giveback={giveback:.2f}")
+
+    loss_cap = abs(float(state.get("daily_loss_cap_inr") or getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0) or 200.0))
+    if loss_cap > 0 and pnl <= -loss_cap:
+        state["halt_for_day"] = True
+        state["day_guard_reason"] = "daily_loss_guard"
+        append_log("WARN", "DAY", f"daily_loss_guard triggered loss={pnl:.2f} cap={loss_cap:.2f} action=halt_for_day")
+        return False
 
     if peak <= 0:
         return True
 
-    drop = peak - pnl
-    dd_pct = (drop / peak) * 100.0 if peak > 0 else 0.0
+    dd_pct = (giveback / peak) * 100.0 if peak > 0 else 0.0
+    halt_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_HALT_PCT", 60.0) or 60.0)
+    pause_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 40.0) or 40.0)
+    reduce_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 25.0) or 25.0)
 
-    # 25% -> reduce size, 40% -> pause entries, 60% -> halt for day
-    if dd_pct >= 60.0:
+    if dd_pct >= halt_pct:
         state["halt_for_day"] = True
-        append_log("WARN", "DAY", "drawdown guard triggered → stopping new trades for day")
+        state["day_guard_reason"] = "profit_giveback_guard"
+        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=halt_for_day")
         return False
-    if dd_pct >= 40.0:
+    if dd_pct >= pause_pct:
         state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
         state["reduce_size_factor"] = 0.5
-        append_log("WARN", "DAY", "drawdown guard triggered → pausing entries")
+        state["day_guard_reason"] = "profit_giveback_guard"
+        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=pause_entries")
         return False
-    if dd_pct >= 25.0:
+    if dd_pct >= reduce_pct:
         state["reduce_size_factor"] = 0.5
-        append_log("WARN", "DAY", "drawdown guard triggered → reducing size")
+        state["day_guard_reason"] = "profit_giveback_guard"
+        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=reduce_size")
     return True

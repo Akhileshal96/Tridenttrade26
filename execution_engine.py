@@ -28,11 +28,19 @@ def close_position(close_position_fn, sym: str, reason: str, ltp_override=None):
     return close_position_fn(sym, reason=reason, ltp_override=ltp_override)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int) -> float:
+def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> float:
     position_value = float(entry) * max(1, int(qty))
-    pct = float(getattr(CFG, "TRAIL_ACTIVATE_PCT_OF_POSITION", 0.4)) / 100.0
+    t = str(tier or "FULL").upper()
+    if t == "MICRO":
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.15) or 0.15) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_FLOOR_INR", 2.0) or 2.0)
+    elif t == "REDUCED":
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_PCT", 0.25) or 0.25) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_FLOOR_INR", 3.0) or 3.0)
+    else:
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
     dynamic = position_value * pct
-    floor = float(getattr(CFG, "MIN_TRAIL_ACTIVATE_INR", 2.0) or 2.0)
     return max(floor, dynamic)
 
 
@@ -72,6 +80,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             pnl_pct = ((ltp - entry) / entry) * 100.0
             pnl_inr = (ltp - entry) * qty
         position_value = entry * qty
+        tier = str(trade.get("confidence_tier") or "FULL").upper()
 
         peak_pnl_inr = float(trade.get("peak_pnl_inr") or 0.0)
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
@@ -83,7 +92,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         trade["peak_pct"] = peak_pct
         trade["peak"] = peak_pct
 
-        activate_inr = _calc_trail_activate_inr(entry, qty)
+        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier)
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
         if (not trail_active) and pnl_inr >= activate_inr:
@@ -93,6 +102,14 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             append_log("INFO", "TRAIL", f"{sym} activated pnl_inr={pnl_inr:.2f} activate_inr={activate_inr:.2f}")
 
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
+        if tier in ("REDUCED", "MICRO"):
+            be_arm = float(getattr(CFG, "TRAIL_BREAKEVEN_ARM_INR", 4.5) or 4.5)
+            if peak_pnl_inr >= be_arm:
+                trade["breakeven_armed"] = True
+        if bool(trade.get("breakeven_armed")) and pnl_inr <= float(getattr(CFG, "TRAIL_BREAKEVEN_LOCK_INR", 0.2) or 0.2):
+            append_log("WARN", "EXIT", f"{sym} reason=BREAKEVEN_LOCK pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} tier={tier}")
+            close_position(sym, reason="BREAKEVEN_LOCK", ltp_override=ltp)
+            continue
 
         if check_stoploss(pnl_pct, side=side):
             close_position(sym, reason="SL", ltp_override=ltp)
@@ -101,7 +118,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         append_log(
             "INFO",
             "RISK",
-            f"[RISK] {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
+            f"[RISK] {sym} qty={qty} tier={tier} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
             f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} "
             f"trail_activate_inr={activate_inr:.2f} trigger_inr={trigger_inr:.2f}",
         )

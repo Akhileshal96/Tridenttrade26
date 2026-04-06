@@ -250,3 +250,17 @@ def test_tick_uses_single_wallet_sync_path(monkeypatch):
 
     tc.tick()
     assert calls["n"] == 1
+
+
+def test_wallet_off_market_auth_error_enters_cached_mode(monkeypatch):
+    reset_state()
+    tc.STATE["last_wallet"] = 1234.0
+    monkeypatch.setattr(tc, "append_log", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_is_market_hours", lambda _now: False)
+    monkeypatch.setattr(tc, "_cached_wallet_value", lambda: 1234.0)
+    monkeypatch.setattr(tc, "get_kite", lambda: type("K", (), {"margins": lambda self: (_ for _ in ()).throw(Exception("invalid token"))})())
+    monkeypatch.setattr(tc.CFG, "WALLET_AUTH_COOLDOWN_SEC", 600, raising=False)
+
+    tc._sync_wallet_and_caps(force=True)
+    assert tc.STATE.get("wallet_cached_mode_until") is not None
+    assert float(tc.STATE.get("wallet_net_inr") or 0.0) == 1234.0

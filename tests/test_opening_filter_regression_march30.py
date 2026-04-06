@@ -5,6 +5,7 @@ sys.path.insert(0, os.getcwd())
 
 import trading_cycle as tc
 import strategy_engine as se
+import pandas as pd
 
 
 def test_missing_spread_volume_range_maps_to_moderate(monkeypatch):
@@ -208,3 +209,21 @@ def test_scan_long_records_deterministic_skip_reason(monkeypatch):
     assert out == 0
     assert rec.get("symbol") == "INFY"
     assert rec.get("reason") == "mean_reversion_conditions_not_met"
+
+
+def test_opening_metrics_handles_multiindex_without_ambiguous_truth(monkeypatch):
+    cols = pd.MultiIndex.from_product([["Open", "High", "Low", "Close", "Volume"], ["^NSEI"]])
+    d1 = pd.DataFrame(
+        [[100, 101, 99, 100, 1000], [101, 103, 100, 102, 1500]],
+        columns=cols,
+        index=pd.date_range("2026-04-06", periods=2, freq="D"),
+    )
+    m5 = pd.DataFrame(
+        [[101, 102, 100, 101.5, 600], [101.5, 102, 101, 101.8, 650], [101.8, 102.2, 101.4, 102.0, 700]],
+        columns=cols,
+        index=pd.date_range("2026-04-06 03:45:00", periods=3, freq="5min", tz="UTC"),
+    )
+    monkeypatch.setattr(tc.yf, "download", lambda *a, **k: d1 if k.get("interval") == "1d" else m5)
+    out = tc._compute_opening_metrics()
+    assert out.get("feed_error") is False
+    assert out.get("data_state") in ("READY", "INCOMPLETE")
