@@ -855,7 +855,28 @@ def _bucket_inr(wallet_net: float) -> float:
     return max(bmin, min(bucket, bmax))
 
 
-def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float = 1.0):
+def _regime_size_multiplier(side: str, regime: str, trend_direction: str) -> float:
+    s = str(side or "BUY").upper()
+    rg = str(regime or "UNKNOWN").upper()
+    td = str(trend_direction or "UNKNOWN").upper()
+    if s == "BUY":
+        if rg in ("TRENDING", "TRENDING_UP") and td == "UP":
+            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.10) or 1.10)
+        if rg in ("VOLATILE", "UNKNOWN"):
+            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.85) or 0.85)
+        if rg == "SIDEWAYS":
+            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.95) or 0.95)
+    else:
+        if rg in ("WEAK", "TRENDING_DOWN") and td == "DOWN":
+            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.10) or 1.10)
+        if rg in ("VOLATILE", "UNKNOWN"):
+            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.85) or 0.85)
+        if rg == "SIDEWAYS":
+            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.90) or 0.90)
+    return 1.0
+
+
+def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float = 1.0, side: str = "BUY", regime: str = "UNKNOWN", trend_direction: str = "UNKNOWN", family: str = ""):
     wallet = float(STATE.get("wallet_net_inr") or 0.0)
     if wallet <= 0:
         wallet = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
@@ -864,52 +885,77 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     open_exposure = float(_current_exposure_inr())
     open_count = int(_open_positions_count())
     max_concurrent = max(1, int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8))
-    remaining_slots = max(1, max_concurrent - open_count)
-
     deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 60.0) or 60.0)))
     deployable_capital = wallet * (deployable_pct / 100.0)
-    remaining_capital = max(0.0, deployable_capital - open_exposure)
-    base_slot_capital = (remaining_capital / remaining_slots) if remaining_slots > 0 else remaining_capital
+    usable_capital = max(0.0, deployable_capital - open_exposure)
+    exposure_remaining = max(0.0, _max_exposure_inr() - open_exposure)
 
     no_entry_cycles = int(STATE.get("no_entry_cycles") or 0)
     sig_seen = int(STATE.get("signals_seen_window") or 0)
     ent_done = int(STATE.get("entries_executed_window") or 0)
-    fill_rate = (float(ent_done) / float(sig_seen)) if sig_seen > 0 else 0.0
-    opportunity_bias = 1.0
-    if remaining_slots >= 3 and no_entry_cycles <= 1:
-        opportunity_bias = 0.90
-    elif remaining_slots <= 1 or no_entry_cycles >= 4:
-        opportunity_bias = 1.15
-    if sig_seen >= 10 and remaining_slots >= 3:
-        opportunity_bias = min(opportunity_bias, 0.85)
-    elif sig_seen >= 6 and fill_rate <= 0.15:
-        opportunity_bias = max(opportunity_bias, 1.20)
-
     tier_u = str(tier or "FULL").upper()
     tw = float(tier_weight or 1.0)
-    target_capital = base_slot_capital * max(0.1, tw) * opportunity_bias
+    slot_pressure = max(0.0, 1.0 - (open_count / float(max_concurrent)))
+    if slot_pressure >= 0.75:
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_HIGH", 0.42) or 0.42)
+    elif slot_pressure >= 0.50:
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_MED", 0.30) or 0.30)
+    else:
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_LOW", 0.20) or 0.20)
+    confidence_mult = max(0.2, tw)
+    if tier_u == "FULL":
+        confidence_mult *= float(_cfg_get("SIZE_CONF_FULL_MULT", 1.20) or 1.20)
+    elif tier_u == "REDUCED":
+        confidence_mult *= float(_cfg_get("SIZE_CONF_REDUCED_MULT", 1.00) or 1.00)
+    else:
+        confidence_mult *= float(_cfg_get("SIZE_CONF_MICRO_MULT", 0.60) or 0.60)
+    regime_mult = _regime_size_multiplier(side, regime, trend_direction)
+    utilization = (open_exposure / deployable_capital) if deployable_capital > 0 else 0.0
+    uplift = 1.0
+    if tier_u == "FULL" and open_count <= 1 and utilization < float(_cfg_get("LOW_UTILIZATION_PCT", 0.35) or 0.35):
+        uplift = min(float(_cfg_get("MAX_UTILIZATION_UPLIFT", 1.20) or 1.20), 1.0 + max(0, no_entry_cycles) * 0.03)
+    opportunity_pressure_mult = max(0.70, min(1.30, (0.9 + slot_pressure * 0.4) * uplift))
+    base_target_capital = usable_capital * max(0.05, min(0.75, opportunity_share))
+    target_capital = base_target_capital * confidence_mult * regime_mult * opportunity_pressure_mult
+
     max_symbol_pct = max(1.0, min(100.0, float(_cfg_get("MAX_SYMBOL_ALLOCATION_PCT", 20.0) or 20.0)))
     symbol_cap = wallet * (max_symbol_pct / 100.0)
-    capital_cap = min(max(0.0, wallet_available), remaining_capital, symbol_cap)
+    capital_cap = min(max(0.0, wallet_available), usable_capital, symbol_cap, exposure_remaining)
     target_capital = max(0.0, min(target_capital, capital_cap))
 
     qty_from_capital = int(target_capital / price) if price > 0 else 0
-    stoploss_pct = max(0.01, float(_cfg_get("STOPLOSS_PCT", 2.0) or 2.0))
+    stoploss_pct = max(0.01, float(_cfg_get("SHORT_STOPLOSS_PCT", 1.2) if str(side).upper() == "SELL" else _cfg_get("STOPLOSS_PCT", 2.0)) or 2.0)
     risk_per_trade_pct = max(0.01, float(_cfg_get("RISK_PER_TRADE_PCT", 1.0) or 1.0))
     risk_amount = wallet * (risk_per_trade_pct / 100.0)
     per_share_risk = price * (stoploss_pct / 100.0) if price > 0 else 0.0
     risk_qty = int(risk_amount / per_share_risk) if per_share_risk > 0 else 0
 
     qty = min(max(0, qty_from_capital), max(0, risk_qty))
+    if str(side or "BUY").upper() == "SELL":
+        short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
+        short_mult = float(_cfg_get("SHORT_SIZE_ALIGNED_MULT", 1.0) if short_aligned else _cfg_get("SHORT_SIZE_NON_ALIGNED_MULT", _cfg_get("SHORT_SIZE_MULTIPLIER", 0.5)) or 0.5)
+        qty = int(math.floor(qty * max(0.1, short_mult)))
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
     if size_factor < 1.0:
         qty = int(qty * max(0.1, size_factor))
     qty = qty if qty >= 1 else 0
+    open_positions = max(1, _open_positions_count())
+    avg_position_size = (open_exposure / float(open_positions)) if open_positions > 0 else 0.0
+    STATE["capital_utilization"] = {
+        "deployable_capital": float(deployable_capital),
+        "open_exposure": float(open_exposure),
+        "unused_deployable": float(max(0.0, deployable_capital - open_exposure)),
+        "utilization_pct": float((open_exposure / deployable_capital) * 100.0 if deployable_capital > 0 else 0.0),
+        "avg_position_size": float(avg_position_size),
+    }
     append_log(
         "INFO",
         "SIZE",
-        f"[SIZE] wallet={wallet:.2f} open_exposure={open_exposure:.2f} remaining_capital={remaining_capital:.2f} "
-        f"remaining_slots={remaining_slots} tier={tier_u} weight={tw:.2f} target_capital={target_capital:.2f} final_qty={qty}",
+        f"[SIZE] symbol={symbol} side={side} family={family or '-'} tier={tier_u} regime={regime}/{trend_direction} "
+        f"wallet_net={wallet:.2f} wallet_available={wallet_available:.2f} deployable_capital={deployable_capital:.2f} "
+        f"usable_capital={usable_capital:.2f} exposure_remaining={exposure_remaining:.2f} base_target_capital={base_target_capital:.2f} "
+        f"confidence_mult={confidence_mult:.2f} regime_mult={regime_mult:.2f} opportunity_pressure_mult={opportunity_pressure_mult:.2f} "
+        f"target_capital={target_capital:.2f} risk_qty={risk_qty} capital_qty={qty_from_capital} final_qty={qty} final_notional={(qty * price):.2f}",
     )
     return qty, qty_from_capital, risk_qty
 
@@ -2769,9 +2815,16 @@ def _maybe_enter_short_from_signal(sig):
     strategy_tag = "short_breakdown"
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)):
         strategy_tag = "mtf_confirmed_short"
-    qty, bucket_qty, risk_qty = _calc_qty(sym, entry, tier=str(decision.get("tier") or "BLOCK"), tier_weight=tier_mult)
-    mult = float(getattr(CFG, "SHORT_SIZE_MULTIPLIER", 0.5) or 0.5)
-    qty = max(1, int(math.floor(qty * mult))) if qty > 0 else 0
+    qty, bucket_qty, risk_qty = _calc_qty(
+        sym,
+        entry,
+        tier=str(decision.get("tier") or "BLOCK"),
+        tier_weight=tier_mult,
+        side="SELL",
+        regime=regime,
+        trend_direction=str((get_market_regime_snapshot() or {}).get("trend_direction") or STATE.get("last_trend_direction") or "UNKNOWN"),
+        family=str(strategy_family),
+    )
     qty = _apply_strategy_allocation(qty, strategy_tag)
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
@@ -2801,6 +2854,10 @@ def _maybe_enter_short_from_signal(sig):
         except Exception:
             pass
         _apply_skip_cooldown(sym, "qty_zero")
+        return False
+    min_notional = float(getattr(CFG, "MIN_MEANINGFUL_NOTIONAL_INR", 0.0) or 0.0)
+    if min_notional > 0 and (entry * qty) < min_notional:
+        append_log("INFO", "SKIP", f"{sym} reason=below_min_meaningful_notional notional={entry*qty:.2f} min={min_notional:.2f}")
         return False
 
     if not _can_open_new_trade(sym, entry, qty, momentum_positive=False):
@@ -2977,7 +3034,16 @@ def _maybe_enter_from_signal(sig):
             decision["tier"] = "MICRO"
             tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier("MICRO"))
             append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier=MICRO")
-    qty, bucket_qty, risk_qty = _calc_qty(sym, entry, tier=str(decision.get("tier") or "BLOCK"), tier_weight=tier_mult)
+    qty, bucket_qty, risk_qty = _calc_qty(
+        sym,
+        entry,
+        tier=str(decision.get("tier") or "BLOCK"),
+        tier_weight=tier_mult,
+        side="BUY",
+        regime=regime,
+        trend_direction=trend_direction,
+        family=str(strategy_family),
+    )
     if regime in ("WEAK", "TRENDING_DOWN"):
         mult = weak_size_mult
         if mult > 0:
@@ -3017,6 +3083,10 @@ def _maybe_enter_from_signal(sig):
         except Exception:
             pass
         _apply_skip_cooldown(sym, "qty_zero")
+        return False
+    min_notional = float(getattr(CFG, "MIN_MEANINGFUL_NOTIONAL_INR", 0.0) or 0.0)
+    if min_notional > 0 and (entry * qty) < min_notional:
+        append_log("INFO", "SKIP", f"{sym} reason=below_min_meaningful_notional notional={entry*qty:.2f} min={min_notional:.2f}")
         return False
 
     if not _can_open_new_trade(sym, entry, qty, momentum_positive=momentum_positive):
@@ -3157,6 +3227,7 @@ def get_status_text():
     regime_now = str(STATE.get("last_regime") or "UNKNOWN")
     bias = str(get_regime_entry_mode(regime_now) or "UNKNOWN")
     runtime_ver = str(_cfg_get("RUNTIME_VERSION", "unknown") or "unknown")
+    cu = dict(STATE.get("capital_utilization") or {})
     return (
         "📟 Trident Status\n\n"
         f"Runtime: {runtime_ver}\n"
@@ -3178,6 +3249,9 @@ def get_status_text():
         f"- Wallet Net: ₹{float(STATE.get('wallet_net_inr') or 0):.2f}\n"
         f"- Wallet Available: ₹{float(STATE.get('wallet_available_inr') or 0):.2f}\n"
         f"- Exposure: ₹{_current_exposure_inr():.2f} / ₹{_max_exposure_inr():.2f} ({RUNTIME.get('MAX_EXPOSURE_PCT')}%)\n"
+        f"- Deployable: ₹{float(cu.get('deployable_capital') or 0.0):.2f}\n"
+        f"- Unused Deployable: ₹{float(cu.get('unused_deployable') or 0.0):.2f}\n"
+        f"- Utilization: {float(cu.get('utilization_pct') or 0.0):.1f}% | Avg Position Size: ₹{float(cu.get('avg_position_size') or 0.0):.2f}\n"
         f"- Daily Loss Cap (hard): ₹{float(STATE.get('daily_loss_cap_inr') or 0):.2f}\n"
         f"- Profit Milestone (soft): ₹{float(STATE.get('daily_profit_milestone_inr') or 0):.2f}\n\n"
         "Open Trades:\n"
