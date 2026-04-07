@@ -154,7 +154,8 @@ def check_day_drawdown_guard(state: dict):
     unrealized = float(state.get("unrealized_now") or 0.0)
     giveback = max(0.0, peak - pnl)
     state["day_giveback_inr"] = giveback
-    append_log("INFO", "DAY", f"daily_loss_guard pnl={pnl:.2f} peak={peak:.2f} realized={realized:.2f} unrealized={unrealized:.2f} giveback={giveback:.2f}")
+    state["day_guard_reason"] = ""
+    append_log("INFO", "DAY", f"day_guard_eval pnl={pnl:.2f} peak={peak:.2f} realized={realized:.2f} unrealized={unrealized:.2f} giveback={giveback:.2f}")
 
     loss_cap = abs(float(state.get("daily_loss_cap_inr") or getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0) or 200.0))
     if loss_cap > 0 and pnl <= -loss_cap:

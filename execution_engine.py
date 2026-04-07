@@ -28,9 +28,10 @@ def close_position(close_position_fn, sym: str, reason: str, ltp_override=None):
     return close_position_fn(sym, reason=reason, ltp_override=ltp_override)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> float:
+def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: str = "LONG") -> float:
     position_value = float(entry) * max(1, int(qty))
     t = str(tier or "FULL").upper()
+    s = str(side or "LONG").upper()
     if t == "MICRO":
         pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.15) or 0.15) / 100.0
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_FLOOR_INR", 2.0) or 2.0)
@@ -40,6 +41,8 @@ def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> floa
     else:
         pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
+    if s == "SHORT" and position_value <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0):
+        floor = min(floor, float(getattr(CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0) or 3.0))
     dynamic = position_value * pct
     return max(floor, dynamic)
 
@@ -92,7 +95,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         trade["peak_pct"] = peak_pct
         trade["peak"] = peak_pct
 
-        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier)
+        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=side)
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
         if (not trail_active) and pnl_inr >= activate_inr:
@@ -102,7 +105,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             append_log("INFO", "TRAIL", f"{sym} activated pnl_inr={pnl_inr:.2f} activate_inr={activate_inr:.2f}")
 
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
-        if tier in ("REDUCED", "MICRO"):
+        if tier in ("REDUCED", "MICRO") or (side == "SHORT" and (entry * qty) <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0)):
             be_arm = float(getattr(CFG, "TRAIL_BREAKEVEN_ARM_INR", 4.5) or 4.5)
             if peak_pnl_inr >= be_arm:
                 trade["breakeven_armed"] = True

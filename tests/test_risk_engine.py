@@ -46,6 +46,12 @@ def test_daily_loss_guard_does_not_trigger_on_positive_day():
     assert state.get("day_guard_reason") != "daily_loss_guard"
 
 
+def test_zero_pnl_does_not_set_daily_loss_guard():
+    state = {"today_pnl": 0.0, "day_peak_pnl": 0.0, "daily_loss_cap_inr": 200.0}
+    assert re.check_day_drawdown_guard(state) is True
+    assert state.get("day_guard_reason") in ("", None)
+
+
 def test_profit_giveback_guard_triggers_on_positive_day_giveback(monkeypatch):
     monkeypatch.setattr(re.CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 20.0, raising=False)
     monkeypatch.setattr(re.CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 30.0, raising=False)

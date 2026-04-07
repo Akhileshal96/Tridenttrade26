@@ -66,3 +66,11 @@ def test_short_side_trailing_still_works(monkeypatch):
 
     ee.monitor_positions({}, positions, lambda _s: 99.9, _close, lambda: False)  # pnl 1, below trigger 9
     assert closes and closes[-1][1] == "TRAIL"
+
+
+def test_small_short_uses_lower_trail_floor(monkeypatch):
+    monkeypatch.setattr(ee.CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0, raising=False)
+    monkeypatch.setattr(ee.CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0, raising=False)
+    monkeypatch.setattr(ee.CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0, raising=False)
+    v = ee._calc_trail_activate_inr(100.0, 10, "FULL", side="SHORT")
+    assert v <= 4.0

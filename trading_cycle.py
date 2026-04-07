@@ -920,10 +920,13 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
 
     max_symbol_pct = max(1.0, min(100.0, float(_cfg_get("MAX_SYMBOL_ALLOCATION_PCT", 20.0) or 20.0)))
     symbol_cap = wallet * (max_symbol_pct / 100.0)
-    capital_cap = min(max(0.0, wallet_available), usable_capital, symbol_cap, exposure_remaining)
-    target_capital = max(0.0, min(target_capital, capital_cap))
+    affordability_cap = max(0.0, wallet_available)
+    symbol_capital_cap = min(affordability_cap, usable_capital, symbol_cap, exposure_remaining)
+    target_capital = max(0.0, min(target_capital, symbol_capital_cap))
 
     qty_from_capital = int(target_capital / price) if price > 0 else 0
+    symbol_cap_qty = int(symbol_cap / price) if price > 0 else 0
+    affordability_qty = int(affordability_cap / price) if price > 0 else 0
     stoploss_pct = max(0.01, float(_cfg_get("SHORT_STOPLOSS_PCT", 1.2) if str(side).upper() == "SELL" else _cfg_get("STOPLOSS_PCT", 2.0)) or 2.0)
     risk_per_trade_pct = max(0.01, float(_cfg_get("RISK_PER_TRADE_PCT", 1.0) or 1.0))
     risk_amount = wallet * (risk_per_trade_pct / 100.0)
@@ -931,14 +934,20 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     risk_qty = int(risk_amount / per_share_risk) if per_share_risk > 0 else 0
 
     qty = min(max(0, qty_from_capital), max(0, risk_qty))
+    reason_chain = [f"capital_qty={qty_from_capital}", f"risk_qty={risk_qty}", f"symbol_cap_qty={symbol_cap_qty}", f"affordability_qty={affordability_qty}"]
+    short_policy_qty = qty
     if str(side or "BUY").upper() == "SELL":
         short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
         short_mult = float(_cfg_get("SHORT_SIZE_ALIGNED_MULT", 1.0) if short_aligned else _cfg_get("SHORT_SIZE_NON_ALIGNED_MULT", _cfg_get("SHORT_SIZE_MULTIPLIER", 0.5)) or 0.5)
-        qty = int(math.floor(qty * max(0.1, short_mult)))
+        short_policy_qty = int(math.floor(qty * max(0.1, short_mult)))
+        qty = short_policy_qty
+        reason_chain.append(f"short_policy_qty={short_policy_qty}")
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
     if size_factor < 1.0:
         qty = int(qty * max(0.1, size_factor))
+        reason_chain.append(f"size_factor_qty={qty}")
     qty = qty if qty >= 1 else 0
+    reason_chain.append(f"final_qty={qty}")
     open_positions = max(1, _open_positions_count())
     avg_position_size = (open_exposure / float(open_positions)) if open_positions > 0 else 0.0
     STATE["capital_utilization"] = {
@@ -955,7 +964,9 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
         f"wallet_net={wallet:.2f} wallet_available={wallet_available:.2f} deployable_capital={deployable_capital:.2f} "
         f"usable_capital={usable_capital:.2f} exposure_remaining={exposure_remaining:.2f} base_target_capital={base_target_capital:.2f} "
         f"confidence_mult={confidence_mult:.2f} regime_mult={regime_mult:.2f} opportunity_pressure_mult={opportunity_pressure_mult:.2f} "
-        f"target_capital={target_capital:.2f} risk_qty={risk_qty} capital_qty={qty_from_capital} final_qty={qty} final_notional={(qty * price):.2f}",
+        f"target_capital={target_capital:.2f} risk_qty={risk_qty} capital_qty={qty_from_capital} symbol_cap_qty={symbol_cap_qty} "
+        f"short_policy_qty={short_policy_qty} affordability_qty={affordability_qty} final_qty={qty} final_notional={(qty * price):.2f} "
+        f"final_qty_reason_chain={'|'.join(reason_chain)}",
     )
     return qty, qty_from_capital, risk_qty
 
@@ -1893,7 +1904,7 @@ def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[f
     return float(pnl_inr), float(pnl_pct)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> float:
+def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: str = "LONG") -> float:
     position_value = float(entry) * max(1, int(qty))
     t = str(tier or "FULL").upper()
     if t == "MICRO":
@@ -1905,6 +1916,8 @@ def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL") -> floa
     else:
         pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
+    if str(side or "LONG").upper() == "SHORT" and position_value <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0):
+        floor = min(floor, float(getattr(CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0) or 3.0))
     dynamic = position_value * pct
     return max(floor, dynamic)
 
@@ -2681,17 +2694,28 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
     rs_vs_nifty = q.get("rs_vs_nifty")
     max_rs_short = float(getattr(CFG, "SHORT_RS_MAX_VS_NIFTY", -0.2) or -0.2)
     base_rs_ok = (rs_vs_nifty is None) or (float(rs_vs_nifty) <= max_rs_short)
+    regime_u = str(STATE.get("last_regime") or "UNKNOWN").upper()
+    trend_u = str(STATE.get("last_trend_direction") or "UNKNOWN").upper()
+    entry_mode_u = str(get_regime_entry_mode(regime_u) or "UNKNOWN").upper()
+    short_relaxed = regime_u == "WEAK" and trend_u == "DOWN" and entry_mode_u == "SHORT_PRIMARY"
+    vol_relax_factor = float(getattr(CFG, "SHORT_WEAK_DOWN_VOL_RELAX_FACTOR", 0.90) or 0.90) if short_relaxed else 1.0
+    sma_tol_pct = float(getattr(CFG, "SHORT_SMA20_TOLERANCE_PCT", 0.12) or 0.12)
+    sma_tol = max(0.0, sma20 * (sma_tol_pct / 100.0))
+    bearish_slope = sma20 < sma20_prev
+    below_or_near_sma = (price < sma20) or (abs(price - sma20) <= sma_tol and bearish_slope)
+    if short_relaxed:
+        append_log("INFO", "SIG", f"short_relaxed_filters=1 regime={regime_u} trend={trend_u} entry_mode={entry_mode_u} vol_relax_factor={vol_relax_factor:.2f} sma_tol_pct={sma_tol_pct:.2f}")
     fam = str(strategy_family or "short_breakdown").strip().lower()
     reason = ""
     if fam == "outlier_short":
         outlier_rs = (rs_vs_nifty is None) or (float(rs_vs_nifty) <= (max_rs_short - 0.3))
-        outlier_vol = vol_score > max(1.4, float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2))
+        outlier_vol = vol_score > (max(1.4, float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2)) * vol_relax_factor)
         outlier_dist = price < (sma20 * 0.997)
-        cond = price < sma20 and sma20 < sma20_prev and outlier_vol and outlier_rs and outlier_dist
+        cond = below_or_near_sma and bearish_slope and outlier_vol and outlier_rs and outlier_dist
         if not cond:
-            if not (price < sma20):
+            if not below_or_near_sma:
                 reason = "price_not_below_sma20"
-            elif not (sma20 < sma20_prev):
+            elif not bearish_slope:
                 reason = "sma20_not_bearish"
             elif not outlier_vol:
                 reason = "volume_score_below_threshold"
@@ -2700,11 +2724,13 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
             else:
                 reason = "strategy_family_conditions_not_met"
     elif fam == "fallback_short":
-        fallback_vol = vol_score > float(getattr(CFG, "FALLBACK_MIN_VOLUME_SCORE", 1.2) or 1.2)
-        cond = price < sma20 and fallback_vol and base_rs_ok
+        fallback_vol = vol_score > (float(getattr(CFG, "FALLBACK_MIN_VOLUME_SCORE", 1.2) or 1.2) * vol_relax_factor)
+        cond = below_or_near_sma and fallback_vol and base_rs_ok and bearish_slope
         if not cond:
-            if not (price < sma20):
+            if not below_or_near_sma:
                 reason = "price_not_below_sma20"
+            elif not bearish_slope:
+                reason = "sma20_not_bearish"
             elif not fallback_vol:
                 reason = "volume_score_below_threshold"
             elif not base_rs_ok:
@@ -2712,13 +2738,13 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
             else:
                 reason = "strategy_family_conditions_not_met"
     else:
-        short_vol_thr = float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2)
-        cond = price < sma20 and sma20 < sma20_prev and vol_score > short_vol_thr and base_rs_ok
+        short_vol_thr = float(getattr(CFG, "SHORT_MIN_VOLUME_SCORE", 1.2) or 1.2) * vol_relax_factor
+        cond = below_or_near_sma and bearish_slope and vol_score > short_vol_thr and base_rs_ok
         fam = "short_breakdown"
         if not cond:
-            if not (price < sma20):
+            if not below_or_near_sma:
                 reason = "price_not_below_sma20"
-            elif not (sma20 < sma20_prev):
+            elif not bearish_slope:
                 reason = "sma20_not_bearish"
             elif not (vol_score > short_vol_thr):
                 reason = "volume_score_below_threshold"
@@ -3457,7 +3483,7 @@ def get_trailing_status_text():
         trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
         trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
         tier = str(t.get("confidence_tier") or "FULL").upper()
-        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier)
+        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=str(t.get("side") or "LONG"))
         trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
 
@@ -3478,13 +3504,15 @@ def get_trailing_status_text():
 def _scan_short_entries(universe: list, max_new: int, strategy_family: str = "short_breakdown", universe_source: str = "primary") -> int:
     opened = 0
     held = set(_positions().keys())
-    for sym in [s for s in universe if s not in held][: max_new * 2]:
+    rejects = {}
+    for sym in [s for s in universe if s not in held][: max_new * 3]:
         if opened >= max_new:
             break
         append_log("INFO", "SCAN", f"Scanning {sym}")
         sig = generate_short_signal(sym, strategy_family=strategy_family)
         if not sig:
             rej = str(STATE.get("last_short_reject_reasons", {}).get(sym) or "no_short_signal")
+            rejects[rej] = int(rejects.get(rej) or 0) + 1
             SA.record_skipped_signal(
                 {
                     "symbol": sym,
@@ -3499,6 +3527,9 @@ def _scan_short_entries(universe: list, max_new: int, strategy_family: str = "sh
         sig.setdefault("universe_source", universe_source or "primary")
         if _maybe_enter_short_from_signal(sig):
             opened += 1
+    if rejects:
+        summary = ",".join([f"{k}:{v}" for k, v in sorted(rejects.items(), key=lambda x: x[1], reverse=True)[:5]])
+        append_log("INFO", "SCAN", f"short_reject_summary family={strategy_family} {summary}")
     return opened
 
 
@@ -3801,7 +3832,7 @@ def tick():
         STATE["active_no_setup_cycles"] = 0
         STATE["fallback_mode_active"] = False
 
-    dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 5) or 5)
+    dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 4) or 4)
     if int(STATE.get("top3_dry_cycles") or 0) >= dry_thr:
         append_log("WARN", "HEALTH", f"[HEALTH] top3 dry for {dry_thr} cycles -> recomputing")
         selected_families = _refresh_active_strategy_families(
@@ -3813,7 +3844,7 @@ def tick():
         )
         append_log("INFO", "HEALTH", "[HEALTH] top3 dry -> expanding to fallback universe")
 
-    trigger_n = int(_cfg_get("FALLBACK_TRIGGER_CYCLES", 5) or 5)
+    trigger_n = int(_cfg_get("FALLBACK_TRIGGER_CYCLES", 4) or 4)
     if STATE.get("no_entry_cycles", 0) >= trigger_n:
         if not STATE.get("fallback_mode_active"):
             append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
