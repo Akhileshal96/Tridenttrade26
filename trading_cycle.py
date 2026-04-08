@@ -19,7 +19,13 @@ from log_store import append_log
 import strategy_engine as SE
 from strategy_engine import generate_signal, generate_mean_reversion_signal, generate_vwap_ema_signal, generate_pullback_signal
 from excluded_store import load_excluded, add_symbol, remove_symbol
-from execution_engine import monitor_positions as ee_monitor_positions, process_entries as ee_process_entries, force_exit_all as ee_force_exit_all
+from execution_engine import (
+    monitor_positions as ee_monitor_positions,
+    process_entries as ee_process_entries,
+    force_exit_all as ee_force_exit_all,
+    _calc_trail_activate_inr as ee_calc_trail_activate_inr,
+    _dynamic_trail_levels as ee_dynamic_trail_levels,
+)
 import risk_engine as RISK
 import research_engine as RE
 from universe_builder import SECTOR_MAP
@@ -1904,24 +1910,6 @@ def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[f
     return float(pnl_inr), float(pnl_pct)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: str = "LONG") -> float:
-    position_value = float(entry) * max(1, int(qty))
-    t = str(tier or "FULL").upper()
-    if t == "MICRO":
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.15) or 0.15) / 100.0
-        floor = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_FLOOR_INR", 2.0) or 2.0)
-    elif t == "REDUCED":
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_PCT", 0.25) or 0.25) / 100.0
-        floor = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_FLOOR_INR", 3.0) or 3.0)
-    else:
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
-        floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
-    if str(side or "LONG").upper() == "SHORT" and position_value <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0):
-        floor = min(floor, float(getattr(CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0) or 3.0))
-    dynamic = position_value * pct
-    return max(floor, dynamic)
-
-
 def _htf_fetch(symbol: str, days: int = 20) -> pd.DataFrame:
     try:
         token = token_for_symbol(symbol)
@@ -3480,17 +3468,18 @@ def get_trailing_status_text():
         peak_pnl_inr = float(t.get("peak_pnl_inr") or 0.0)
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
 
-        trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
-        trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
         tier = str(t.get("confidence_tier") or "FULL").upper()
-        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=str(t.get("side") or "LONG"))
-        trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
+        activate_inr = ee_calc_trail_activate_inr(entry, qty, tier=tier, side=side)
+        min_locked_pnl, allowed_giveback_inr = ee_dynamic_trail_levels(peak_pnl_inr, tier)
+        trigger_inr = max(min_locked_pnl, peak_pnl_inr - allowed_giveback_inr)
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
 
         rows.append(
             f"- {sym} qty={qty} entry={entry:.2f} ltp={ltp:.2f} value={value:.2f} "
             f"pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} "
-            f"trail_active={trail_active} tier={tier} activate@₹{activate_inr:.2f} trigger<=₹{trigger_inr:.2f}"
+            f"trail_active={trail_active} tier={tier} activate_inr={activate_inr:.2f} "
+            f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} "
+            f"trigger_inr={trigger_inr:.2f}"
         )
 
     if not rows:
