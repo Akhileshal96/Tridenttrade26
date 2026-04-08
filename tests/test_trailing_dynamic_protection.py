@@ -11,7 +11,7 @@ def _mk_trade(tier: str):
 
 
 def test_trail_activation_threshold_full():
-    assert ee._calc_trail_activate_inr(100.0, 10, "FULL") == 8.0
+    assert ee._calc_trail_activate_inr(100.0, 10, "FULL") == 5.0
 
 
 def test_trail_activation_threshold_reduced():
@@ -54,8 +54,7 @@ def test_short_side_trailing_still_works(monkeypatch):
             "peak_pnl_inr": 20.0,
         }
     }
-    monkeypatch.setattr(ee.CFG, "TRAIL_LOCK_RATIO", 0.5, raising=False)
-    monkeypatch.setattr(ee.CFG, "TRAIL_BUFFER_INR", 1.0, raising=False)
+    monkeypatch.setattr(ee.CFG, "TRAIL_BE_ARM_FULL_INR", 50.0, raising=False)
 
     closes = []
 
@@ -64,7 +63,7 @@ def test_short_side_trailing_still_works(monkeypatch):
         positions.pop(sym, None)
         return True
 
-    ee.monitor_positions({}, positions, lambda _s: 99.9, _close, lambda: False)  # pnl 1, below trigger 9
+    ee.monitor_positions({}, positions, lambda _s: 99.9, _close, lambda: False)
     assert closes and closes[-1][1] == "TRAIL"
 
 

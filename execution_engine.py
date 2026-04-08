@@ -33,18 +33,36 @@ def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: s
     t = str(tier or "FULL").upper()
     s = str(side or "LONG").upper()
     if t == "MICRO":
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.15) or 0.15) / 100.0
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_PCT", 0.18) or 0.18) / 100.0
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_MICRO_FLOOR_INR", 2.0) or 2.0)
     elif t == "REDUCED":
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_PCT", 0.25) or 0.25) / 100.0
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_PCT", 0.22) or 0.22) / 100.0
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_REDUCED_FLOOR_INR", 3.0) or 3.0)
     else:
-        pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.40) or 0.40) / 100.0
-        floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 8.0) or 8.0)
+        pct = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_PCT", 0.30) or 0.30) / 100.0
+        floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 5.0) or 5.0)
     if s == "SHORT" and position_value <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0):
         floor = min(floor, float(getattr(CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0) or 3.0))
     dynamic = position_value * pct
     return max(floor, dynamic)
+
+
+def _dynamic_trail_levels(peak_pnl_inr: float, tier: str) -> tuple[float, float]:
+    t = str(tier or "FULL").upper()
+    if t == "MICRO":
+        be_arm = float(getattr(CFG, "TRAIL_BE_ARM_MICRO_INR", 2.5) or 2.5)
+        min_lock_floor = float(getattr(CFG, "TRAIL_BE_LOCK_MICRO_INR", 0.1) or 0.1)
+    elif t == "REDUCED":
+        be_arm = float(getattr(CFG, "TRAIL_BE_ARM_REDUCED_INR", 4.0) or 4.0)
+        min_lock_floor = float(getattr(CFG, "TRAIL_BE_LOCK_REDUCED_INR", 0.2) or 0.2)
+    else:
+        be_arm = float(getattr(CFG, "TRAIL_BE_ARM_FULL_INR", 6.0) or 6.0)
+        min_lock_floor = float(getattr(CFG, "TRAIL_BE_LOCK_FULL_INR", 0.5) or 0.5)
+    if peak_pnl_inr < be_arm:
+        return 0.0, max(2.0, peak_pnl_inr * 0.60)
+    if peak_pnl_inr < (be_arm * 2.0):
+        return min_lock_floor, max(2.0, peak_pnl_inr * 0.45)
+    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5, peak_pnl_inr * 0.30)
 
 
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
@@ -104,15 +122,10 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             trade["trailing_active"] = True
             append_log("INFO", "TRAIL", f"{sym} activated pnl_inr={pnl_inr:.2f} activate_inr={activate_inr:.2f}")
 
-        trigger_inr = (peak_pnl_inr * trail_lock_ratio) - trail_buffer_inr
-        if tier in ("REDUCED", "MICRO") or (side == "SHORT" and (entry * qty) <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0)):
-            be_arm = float(getattr(CFG, "TRAIL_BREAKEVEN_ARM_INR", 4.5) or 4.5)
-            if peak_pnl_inr >= be_arm:
-                trade["breakeven_armed"] = True
-        if bool(trade.get("breakeven_armed")) and pnl_inr <= float(getattr(CFG, "TRAIL_BREAKEVEN_LOCK_INR", 0.2) or 0.2):
-            append_log("WARN", "EXIT", f"{sym} reason=BREAKEVEN_LOCK pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} tier={tier}")
-            close_position(sym, reason="BREAKEVEN_LOCK", ltp_override=ltp)
-            continue
+        min_locked_pnl, allowed_giveback_inr = _dynamic_trail_levels(peak_pnl_inr, tier)
+        trigger_inr = max(min_locked_pnl, peak_pnl_inr - allowed_giveback_inr)
+        if min_locked_pnl > 0:
+            trade["breakeven_armed"] = True
 
         if check_stoploss(pnl_pct, side=side):
             close_position(sym, reason="SL", ltp_override=ltp)
@@ -121,18 +134,20 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         append_log(
             "INFO",
             "RISK",
-            f"[RISK] {sym} qty={qty} tier={tier} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
-            f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} "
-            f"trail_activate_inr={activate_inr:.2f} trigger_inr={trigger_inr:.2f}",
+            f"[RISK] {sym} side={side} qty={qty} tier={tier} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
+            f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} activate_inr={activate_inr:.2f} "
+            f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} trigger_inr={trigger_inr:.2f}",
         )
 
         if check_trailing(trade, pnl_inr, trigger_inr):
+            reason = "BREAKEVEN_LOCK" if (min_locked_pnl > 0 and pnl_inr <= min_locked_pnl) else "TRAIL"
             append_log(
                 "WARN",
                 "EXIT",
-                f"{sym} reason=TRAIL pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} trigger_inr={trigger_inr:.2f}",
+                f"{sym} reason={reason} pnl_inr={pnl_inr:.2f} peak_pnl_inr={peak_pnl_inr:.2f} "
+                f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} trigger_inr={trigger_inr:.2f}",
             )
-            close_position(sym, reason="TRAIL", ltp_override=ltp)
+            close_position(sym, reason=reason, ltp_override=ltp)
 
 
 def process_entries(universe, positions: dict, signal_fn, try_enter_fn, max_new=5):
