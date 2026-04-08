@@ -71,3 +71,53 @@ def tail_today():
             if ln.startswith(today):
                 out.append(ln)
     return "".join(out) if out else "(no logs for today yet)"
+
+
+def _parse_hhmm_to_minutes(value: str):
+    """Parse HH:MM to absolute minutes (00:00 -> 0). Return None on invalid input."""
+    try:
+        hh_str, mm_str = str(value).strip().split(":", 1)
+        hh = int(hh_str)
+        mm = int(mm_str)
+    except Exception:
+        return None
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+    return hh * 60 + mm
+
+
+def tail_trading_hours_today(start_hhmm: str = "09:15", end_hhmm: str = "15:30"):
+    """Return today's log lines within trading hours (IST) as text."""
+    if not os.path.exists(LOG_FILE):
+        return "(no logs yet)"
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    smin = _parse_hhmm_to_minutes(start_hhmm)
+    emin = _parse_hhmm_to_minutes(end_hhmm)
+    if smin is None or emin is None:
+        smin, emin = 9 * 60 + 15, 15 * 60 + 30
+    elif smin > emin:
+        smin, emin = emin, smin
+
+    out = []
+    with open(LOG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+        for ln in f:
+            if not ln.startswith(today):
+                continue
+            # format: YYYY-MM-DD HH:MM:SS | LEVEL | [TAG] ...
+            try:
+                hh = int(ln[11:13])
+                mm = int(ln[14:16])
+                m = hh * 60 + mm
+            except Exception:
+                continue
+            if smin <= m <= emin:
+                out.append(ln)
+    return "".join(out) if out else "(no trading-hour logs for today yet)"
+
+
+def clear_logs():
+    """Truncate main log file safely."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write("")
+    return LOG_FILE
