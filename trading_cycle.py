@@ -1260,10 +1260,53 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     return True
 
 
-def _apply_strategy_allocation(qty: int, strategy_tag: str) -> int:
+def _apply_strategy_allocation(
+    qty: int,
+    strategy_tag: str,
+    *,
+    tier: str = "",
+    side: str = "",
+    regime: str = "",
+    trend_direction: str = "",
+) -> int:
+    pre_qty = max(0, int(qty))
     mult, reason = SA.get_strategy_multiplier(strategy_tag, CFG)
-    append_log("INFO", "ALLOC", f"strategy={strategy_tag} multiplier={mult:.2f} reason={reason}")
-    return max(0, int(math.floor(max(0, qty) * max(0.0, mult))))
+    post_qty = max(0, int(math.floor(pre_qty * max(0.0, mult))))
+
+    tier_u = str(tier or "").upper()
+    side_u = str(side or "").upper()
+    regime_u = str(regime or "").upper()
+    trend_u = str(trend_direction or "").upper()
+    mtf_tag_ok = strategy_tag in ("mtf_confirmed_long", "mtf_confirmed_short")
+    tier_ok = tier_u == "FULL" and tier_u != "MICRO"
+    if side_u in ("BUY", "LONG"):
+        regime_aligned = (regime_u == "TRENDING_UP") or (regime_u == "TRENDING" and trend_u == "UP")
+    else:
+        regime_aligned = (regime_u == "WEAK") or (regime_u == "TRENDING_DOWN" and trend_u == "DOWN")
+    floor_override = bool(
+        reason == "low_expectancy"
+        and pre_qty >= 1
+        and post_qty <= 0
+        and mtf_tag_ok
+        and tier_ok
+        and regime_aligned
+    )
+    if floor_override:
+        post_qty = 1
+        append_log(
+            "INFO",
+            "ALLOC",
+            f"allocation_floor_override=1 strategy={strategy_tag} tier={tier_u or '-'} regime={regime_u or '-'} "
+            f"trend={trend_u or '-'} side={side_u or '-'} original_qty={pre_qty} final_qty={post_qty} reason={reason}",
+        )
+
+    append_log(
+        "INFO",
+        "ALLOC",
+        f"strategy={strategy_tag} pre_allocation_qty={pre_qty} allocation_multiplier={mult:.2f} "
+        f"allocation_reason={reason} post_allocation_qty={post_qty} allocation_floor_override={(1 if floor_override else 0)}",
+    )
+    return post_qty
 
 
 def _close_all_open_trades(reason="MANUAL"):
@@ -2839,7 +2882,14 @@ def _maybe_enter_short_from_signal(sig):
         trend_direction=str((get_market_regime_snapshot() or {}).get("trend_direction") or STATE.get("last_trend_direction") or "UNKNOWN"),
         family=str(strategy_family),
     )
-    qty = _apply_strategy_allocation(qty, strategy_tag)
+    qty = _apply_strategy_allocation(
+        qty,
+        strategy_tag,
+        tier=str(decision.get("tier") or ""),
+        side="SHORT",
+        regime=regime,
+        trend_direction=str((get_market_regime_snapshot() or {}).get("trend_direction") or STATE.get("last_trend_direction") or "UNKNOWN"),
+    )
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
@@ -3068,7 +3118,14 @@ def _maybe_enter_from_signal(sig):
         strategy_tag = "weak_market_long"
     if bool(getattr(CFG, "USE_MTF_CONFIRMATION", True)) and strategy_tag in ("primary_long", "weak_market_long"):
         strategy_tag = "mtf_confirmed_long"
-    qty = _apply_strategy_allocation(qty, strategy_tag)
+    qty = _apply_strategy_allocation(
+        qty,
+        strategy_tag,
+        tier=str(decision.get("tier") or ""),
+        side="LONG",
+        regime=regime,
+        trend_direction=trend_direction,
+    )
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
