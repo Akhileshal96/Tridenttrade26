@@ -1279,10 +1279,14 @@ def _apply_strategy_allocation(
     trend_u = str(trend_direction or "").upper()
     mtf_tag_ok = strategy_tag in ("mtf_confirmed_long", "mtf_confirmed_short")
     tier_ok = tier_u == "FULL" and tier_u != "MICRO"
-    if side_u in ("BUY", "LONG"):
-        regime_aligned = (regime_u == "TRENDING_UP") or (regime_u == "TRENDING" and trend_u == "UP")
+    is_long_side = side_u in ("BUY", "LONG")
+    is_short_side = side_u in ("SELL", "SHORT")
+    if is_long_side:
+        regime_aligned = (regime_u in ("TRENDING_UP", "TRENDING")) and trend_u == "UP"
+    elif is_short_side:
+        regime_aligned = (regime_u in ("WEAK", "TRENDING_DOWN")) and trend_u == "DOWN"
     else:
-        regime_aligned = (regime_u == "WEAK") or (regime_u == "TRENDING_DOWN" and trend_u == "DOWN")
+        regime_aligned = False
     floor_override = bool(
         reason == "low_expectancy"
         and pre_qty >= 1
@@ -1293,17 +1297,12 @@ def _apply_strategy_allocation(
     )
     if floor_override:
         post_qty = 1
-        append_log(
-            "INFO",
-            "ALLOC",
-            f"allocation_floor_override=1 strategy={strategy_tag} tier={tier_u or '-'} regime={regime_u or '-'} "
-            f"trend={trend_u or '-'} side={side_u or '-'} original_qty={pre_qty} final_qty={post_qty} reason={reason}",
-        )
 
     append_log(
         "INFO",
         "ALLOC",
-        f"strategy={strategy_tag} pre_allocation_qty={pre_qty} allocation_multiplier={mult:.2f} "
+        f"strategy={strategy_tag} tier={tier_u or '-'} side={side_u or '-'} regime={regime_u or '-'} trend_direction={trend_u or '-'} "
+        f"pre_allocation_qty={pre_qty} allocation_multiplier={mult:.2f} "
         f"allocation_reason={reason} post_allocation_qty={post_qty} allocation_floor_override={(1 if floor_override else 0)}",
     )
     return post_qty

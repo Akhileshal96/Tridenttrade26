@@ -25,7 +25,7 @@ def test_low_expectancy_full_aligned_mtf_short_gets_floor_override(monkeypatch):
         1,
         "mtf_confirmed_short",
         tier="FULL",
-        side="SHORT",
+        side="SELL",
         regime="TRENDING_DOWN",
         trend_direction="DOWN",
     )
@@ -67,6 +67,19 @@ def test_unaligned_regime_does_not_get_floor_override(monkeypatch):
         side="LONG",
         regime="WEAK",
         trend_direction="DOWN",
+    )
+    assert q == 0
+
+
+def test_non_mtf_strategy_does_not_get_floor_override(monkeypatch):
+    monkeypatch.setattr(tc.SA, "get_strategy_multiplier", lambda _tag, _cfg: (0.0, "low_expectancy"))
+    q = tc._apply_strategy_allocation(
+        1,
+        "primary_long",
+        tier="FULL",
+        side="LONG",
+        regime="TRENDING_UP",
+        trend_direction="UP",
     )
     assert q == 0
 
