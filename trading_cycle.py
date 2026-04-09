@@ -1287,7 +1287,7 @@ def _apply_strategy_allocation(
         regime_aligned = (regime_u in ("WEAK", "TRENDING_DOWN")) and trend_u == "DOWN"
     else:
         regime_aligned = False
-    floor_override = bool(
+    full_floor_override = bool(
         reason == "low_expectancy"
         and pre_qty >= 1
         and post_qty <= 0
@@ -1295,6 +1295,18 @@ def _apply_strategy_allocation(
         and tier_ok
         and regime_aligned
     )
+    reduced_sideways_flat_override = bool(
+        reason == "low_expectancy"
+        and pre_qty >= 1
+        and post_qty <= 0
+        and strategy_tag == "mtf_confirmed_long"
+        and tier_u == "REDUCED"
+        and tier_u != "MICRO"
+        and side_u in ("BUY", "LONG")
+        and regime_u == "SIDEWAYS"
+        and trend_u == "FLAT"
+    )
+    floor_override = bool(full_floor_override or reduced_sideways_flat_override)
     if floor_override:
         post_qty = 1
 
