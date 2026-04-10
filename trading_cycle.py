@@ -58,6 +58,7 @@ STATE = {
     "last_exit_ts": {},
     "skip_cooldown": {},
     "loss_streak": 0,
+    "consecutive_wins": 0,
     "reduce_size_factor": 1.0,
     "pause_entries_until": None,
     "halt_for_day": False,
@@ -145,6 +146,7 @@ _STATE_PERSIST_KEYS = [
     "today_pnl",
     "halt_for_day",
     "loss_streak",
+    "consecutive_wins",
     "reduce_size_factor",
     "day_peak_pnl",
     "profit_milestone_hit",
@@ -513,6 +515,7 @@ def _ensure_day_key():
             STATE["profit_milestone_hit"] = False
             STATE["cooldown_until"] = None
             STATE["loss_streak"] = 0
+            STATE["consecutive_wins"] = 0
             STATE["reduce_size_factor"] = 1.0
             STATE["pause_entries_until"] = None
             STATE["halt_for_day"] = False
@@ -1000,16 +1003,18 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     tw = float(tier_weight or 1.0)
     slot_pressure = max(0.0, 1.0 - (open_count / float(max_concurrent)))
     if slot_pressure >= 0.75:
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_HIGH", 0.42) or 0.42)
+        # Raised from 0.42 → 0.52: more slots free means larger per-trade allocation.
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_HIGH", 0.52) or 0.52)
     elif slot_pressure >= 0.50:
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_MED", 0.30) or 0.30)
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_MED", 0.38) or 0.38)
     else:
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_LOW", 0.20) or 0.20)
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_LOW", 0.25) or 0.25)
     confidence_mult = max(0.2, tw)
     if tier_u == "FULL":
         confidence_mult *= float(_cfg_get("SIZE_CONF_FULL_MULT", 1.20) or 1.20)
     elif tier_u == "REDUCED":
-        confidence_mult *= float(_cfg_get("SIZE_CONF_REDUCED_MULT", 1.00) or 1.00)
+        # Raised from 1.00 → 1.10: creates meaningful 3-tier gradient FULL=1.20 REDUCED=1.10 MICRO=0.60.
+        confidence_mult *= float(_cfg_get("SIZE_CONF_REDUCED_MULT", 1.10) or 1.10)
     else:
         confidence_mult *= float(_cfg_get("SIZE_CONF_MICRO_MULT", 0.60) or 0.60)
     regime_mult = _regime_size_multiplier(side, regime, trend_direction)
@@ -1049,6 +1054,26 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     if size_factor < 1.0:
         qty = int(qty * max(0.1, size_factor))
         reason_chain.append(f"size_factor_qty={qty}")
+
+    # Win-streak scaling: compound hot streaks instead of staying flat.
+    # Only active on FULL-tier TRENDING/TRENDING_UP setups — no uplift on weak/sideways.
+    loss_streak = int(STATE.get("loss_streak") or 0)
+    regime_u_local = str(regime or "UNKNOWN").upper()
+    if (
+        loss_streak == 0
+        and tier_u == "FULL"
+        and regime_u_local in ("TRENDING", "TRENDING_UP")
+        and size_factor >= 1.0
+    ):
+        recent_wins = int(STATE.get("consecutive_wins") or 0)
+        if recent_wins >= 2:
+            win_uplift = min(
+                float(_cfg_get("WIN_STREAK_MAX_UPLIFT", 1.30) or 1.30),
+                1.0 + 0.10 * min(recent_wins, 3),
+            )
+            qty = int(math.floor(qty * win_uplift))
+            reason_chain.append(f"win_streak_uplift={win_uplift:.2f}(wins={recent_wins})")
+
     qty = qty if qty >= 1 else 0
     reason_chain.append(f"final_qty={qty}")
     open_positions = max(1, _open_positions_count())
@@ -1239,16 +1264,22 @@ def _wait_for_fill(kite, order_id: str, fallback_price: float, timeout: float = 
 
 
 def _set_cooldown():
-    sec = int(_cfg_get("COOLDOWN_SECONDS", 120))
-    # Slightly relax cooldown after 09:30 for repeated valid MICRO/REDUCED entries.
+    # Tier-based cooldowns: FULL=45s, REDUCED=75s, MICRO=90s (flat 120s was leaving
+    # capital idle between fast momentum setups on FULL-tier entries).
     tier = str(STATE.get("entry_tier_for_cooldown") or "").upper()
+    if tier == "FULL":
+        sec = int(_cfg_get("COOLDOWN_FULL_SECONDS", 45))
+    elif tier == "REDUCED":
+        sec = int(_cfg_get("COOLDOWN_REDUCED_SECONDS", 75))
+    else:
+        sec = int(_cfg_get("COOLDOWN_SECONDS", 90))
     now = datetime.now(IST)
     post_0930 = now.time() >= dt_time(9, 30)
     if post_0930 and tier in ("MICRO", "REDUCED"):
         streak_key = "post0930_valid_tier_streak"
         streak = safe_update(STATE, streak_key, lambda v: int(v or 0) + 1)
         if streak >= 2:
-            sec = max(60, int(round(sec * 0.75)))
+            sec = max(30, int(round(sec * 0.75)))
             append_log("INFO", "COOLDOWN", f"[COOLDOWN] refinement applied tier={tier} streak={streak} sec={sec}")
     else:
         safe_set(STATE, "post0930_valid_tier_streak", 0)
@@ -2051,12 +2082,14 @@ def _weak_market_quality_metrics(symbol: str) -> dict:
 
 def passes_weak_market_filter(symbol: str, research_universe: list) -> tuple[bool, str, dict]:
     sym = (symbol or "").strip().upper()
-    top_n = int(getattr(CFG, "WEAK_MARKET_TOP_N", 10) or 10)
+    # Raised top_n from 10 → 20 and lowered min_score from 0.90 → 0.75.
+    # 0.90 was blocking top-25% setups in weak markets; now top-50% qualify.
+    top_n = int(getattr(CFG, "WEAK_MARKET_TOP_N", 20) or 20)
     if not is_top_ranked_symbol(sym, research_universe, top_n):
         return False, "not_top_ranked", {}
 
     score = _research_score_for_symbol(sym)
-    min_score = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 0.90) or 0.90)
+    min_score = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 0.75) or 0.75)
     if score is None or score < min_score:
         return False, "score_too_low", {"score": score}
 
@@ -2774,8 +2807,13 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
         done = int(STATE.get("micro_mode_trade_count") or 0)
         if done < max_trades:
             min_score = int(getattr(CFG, "MICRO_MODE_MIN_SCORE", 35) or 35)
-            micro_n = int(getattr(CFG, "ENTRY_MICRO_TOP_N", 5) or 5)
+            micro_n = int(getattr(CFG, "ENTRY_MICRO_TOP_N", 10) or 10)
             top_ranked = (not research_universe) or is_top_ranked_symbol(symbol, research_universe, micro_n)
+            # Score override: symbols ranked just outside top-N but with high score still qualify.
+            score_override_n = int(getattr(CFG, "ENTRY_MICRO_SCORE_OVERRIDE_N", 20) or 20)
+            score_override_min = int(getattr(CFG, "ENTRY_MICRO_SCORE_OVERRIDE_MIN", 65) or 65)
+            if not top_ranked and score >= score_override_min:
+                top_ranked = is_top_ranked_symbol(symbol, research_universe, score_override_n)
             if score >= min_score and top_ranked and tier == "BLOCK":
                 tier = "MICRO"
                 comps["micro_override"] = "active"
@@ -2785,10 +2823,18 @@ def _build_entry_confidence(symbol: str, side: str, sig: dict, regime: str, rese
         size_mult = min(size_mult, float(getattr(CFG, "MICRO_MODE_SIZE_MULTIPLIER", 0.25) or 0.25))
 
     if tier == "BLOCK" and rg == "SIDEWAYS" and htf_status in ("PARTIAL", "INSUFFICIENT_HISTORY") and ltf_ok:
-        tier = "MICRO"
-        score = max(score, int(_cfg_get("ENTRY_MICRO_MIN_SCORE", 45) or 45))
-        size_mult = _entry_tier_multiplier("MICRO")
-        comps["sideways_htf_softened"] = htf_status.lower()
+        # Score-tiered softening: high-confidence signals get REDUCED, lower get MICRO.
+        # Previously all SIDEWAYS HTF-partial setups collapsed to MICRO (60% size).
+        sideways_reduced_min = int(_cfg_get("SIDEWAYS_REDUCED_MIN_SCORE", 70) or 70)
+        if score >= sideways_reduced_min:
+            tier = "REDUCED"
+            size_mult = _entry_tier_multiplier("REDUCED")
+            comps["sideways_htf_softened"] = f"REDUCED(score={score})"
+        else:
+            tier = "MICRO"
+            score = max(score, int(_cfg_get("ENTRY_MICRO_MIN_SCORE", 45) or 45))
+            size_mult = _entry_tier_multiplier("MICRO")
+            comps["sideways_htf_softened"] = htf_status.lower()
 
     return {
         "score": score,
@@ -3247,20 +3293,30 @@ def _maybe_enter_from_signal(sig):
                 append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
                 return False
         elif regime == "SIDEWAYS" and htf_comp in ("partial", "insufficient_history"):
-            tier_mult = max(0.0, _entry_tier_multiplier("MICRO"))
-            decision["tier"] = "MICRO"
-            append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_{htf_comp.upper()}_SIDEWAYS tier=MICRO")
+            dscore = float(decision.get("score") or 0.0)
+            sideways_reduced_min = int(_cfg_get("SIDEWAYS_REDUCED_MIN_SCORE", 70) or 70)
+            if dscore >= sideways_reduced_min:
+                tier_mult = max(0.0, _entry_tier_multiplier("REDUCED"))
+                decision["tier"] = "REDUCED"
+                append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_{htf_comp.upper()}_SIDEWAYS tier=REDUCED score={dscore:.0f}")
+            else:
+                tier_mult = max(0.0, _entry_tier_multiplier("MICRO"))
+                decision["tier"] = "MICRO"
+                append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_{htf_comp.upper()}_SIDEWAYS tier=MICRO score={dscore:.0f}")
         else:
             append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
             return False
     else:
         tier_mult = float(decision.get("size_mult") or 0.0)
     if strategy_family in ("mean_reversion", "fallback_long") and regime == "SIDEWAYS" and trend_direction == "DOWN":
-        mode_sd = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "BLOCK") or "BLOCK").upper()
-        if mode_sd == "MICRO":
-            decision["tier"] = "MICRO"
-            tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier("MICRO"))
-            append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier=MICRO")
+        # Default changed from BLOCK to REDUCED — SIDEWAYS+DOWN has mean-reversion edge.
+        # BLOCK was leaving profitable setups entirely untouched.
+        mode_sd = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "REDUCED") or "REDUCED").upper()
+        if mode_sd in ("MICRO", "REDUCED"):
+            forced_tier = mode_sd if mode_sd in ("MICRO", "REDUCED") else "MICRO"
+            decision["tier"] = forced_tier
+            tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier(forced_tier))
+            append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier={forced_tier}")
     qty, bucket_qty, risk_qty = _calc_qty(
         sym,
         entry,
@@ -4058,7 +4114,9 @@ def tick():
             STATE["active_no_setup_cycles"] = 0
             STATE["fallback_mode_active"] = False
 
-    dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 4) or 4)
+    # Raised from 4 → 10 cycles: prevents reactive strategy family churn during brief
+    # choppy periods. 4 cycles (~2 min) was causing constant recomputes.
+    dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 10) or 10)
     if int(STATE.get("top3_dry_cycles") or 0) >= dry_thr:
         append_log("WARN", "HEALTH", f"[HEALTH] top3 dry for {dry_thr} cycles -> recomputing")
         selected_families = _refresh_active_strategy_families(
@@ -4070,7 +4128,9 @@ def tick():
         )
         append_log("INFO", "HEALTH", "[HEALTH] top3 dry -> expanding to fallback universe")
 
-    trigger_n = int(_cfg_get("FALLBACK_TRIGGER_CYCLES", 4) or 4)
+    # Reduced from 4 → 2 cycles: fallback universe activates faster (60s vs 120s)
+    # when the primary universe has no setups — less dead time.
+    trigger_n = int(_cfg_get("FALLBACK_TRIGGER_CYCLES", 2) or 2)
     if STATE.get("no_entry_cycles", 0) >= trigger_n:
         if not STATE.get("fallback_mode_active"):
             append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
@@ -4138,6 +4198,13 @@ def run_loop_forever():
     )
     _migrate_legacy_positions()
     _load_state_snapshot()
+    # Force a live wallet sync at startup — ensures last_wallet reflects the actual
+    # broker balance, not CAPITAL_INR fallback or a stale yesterday snapshot.
+    try:
+        _sync_wallet_and_caps(force=True)
+        append_log("INFO", "BOOT", f"startup_wallet_sync wallet_net={float(STATE.get('wallet_net_inr') or 0.0):.2f}")
+    except Exception as _e:
+        append_log("WARN", "BOOT", f"startup_wallet_sync_failed={_e}")
     if not _active_trade_universe():
         _load_research_universe_from_file()
     while True:

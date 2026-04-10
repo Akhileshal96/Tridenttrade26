@@ -123,11 +123,15 @@ def can_enter_trade(symbol: str, price: float, positions: dict, wallet: float, q
 
 def update_loss_streak(state: dict, result: float):
     streak = int(state.get("loss_streak") or 0)
+    wins = int(state.get("consecutive_wins") or 0)
     if result < 0:
         streak += 1
+        wins = 0
     else:
         streak = 0
+        wins += 1
     state["loss_streak"] = streak
+    state["consecutive_wins"] = wins
 
     if streak >= 4:
         state["halt_for_day"] = True

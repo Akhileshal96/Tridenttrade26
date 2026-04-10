@@ -176,7 +176,9 @@ def _optimal_f_multiplier(trades: list[dict], cfg) -> float:
     frac = float(getattr(cfg, "OPTIMAL_F_FRACTION", 0.25) or 0.25)
     raw = max(0.0, best_f * frac / 0.1)  # normalize around 10%
     lo = float(getattr(cfg, "OPTIMAL_F_MIN_MULTIPLIER", 0.25) or 0.25)
-    hi = float(getattr(cfg, "OPTIMAL_F_MAX_MULTIPLIER", 1.25) or 1.25)
+    # Raised default cap from 1.25 to 1.50 — allows proven edge strategies to deploy
+    # more capital instead of being capped at 25% above base.
+    hi = float(getattr(cfg, "OPTIMAL_F_MAX_MULTIPLIER", 1.50) or 1.50)
     return max(lo, min(hi, raw if raw > 0 else 1.0))
 
 
@@ -193,15 +195,28 @@ def get_strategy_multiplier(strategy_tag: str, cfg) -> tuple[float, str]:
     exp_half = float(getattr(cfg, "EXPECTANCY_HALF_SIZE", 10.0) or 10.0)
     disable_n = int(getattr(cfg, "DISABLE_NEGATIVE_LAST_N", 10) or 10)
     recent = [_safe_float(r.get("pnl_inr"), 0.0) for r in tag_rows[-disable_n:]]
-    if recent and sum(recent) < 0:
+    # Only hard-disable when loss is significant AND sample is large enough.
+    # Previously: any negative sum → multiplier=0, blocking recovering strategies.
+    disable_loss_threshold = float(getattr(cfg, "DISABLE_NEGATIVE_LOSS_THRESHOLD_INR", 500.0) or 500.0)
+    disable_min_sample = int(getattr(cfg, "DISABLE_NEGATIVE_MIN_SAMPLE", 15) or 15)
+    if recent and sum(recent) < -disable_loss_threshold and len(tag_rows) >= disable_min_sample:
         base = 0.0
         reason = "negative_recent"
+    elif recent and sum(recent) < 0 and len(tag_rows) >= disable_min_sample:
+        # Modest recent loss: throttle to 25% instead of full block so recovery is possible.
+        base = 0.25
+        reason = "negative_recent_throttled"
     elif s["expectancy"] >= exp_full:
         base = 1.0
         reason = "strong_expectancy"
     elif s["expectancy"] >= exp_half:
         base = 0.5
         reason = "moderate_expectancy"
+    elif s["expectancy"] > 0:
+        # Positive expectancy but below threshold: allocate 25% rather than
+        # collapsing to 0 and forcing the floor override to qty=1 on every trade.
+        base = 0.25
+        reason = "low_positive_expectancy"
     else:
         base = 0.0
         reason = "low_expectancy"

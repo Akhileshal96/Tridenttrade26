@@ -59,10 +59,13 @@ def _dynamic_trail_levels(peak_pnl_inr: float, tier: str) -> tuple[float, float]
         be_arm = float(getattr(CFG, "TRAIL_BE_ARM_FULL_INR", 6.0) or 6.0)
         min_lock_floor = float(getattr(CFG, "TRAIL_BE_LOCK_FULL_INR", 0.5) or 0.5)
     if peak_pnl_inr < be_arm:
-        return 0.0, max(2.0, peak_pnl_inr * 0.60)
+        # Early profit stage: allow 35% giveback (was 60% — too wide, exited too early)
+        return 0.0, max(2.0, peak_pnl_inr * 0.35)
     if peak_pnl_inr < (be_arm * 2.0):
-        return min_lock_floor, max(2.0, peak_pnl_inr * 0.45)
-    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5, peak_pnl_inr * 0.30)
+        # Breakeven stage: allow 30% giveback once BE armed (was 45%)
+        return min_lock_floor, max(2.0, peak_pnl_inr * 0.30)
+    # Strong profit stage: lock 10%, allow only 20% giveback (was 30%)
+    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5, peak_pnl_inr * 0.20)
 
 
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
