@@ -380,10 +380,15 @@ def _log_trade_event(event_tag: str, trade: dict):
     _append_runtime_event("trade_events", {"event": event_tag, **tr})
 
 
-def _positions():
+def _migrate_legacy_positions():
+    """One-time migration of legacy STATE layouts to the current positions dict.
+
+    Called once at startup (run_loop_forever) so _positions() stays a pure read.
+    Safe to call multiple times — migrated entries are skipped on repeat calls.
+    """
     pos = STATE.setdefault("positions", {})
 
-    def _normalize_trade_dict(sym: str, tr: dict):
+    def _normalize(sym: str, tr: dict):
         if not sym or not isinstance(tr, dict):
             return None
         entry = float(tr.get("entry") or tr.get("entry_price") or 0.0)
@@ -404,7 +409,7 @@ def _positions():
             "order_id": tr.get("order_id"),
         }
 
-    # backward compatibility: merge legacy multi-trade map if present
+    # merge legacy multi-trade map
     legacy_map = STATE.get("open_trades")
     if isinstance(legacy_map, dict) and legacy_map is not pos:
         migrated = 0
@@ -412,24 +417,24 @@ def _positions():
             sym = str(raw_sym or "").strip().upper()
             if not sym or sym in pos:
                 continue
-            norm = _normalize_trade_dict(sym, tr)
+            norm = _normalize(sym, tr)
             if norm:
                 pos[sym] = norm
                 migrated += 1
         if migrated:
             append_log("INFO", "STATE", f"Merged {migrated} legacy open_trades into positions")
 
-    # backward compatibility: migrate legacy single trade slot if present
+    # migrate legacy single trade slot
     legacy = STATE.get("open_trade")
     if legacy and isinstance(legacy, dict):
         sym = str(legacy.get("symbol") or "").strip().upper()
         if sym and sym not in pos:
-            norm = _normalize_trade_dict(sym, legacy)
+            norm = _normalize(sym, legacy)
             if norm:
                 pos[sym] = norm
                 append_log("INFO", "STATE", f"Migrated legacy open_trade -> positions for {sym}")
 
-    # ensure trailing keys exist for current runtime positions
+    # ensure trailing keys exist
     for tr in pos.values():
         if not isinstance(tr, dict):
             continue
@@ -437,9 +442,12 @@ def _positions():
         tr.setdefault("trail_active", bool(tr.get("trailing_active", False)))
         tr.setdefault("trailing_active", bool(tr.get("trail_active", False)))
 
-    # keep alias aligned
     STATE["open_trades"] = pos
-    return pos
+
+
+def _positions():
+    """Return the current open positions dict. Pure read — no side effects."""
+    return STATE.setdefault("positions", {})
 
 
 def _trade_entry_qty(trade: dict) -> tuple[float, int]:
@@ -1116,27 +1124,27 @@ def _kite_client_version() -> str:
 
 
 def _place_order_http_fallback(kite, params: dict):
+    """Place an order via direct HTTP when the SDK's place_order() signature
+    doesn't accept market_protection.  Uses a plain requests.Session rather
+    than SDK internal attributes so it doesn't break when the SDK is updated.
+    """
+    import requests as _requests
     payload = {k: v for k, v in dict(params or {}).items() if v is not None}
     variety = str(payload.get("variety") or getattr(kite, "VARIETY_REGULAR", "regular")).lower()
-    sess = getattr(kite, "reqsession", None)
-    api_key = getattr(kite, "api_key", None)
-    access_token = getattr(kite, "access_token", None)
-    root = str(getattr(kite, "root", "https://api.kite.trade") or "https://api.kite.trade").rstrip("/")
-    if sess is not None and api_key and access_token:
-        url = urljoin(f"{root}/", f"orders/{variety}")
-        headers = {
-            "X-Kite-Version": "3",
-            "Authorization": f"token {api_key}:{access_token}",
-        }
-        resp = sess.post(url, data=payload, headers=headers, timeout=getattr(kite, "timeout", 7))
-        data = resp.json()
-        if int(resp.status_code) == 200 and isinstance(data, dict):
-            return ((data.get("data") or {}).get("order_id")) or data.get("order_id")
-        raise RuntimeError(f"http_fallback_failed status={resp.status_code} body={str(data)[:200]}")
-    res = kite._post("order.place", url_args={"variety": variety}, params=payload)
-    if isinstance(res, dict):
-        return res.get("order_id")
-    return res
+    api_key = str(getattr(kite, "api_key", None) or CFG.KITE_API_KEY or "")
+    access_token = str(getattr(kite, "access_token", None) or os.getenv("KITE_ACCESS_TOKEN") or CFG.KITE_ACCESS_TOKEN or "")
+    if not api_key or not access_token:
+        raise RuntimeError("http_fallback: api_key or access_token missing")
+    url = f"https://api.kite.trade/orders/{variety}"
+    headers = {
+        "X-Kite-Version": "3",
+        "Authorization": f"token {api_key}:{access_token}",
+    }
+    resp = _requests.post(url, data=payload, headers=headers, timeout=7)
+    data = resp.json()
+    if int(resp.status_code) == 200 and isinstance(data, dict):
+        return ((data.get("data") or {}).get("order_id")) or data.get("order_id")
+    raise RuntimeError(f"http_fallback_failed status={resp.status_code} body={str(data)[:200]}")
 
 
 def place_order_safe(kite, **kwargs):
@@ -4128,6 +4136,7 @@ def run_loop_forever():
         f"adaptive opening filter enabled unsafe_mult={float(_cfg_get('OPEN_UNSAFE_SIZE_MULTIPLIER', 0.25) or 0.25):.2f} "
         f"moderate_mult={float(_cfg_get('OPEN_MODERATE_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
+    _migrate_legacy_positions()
     _load_state_snapshot()
     if not _active_trade_universe():
         _load_research_universe_from_file()

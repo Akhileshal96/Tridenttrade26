@@ -308,6 +308,11 @@ async def _restart_bot_process(event) -> None:
 
     append_log("WARN", "BOT", f"Service restart unavailable ({msg}); falling back to process exit")
     await event.reply(f"⚠️ Service restart unavailable ({msg}). Falling back to process exit.")
+    try:
+        CYCLE._save_state_snapshot()
+        append_log("INFO", "BOT", "State snapshot saved before process exit")
+    except Exception as snap_err:
+        append_log("WARN", "BOT", f"State snapshot failed before exit: {snap_err}")
     os._exit(0)
 
 
@@ -761,8 +766,14 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             access = data["access_token"]
             set_env_value("KITE_ACCESS_TOKEN", access)
             os.environ["KITE_ACCESS_TOKEN"] = access
+            from broker_zerodha import invalidate_kite
+            invalidate_kite()
             await event.reply("✅ Token updated. Restarting bot.")
             append_log("INFO", "BOT", "Token updated; restarting bot process")
+            try:
+                CYCLE._save_state_snapshot()
+            except Exception:
+                pass
             os._exit(0)
         except Exception as e:
             await event.reply("❌ Token update failed: %s" % e)
