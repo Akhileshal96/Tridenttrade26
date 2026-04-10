@@ -304,25 +304,39 @@ def _write_skipped_rows(rows: list[dict]):
 
 
 def _default_future_price_fetcher(symbol: str, signal_time: datetime, horizons: tuple[int, ...]) -> dict[int, float]:
-    # Lazy import to avoid hard dependency during unit tests
-    import yfinance as yf
+    """Fetch intraday 1-minute prices after *signal_time* for post-trade analytics."""
+    from broker_zerodha import get_kite
+    from instrument_store import token_for_symbol
 
-    tk = f"{symbol}.NS"
-    start = signal_time - timedelta(minutes=5)
-    end = signal_time + timedelta(minutes=max(horizons) + 15)
-    df = yf.download(tk, start=start, end=end, interval="1m", progress=False, auto_adjust=False, threads=False)
-    out = {}
-    if isinstance(df, pd.DataFrame) and not df.empty and "Close" in df.columns:
-        close = df["Close"].astype(float)
-        if close.index.tz is None:
-            close.index = close.index.tz_localize("UTC").tz_convert(IST)
+    out: dict[int, float] = {}
+    try:
+        token = token_for_symbol(symbol)
+        kite = get_kite()
+        from_dt = signal_time - timedelta(minutes=5)
+        to_dt = signal_time + timedelta(minutes=max(horizons) + 15)
+        data = kite.historical_data(token, from_dt, to_dt, "minute")
+        if not data:
+            return out
+        import pandas as pd
+        from zoneinfo import ZoneInfo
+        _IST = ZoneInfo("Asia/Kolkata")
+        df = pd.DataFrame(data)
+        if df.empty or "close" not in df.columns:
+            return out
+        close = pd.to_numeric(df["close"], errors="coerce")
+        idx = pd.to_datetime(df["date"])
+        if idx.dt.tz is None:
+            idx = idx.dt.tz_localize("Asia/Kolkata")
         else:
-            close.index = close.index.tz_convert(IST)
+            idx = idx.dt.tz_convert("Asia/Kolkata")
+        close.index = idx
         for h in horizons:
             target = signal_time + timedelta(minutes=h)
             sub = close[close.index >= target]
             if len(sub) > 0:
                 out[h] = float(sub.iloc[0])
+    except Exception:
+        pass
     return out
 
 

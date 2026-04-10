@@ -1,5 +1,5 @@
+import datetime as _dt
 import pandas as pd
-import yfinance as yf
 
 _LAST_VALID_SNAPSHOT = None
 
@@ -13,6 +13,38 @@ def _is_valid_close(close: pd.Series) -> bool:
     if float(close.iloc[-1]) <= 0:
         return False
     return len(close) >= 25
+
+
+def _fetch_nifty_daily_kite() -> pd.DataFrame:
+    """Fetch ~90 days of daily candles for the stability symbol via Kite.
+
+    Returns an empty DataFrame on any failure so callers can fall back gracefully.
+    Columns on success: Close, High, Low (Title-cased for compatibility with
+    detect_market_regime / detect_trend_direction).
+    """
+    try:
+        from broker_zerodha import get_kite
+        from instrument_store import token_for_symbol
+        import config as CFG
+
+        sym = str(getattr(CFG, "STABILITY_SYMBOL", "NIFTYBEES") or "NIFTYBEES").strip().upper()
+        token = token_for_symbol(sym)
+        kite = get_kite()
+        to_dt = _dt.datetime.now()
+        from_dt = to_dt - _dt.timedelta(days=100)  # extra buffer for weekends/holidays
+        data = kite.historical_data(token, from_dt, to_dt, "day")
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        # Kite returns lowercase columns: date, open, high, low, close, volume
+        rename = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        if "date" in df.columns:
+            df = df.set_index("date")
+        df = df.dropna(subset=["Close"])
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def detect_market_regime(df: pd.DataFrame) -> str:
@@ -69,7 +101,7 @@ def detect_trend_direction(df: pd.DataFrame) -> str:
 def get_market_regime_snapshot() -> dict:
     global _LAST_VALID_SNAPSHOT
     try:
-        df = yf.download("^NSEI", period="3mo", interval="1d", auto_adjust=False, progress=False, threads=False)
+        df = _fetch_nifty_daily_kite()
         if df is None or df.empty or "Close" not in df.columns:
             if isinstance(_LAST_VALID_SNAPSHOT, dict):
                 snap = dict(_LAST_VALID_SNAPSHOT)

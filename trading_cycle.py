@@ -10,7 +10,6 @@ from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import yfinance as yf
 
 import config as CFG
 from broker_zerodha import get_kite
@@ -31,7 +30,7 @@ import research_engine as RE
 from universe_builder import SECTOR_MAP
 from market_regime import get_market_regime_snapshot, get_regime_entry_mode
 import strategy_analytics as SA
-from state_lock import STATE_LOCK, safe_update, PositionManager
+from state_lock import STATE_LOCK, safe_update, safe_set, PositionManager
 
 IST = ZoneInfo("Asia/Kolkata")
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -132,6 +131,96 @@ RUNTIME = {
 _ORDER_RATE_LOCK = threading.Lock()
 _ORDER_REQ_TS = deque(maxlen=256)
 _KITE_MP_SUPPORT_CACHE = {}
+
+# ---------------------------------------------------------------------------
+# STATE persistence helpers
+# ---------------------------------------------------------------------------
+
+_STATE_SNAPSHOT_PATH = os.path.join(DATA_DIR, "state_snapshot.json")
+
+# Keys that survive a restart (positions, daily risk counters, halt/pause flags).
+# Transient UI state and in-tick caches are intentionally excluded.
+_STATE_PERSIST_KEYS = [
+    "day_key",
+    "today_pnl",
+    "halt_for_day",
+    "loss_streak",
+    "reduce_size_factor",
+    "day_peak_pnl",
+    "profit_milestone_hit",
+    "cooldown_until",
+    "pause_entries_until",
+    "positions",
+]
+
+
+def _save_state_snapshot() -> None:
+    """Atomically write critical STATE fields to disk."""
+    import json
+    try:
+        snap: dict = {}
+        with STATE_LOCK:
+            for k in _STATE_PERSIST_KEYS:
+                v = STATE.get(k)
+                if isinstance(v, datetime):
+                    snap[k] = v.isoformat()
+                elif isinstance(v, dict):
+                    snap[k] = dict(v)
+                else:
+                    snap[k] = v
+        tmp = _STATE_SNAPSHOT_PATH + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(snap, fh, default=str)
+        os.replace(tmp, _STATE_SNAPSHOT_PATH)
+    except Exception as exc:
+        # Persistence failure is non-fatal; log and continue.
+        try:
+            from log_store import append_log as _al
+            _al("WARN", "STATE", f"state_snapshot_save_failed: {exc}")
+        except Exception:
+            pass
+
+
+def _load_state_snapshot() -> None:
+    """Restore persisted STATE fields on startup.
+
+    Only restores if the snapshot was saved for today's trading date.
+    """
+    import json
+    try:
+        if not os.path.exists(_STATE_SNAPSHOT_PATH):
+            return
+        with open(_STATE_SNAPSHOT_PATH, "r") as fh:
+            snap: dict = json.load(fh)
+        saved_day = str(snap.get("day_key") or "")
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        if saved_day != today:
+            append_log("INFO", "STATE", f"state_snapshot stale (saved={saved_day} today={today}) — skipping restore")
+            return
+        with STATE_LOCK:
+            for k in _STATE_PERSIST_KEYS:
+                if k not in snap:
+                    continue
+                v = snap[k]
+                if k in ("cooldown_until", "pause_entries_until") and v:
+                    try:
+                        parsed = datetime.fromisoformat(str(v))
+                        # Ensure timezone-aware in IST
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=IST)
+                        else:
+                            parsed = parsed.astimezone(IST)
+                        STATE[k] = parsed
+                    except Exception:
+                        pass
+                elif k == "positions" and isinstance(v, dict):
+                    STATE["positions"].update(v)
+                    STATE["open_trades"] = STATE["positions"]
+                else:
+                    STATE[k] = v
+        append_log("INFO", "STATE", f"state_snapshot restored day={saved_day} pnl={snap.get('today_pnl')} positions={len(snap.get('positions') or {})}")
+    except Exception as exc:
+        append_log("WARN", "STATE", f"state_snapshot_load_failed: {exc}")
 
 
 def _cfg_obj():
@@ -1106,6 +1195,41 @@ def _place_live_order(kite, sym, side, qty):
         return None
 
 
+def _wait_for_fill(kite, order_id: str, fallback_price: float, timeout: float = 6.0) -> float:
+    """Poll order history until COMPLETE or timeout, returning the average fill price.
+
+    Falls back to *fallback_price* if the order hasn't filled within *timeout* seconds
+    or if the API call fails.  A REJECTED/CANCELLED status is logged and the fallback
+    is returned so the caller can decide how to handle it.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            history = kite.order_history(order_id)
+            if history:
+                last = history[-1]
+                status = str(last.get("status") or "").upper()
+                if status == "COMPLETE":
+                    avg = float(last.get("average_price") or 0.0)
+                    filled_qty = int(last.get("filled_quantity") or 0)
+                    if avg > 0 and filled_qty > 0:
+                        return avg
+                elif status in ("REJECTED", "CANCELLED"):
+                    append_log(
+                        "WARN", "FILL",
+                        f"order_id={order_id} status={status} — using pre-order LTP as fallback",
+                    )
+                    return fallback_price
+        except Exception as exc:
+            append_log("WARN", "FILL", f"order_history_poll_failed order_id={order_id}: {exc}")
+        time.sleep(0.5)
+    append_log(
+        "WARN", "FILL",
+        f"fill_timeout order_id={order_id} after {timeout:.0f}s — using pre-order LTP {fallback_price:.2f}",
+    )
+    return fallback_price
+
+
 def _set_cooldown():
     sec = int(_cfg_get("COOLDOWN_SECONDS", 120))
     # Slightly relax cooldown after 09:30 for repeated valid MICRO/REDUCED entries.
@@ -1114,15 +1238,15 @@ def _set_cooldown():
     post_0930 = now.time() >= dt_time(9, 30)
     if post_0930 and tier in ("MICRO", "REDUCED"):
         streak_key = "post0930_valid_tier_streak"
-        streak = int(STATE.get(streak_key) or 0) + 1
-        STATE[streak_key] = streak
+        streak = safe_update(STATE, streak_key, lambda v: int(v or 0) + 1)
         if streak >= 2:
             sec = max(60, int(round(sec * 0.75)))
             append_log("INFO", "COOLDOWN", f"[COOLDOWN] refinement applied tier={tier} streak={streak} sec={sec}")
     else:
-        STATE["post0930_valid_tier_streak"] = 0
-    STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
-    STATE["entry_tier_for_cooldown"] = None
+        safe_set(STATE, "post0930_valid_tier_streak", 0)
+    with STATE_LOCK:
+        STATE["cooldown_until"] = datetime.now(IST) + timedelta(seconds=sec)
+        STATE["entry_tier_for_cooldown"] = None
 
 
 def _apply_skip_cooldown(sym: str, reason: str, minutes: int = 3, side: str = "BUY", signal_price: float | None = None, strategy_tag: str = ""):
@@ -1978,6 +2102,35 @@ def _htf_fetch(symbol: str, days: int = 20) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _kite_fetch_custom(symbol: str, days: int, interval: str) -> pd.DataFrame:
+    """Fetch historical data for *symbol* at the specified *interval*.
+
+    Returns a DataFrame with Title-cased columns (Open/High/Low/Close/Volume)
+    and a tz-aware DatetimeIndex in IST, or an empty DataFrame on failure.
+    """
+    try:
+        token = token_for_symbol(symbol)
+        to_dt = pd.Timestamp.now()
+        from_dt = to_dt - pd.Timedelta(days=days)
+        data = get_kite().historical_data(token, from_dt, to_dt, interval)
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        rename = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        if "date" in df.columns:
+            idx = pd.to_datetime(df["date"])
+            if idx.dt.tz is None:
+                idx = idx.dt.tz_localize("Asia/Kolkata")
+            else:
+                idx = idx.dt.tz_convert("Asia/Kolkata")
+            df.index = idx
+            df = df.drop(columns=["date"])
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def _calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     c = close.astype(float)
     delta = c.diff()
@@ -2036,54 +2189,45 @@ def _compute_opening_metrics() -> dict:
         "feed_error": False,
         "feed_exception": "",
     }
-    def _col_series(frame: pd.DataFrame, name: str) -> pd.Series:
-        col = frame[name]
-        if isinstance(col, pd.DataFrame):
-            col = col.iloc[:, 0]
-        return pd.to_numeric(col, errors="coerce")
+    stability_sym = str(getattr(CFG, "STABILITY_SYMBOL", "NIFTYBEES") or "NIFTYBEES").strip().upper()
     try:
-        d1 = yf.download("^NSEI", period="7d", interval="1d", auto_adjust=False, progress=False, threads=False)
-        m5 = yf.download("^NSEI", period="2d", interval="5m", auto_adjust=False, progress=False, threads=False)
+        # Daily candles — need at least yesterday + today to compute gap
+        d1 = _kite_fetch_custom(stability_sym, days=10, interval="day")
+        # 5-minute candles — need today's intraday data
+        m5 = _kite_fetch_custom(stability_sym, days=2, interval="5minute")
+
         if d1 is None or d1.empty or m5 is None or m5.empty:
             return out
-        if isinstance(d1.columns, pd.MultiIndex):
-            d1 = d1.droplevel(-1, axis=1)
-        if isinstance(m5.columns, pd.MultiIndex):
-            m5 = m5.droplevel(-1, axis=1)
-        d1 = d1.dropna()
-        m5 = m5.dropna()
+        d1 = d1.dropna(subset=["Close"])
+        m5 = m5.dropna(subset=["Close"])
         if len(d1) < 2 or len(m5) < 3:
             return out
 
-        d1_close = _col_series(d1, "Close")
-        d1_open = _col_series(d1, "Open")
+        d1_close = pd.to_numeric(d1["Close"], errors="coerce")
+        d1_open = pd.to_numeric(d1["Open"], errors="coerce") if "Open" in d1.columns else d1_close
         prev_close = float(d1_close.iloc[-2])
         open_today = float(d1_open.iloc[-1])
         gap_pct = ((open_today - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
 
-        # first intraday candle of current day
-        idx = m5.index
-        if getattr(idx, "tz", None) is None:
-            idx = idx.tz_localize("UTC").tz_convert(IST)
-        else:
-            idx = idx.tz_convert(IST)
-        m5 = m5.copy()
-        m5.index = idx
+        # first intraday candles of the current trading day
         today = datetime.now(IST).date()
         day_df = m5[m5.index.date == today]
         if day_df.empty:
             return out
+
         first = day_df.iloc[0]
         o5 = float(pd.to_numeric(first.get("Open", 0.0), errors="coerce"))
         h5 = float(pd.to_numeric(first.get("High", 0.0), errors="coerce"))
         l5 = float(pd.to_numeric(first.get("Low", 0.0), errors="coerce"))
-        close_ser = _col_series(day_df, "Close")
+        close_ser = pd.to_numeric(day_df["Close"], errors="coerce")
         c_last = float(close_ser.iloc[-1])
         ma3 = float(close_ser.rolling(3).mean().dropna().iloc[-1]) if len(close_ser) >= 3 and not close_ser.dropna().empty else c_last
         first_5m_range_pct = ((h5 - l5) / o5 * 100.0) if o5 > 0 else 0.0
-        direction_clear = abs((c_last - o5) / o5 * 100.0) >= 0.15 and ((c_last > ma3 and c_last > o5) or (c_last < ma3 and c_last < o5))
+        direction_clear = abs((c_last - o5) / o5 * 100.0) >= 0.15 and (
+            (c_last > ma3 and c_last > o5) or (c_last < ma3 and c_last < o5)
+        )
 
-        vol = _col_series(day_df, "Volume") if "Volume" in day_df.columns else pd.Series(dtype=float)
+        vol = pd.to_numeric(day_df["Volume"], errors="coerce") if "Volume" in day_df.columns else pd.Series(dtype=float)
         volume_quality = "GOOD"
         if not vol.empty and len(vol) > 1:
             v0 = float(vol.iloc[0])
@@ -2194,8 +2338,7 @@ def get_opening_mode() -> tuple[str, dict]:
     append_log("INFO", "OPEN", f"spread_quality={spread_q}")
     append_log("INFO", "OPEN", f"volume_quality={volume_q}")
     if bool(m.get("feed_error")):
-        retries = int(STATE.get("open_feed_retry_count") or 0) + 1
-        STATE["open_feed_retry_count"] = retries
+        retries = safe_update(STATE, "open_feed_retry_count", lambda v: int(v or 0) + 1)
         hard_after = int(_cfg_get("OPEN_FEED_HARD_BLOCK_RETRIES", 3) or 3)
         m["decision_path"] = "feed_error"
         if retries >= max(2, hard_after):
@@ -2209,7 +2352,7 @@ def get_opening_mode() -> tuple[str, dict]:
         return "OPEN_MODERATE", m
     # Missing/unknown opening metrics (volume/spread/opening_range) must remain
     # an incomplete-data state and never escalate to confirmed_broken_feed.
-    STATE["open_feed_retry_count"] = 0
+    safe_set(STATE, "open_feed_retry_count", 0)
 
     if gap > max_gap * 1.5:
         m["reason"] = "confirmed_extreme_gap"
@@ -2951,6 +3094,7 @@ def _maybe_enter_short_from_signal(sig):
         if not oid:
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
+        booked_entry = _wait_for_fill(kite, oid, booked_entry)
         append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
@@ -3191,6 +3335,7 @@ def _maybe_enter_from_signal(sig):
         if not oid:
             append_log("INFO", "SKIP", f"{sym} reason=order_failed")
             return False
+        booked_entry = _wait_for_fill(kite, oid, booked_entry)
         append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
@@ -3730,11 +3875,11 @@ def tick():
 
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):
-            STATE["force_exit_done"] = True
+            safe_set(STATE, "force_exit_done", True)
             append_log("WARN", "TIME", "FORCE_EXIT triggered")
             positions_before = _open_positions_count()
             ee_force_exit_all(_positions(), _close_position, reason="TIME")
-            STATE["paused"] = True
+            safe_set(STATE, "paused", True)
             day_pnl = float(STATE.get("today_pnl") or 0.0)
             pnl_label = "Profit" if day_pnl >= 0 else "Loss"
             _notify(
@@ -3755,21 +3900,21 @@ def tick():
 
     if STATE.get("halt_for_day"):
         append_log("WARN", "RISK", "halt_for_day active. Pausing loop.")
-        STATE["paused"] = True
+        safe_set(STATE, "paused", True)
         return
 
     if float(STATE.get("daily_loss_cap_inr") or 0.0) > 0 and STATE["today_pnl"] <= -abs(float(STATE["daily_loss_cap_inr"])):
         append_log("WARN", "CAP", "Daily loss cap hit. Pausing loop.")
-        STATE["paused"] = True
+        safe_set(STATE, "paused", True)
         return
 
     prof_milestone = float(STATE.get("daily_profit_milestone_inr") or 0.0)
     if prof_milestone > 0 and STATE["today_pnl"] >= prof_milestone and not STATE.get("profit_milestone_hit"):
-        STATE["profit_milestone_hit"] = True
+        safe_set(STATE, "profit_milestone_hit", True)
         append_log("INFO", "CAP", f"Profit milestone hit at ₹{STATE['today_pnl']:.2f}")
         _notify(f"🎯 Profit milestone hit: ₹{STATE['today_pnl']:.2f}")
         if not bool(RUNTIME.get("SOFT_PROFIT_TARGET", True)):
-            STATE["paused"] = True
+            safe_set(STATE, "paused", True)
             return
 
     if bool(_cfg_get("AUTO_PROMOTE_ENABLED", False)) and not _positions() and _in_any_promote_window() and _cooldown_ok():
@@ -3822,8 +3967,8 @@ def tick():
         _deactivate_micro_mode("regime_changed")
 
     open_mode, open_metrics = get_opening_mode()
-    STATE["opening_mode"] = open_mode
-    STATE["opening_metrics"] = dict(open_metrics or {})
+    safe_set(STATE, "opening_mode", open_mode)
+    safe_set(STATE, "opening_metrics", dict(open_metrics or {}))
     if _in_open_filter_window():
         reason = str((open_metrics or {}).get("reason") or "n/a")
         conf_i = int((open_metrics or {}).get("confidence") or 0)
@@ -3854,15 +3999,14 @@ def tick():
 
     research_tail = [s for s in research_universe if s not in set(active_universe)]
     if opened <= 0:
-        STATE["active_no_setup_cycles"] = int(STATE.get("active_no_setup_cycles") or 0) + 1
+        safe_update(STATE, "active_no_setup_cycles", lambda v: int(v or 0) + 1)
         append_log("INFO", "UNIV", "no setup in active universe → scanning research universe")
         _record_research_event("route_change", "route_scan=research_universe", active_top3=selected_families)
         opened += _scan_top3_families(research_tail, selected_families, max_new=max_new - opened, universe_source="research_universe")
 
     if regime_u == "SIDEWAYS":
         if opened <= 0 and "mean_reversion" in selected_families:
-            STATE["mean_reversion_dry_cycles"] = int(STATE.get("mean_reversion_dry_cycles") or 0) + 1
-            dry_cycles = int(STATE.get("mean_reversion_dry_cycles") or 0)
+            dry_cycles = safe_update(STATE, "mean_reversion_dry_cycles", lambda v: int(v or 0) + 1)
             if dry_cycles >= 2:
                 next_ranked = [f for f in selected_families if f != "mean_reversion"]
                 selected_families = next_ranked + ["mean_reversion"]
@@ -3881,13 +4025,14 @@ def tick():
         opened += _scan_top3_families(expanded, selected_families, max_new=max_new - opened, universe_source="expanded_universe")
 
     if opened <= 0:
-        STATE["no_entry_cycles"] = int(STATE.get("no_entry_cycles") or 0) + 1
-        STATE["top3_dry_cycles"] = int(STATE.get("top3_dry_cycles") or 0) + 1
+        safe_update(STATE, "no_entry_cycles", lambda v: int(v or 0) + 1)
+        safe_update(STATE, "top3_dry_cycles", lambda v: int(v or 0) + 1)
     else:
-        STATE["no_entry_cycles"] = 0
-        STATE["top3_dry_cycles"] = 0
-        STATE["active_no_setup_cycles"] = 0
-        STATE["fallback_mode_active"] = False
+        with STATE_LOCK:
+            STATE["no_entry_cycles"] = 0
+            STATE["top3_dry_cycles"] = 0
+            STATE["active_no_setup_cycles"] = 0
+            STATE["fallback_mode_active"] = False
 
     dry_thr = int(_cfg_get("TOP3_DRY_CYCLE_THRESHOLD", 4) or 4)
     if int(STATE.get("top3_dry_cycles") or 0) >= dry_thr:
@@ -3906,7 +4051,7 @@ def tick():
         if not STATE.get("fallback_mode_active"):
             append_log("INFO", "UNIV", f"no tradable setup in primary for {trigger_n} cycles → activating fallback universe")
             build_fallback_universe()
-            STATE["fallback_mode_active"] = True
+            safe_set(STATE, "fallback_mode_active", True)
             _record_research_event("fallback_activation", f"trigger_n={trigger_n}")
 
     if STATE.get("fallback_mode_active"):
@@ -3923,7 +4068,7 @@ def tick():
                     "UNIV",
                     f"fallback entries allowed opened={fb_opened} size_multiplier={float(_cfg_get('FALLBACK_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
                 )
-                STATE["no_entry_cycles"] = 0
+                safe_set(STATE, "no_entry_cycles", 0)
             else:
                 append_log("INFO", "UNIV", "fallback scanned but no eligible entries this cycle")
 
@@ -3967,11 +4112,13 @@ def run_loop_forever():
         f"adaptive opening filter enabled unsafe_mult={float(_cfg_get('OPEN_UNSAFE_SIZE_MULTIPLIER', 0.25) or 0.25):.2f} "
         f"moderate_mult={float(_cfg_get('OPEN_MODERATE_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
+    _load_state_snapshot()
     if not _active_trade_universe():
         _load_research_universe_from_file()
     while True:
         try:
             tick()
+            _save_state_snapshot()
         except Exception as e:
             append_log("ERROR", "LOOP", str(e))
         time.sleep(int(_cfg_get("TICK_SECONDS", 20)))

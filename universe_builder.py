@@ -1,10 +1,10 @@
+import datetime as _dt
 import os
 import time
 from collections import defaultdict
 from typing import Dict, List
 
 import pandas as pd
-import yfinance as yf
 
 import config as CFG
 from excluded_store import load_excluded
@@ -66,14 +66,35 @@ def _download_cached(symbols: List[str], period="1y", interval="1d") -> pd.DataF
 
 
 def _download_nifty_cached(period="3mo", interval="1d") -> pd.DataFrame:
-    key = ("^NSEI", str(period), str(interval))
+    """Fetch index reference data via Kite using the STABILITY_SYMBOL (NIFTYBEES by default)."""
+    sym = str(getattr(CFG, "STABILITY_SYMBOL", "NIFTYBEES") or "NIFTYBEES").strip().upper()
+    key = (sym, str(period), str(interval))
     cached = _cache_get(key)
     if isinstance(cached, pd.DataFrame):
         return cached
-    df = yf.download("^NSEI", period=period, interval=interval, auto_adjust=False, progress=False, threads=False)
-    if isinstance(df, pd.DataFrame) and not df.empty:
-        _cache_put(key, df)
-    return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    try:
+        from broker_zerodha import get_kite
+        from instrument_store import token_for_symbol
+        _period_days = {"3mo": 95, "6mo": 185, "1y": 375, "2y": 740}
+        days = _period_days.get(str(period), 95)
+        token = token_for_symbol(sym)
+        kite = get_kite()
+        to_dt = _dt.datetime.now()
+        from_dt = to_dt - _dt.timedelta(days=days)
+        data = kite.historical_data(token, from_dt, to_dt, "day")
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        rename = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        if "date" in df.columns:
+            df = df.set_index("date")
+        df = df.dropna(subset=["Close"])
+        if not df.empty:
+            _cache_put(key, df)
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def _normalize_symbols(values: List[str]) -> List[str]:
@@ -136,9 +157,48 @@ def load_nifty100_symbols() -> List[str]:
 
 
 def _download(symbols: List[str], period="1y", interval="1d") -> pd.DataFrame:
-    tickers = [f"{s}.NS" for s in symbols]
-    df = yf.download(tickers=tickers, period=period, interval=interval, auto_adjust=False, progress=False, threads=False, group_by="ticker")
-    return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    """Fetch historical daily data for *symbols* via Kite.
+
+    Returns a MultiIndex DataFrame where level-0 columns are ``{sym}.NS`` and
+    level-1 columns are Open/High/Low/Close/Volume — the same shape that the
+    yfinance ``group_by="ticker"`` output had, so all downstream code is unaffected.
+    """
+    try:
+        from broker_zerodha import get_kite
+        from instrument_store import token_for_symbol
+    except ImportError:
+        return pd.DataFrame()
+
+    _period_days = {"3mo": 95, "6mo": 185, "1y": 375, "2y": 740}
+    days = _period_days.get(str(period), 375)
+    _interval_map = {"1d": "day", "1w": "week", "1mo": "month"}
+    kite_interval = _interval_map.get(str(interval), "day")
+
+    kite = get_kite()
+    to_dt = _dt.datetime.now()
+    from_dt = to_dt - _dt.timedelta(days=days)
+    _col_rename = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+
+    all_frames: Dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        tk = f"{sym}.NS"
+        try:
+            token = token_for_symbol(sym)
+            data = kite.historical_data(token, from_dt, to_dt, kite_interval)
+            if not data:
+                continue
+            df_sym = pd.DataFrame(data)
+            df_sym = df_sym.rename(columns={k: v for k, v in _col_rename.items() if k in df_sym.columns})
+            if "date" in df_sym.columns:
+                df_sym = df_sym.set_index("date")
+            all_frames[tk] = df_sym
+        except Exception:
+            continue
+        time.sleep(0.12)  # stay below Zerodha's 10 req/sec rate limit
+
+    if not all_frames:
+        return pd.DataFrame()
+    return pd.concat(all_frames, axis=1)
 
 
 def _is_valid_num(x) -> bool:

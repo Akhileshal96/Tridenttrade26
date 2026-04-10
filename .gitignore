@@ -11,3 +11,18 @@ venv/
 # Runtime logs and generated data
 logs/*.log
 data/*.csv
+
+# Credentials — NEVER commit the live .env
+.env
+
+# Generated runtime data
+cache/
+data/
+state_snapshot.json*
+
+# Backup directories created by the bot
+backup_*/
+backups/
+
+# Accidental shell artifact
+=

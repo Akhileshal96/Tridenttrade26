@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Trident Bot (main)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["bot.py"],
+      "port": 0,
+      "description": "Main process: Telegram bot + trading loop + night scheduler (asyncio.gather)"
+    },
+    {
+      "name": "Night Research (standalone)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["night_research.py"],
+      "port": 0,
+      "description": "One-shot night batch job: builds dynamic universe via Kite, writes universe_trading.txt"
+    },
+    {
+      "name": "Bot Emulator (offline dev)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/emulate_bot_flow.py"],
+      "port": 0,
+      "description": "Offline Telegram command emulator — no broker or Telegram connection needed"
+    }
+  ]
+}
