@@ -3759,7 +3759,15 @@ def reconcile_broker_positions():
         return
     try:
         kite = get_kite()
-        net_positions = (kite.positions() or {}).get("net") or []
+        positions_resp = kite.positions() or {}
+        net_positions = positions_resp.get("net") or []
+        # Treat a completely empty API response as a suspect fetch — the broker
+        # always returns a "net" key even when flat.  If it's missing entirely
+        # the call likely failed or returned partial data, so bail out rather
+        # than silently wiping local position tracking.
+        if "net" not in positions_resp:
+            append_log("WARN", "RECON", "broker positions response missing 'net' key — skipping reconcile to protect local state")
+            return
     except Exception as e:
         append_log("WARN", "RECON", f"broker position fetch failed: {e}")
         return
@@ -3774,6 +3782,14 @@ def reconcile_broker_positions():
         avg = float((p or {}).get("average_price") or 0.0)
         side = "BUY" if qty > 0 else "SHORT"
         broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side}
+    # Only remove local positions if broker returned at least one position OR
+    # we have confirmed the account is genuinely flat (local also has no positions).
+    # This prevents a network glitch / empty response from wiping position memory.
+    local_count = len(local)
+    broker_count = len(broker_map)
+    if local_count > 0 and broker_count == 0:
+        append_log("WARN", "RECON", f"broker returned 0 positions but local has {local_count} — skipping removal to protect local state")
+        return
     for sym, bp in broker_map.items():
         if sym in local:
             tr = dict(local.get(sym) or {})
