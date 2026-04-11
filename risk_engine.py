@@ -145,6 +145,15 @@ def update_loss_streak(state: dict, result: float):
         append_log("WARN", "RISK", "loss_streak=2 → reducing entry aggressiveness")
     else:
         state["reduce_size_factor"] = 1.0
+        # A win breaks the streak — clear halt/pause flags so the bot can resume
+        # trading normally mid-day without waiting for next day rollover.
+        # Note: daily_loss_cap halt is intentionally NOT cleared here — that
+        # requires manual /resetday or next-day rollover.
+        if result >= 0 and int(state.get("loss_streak") or 0) == 0:
+            if state.get("halt_for_day") and not state.get("day_guard_reason"):
+                state["halt_for_day"] = False
+                state["pause_entries_until"] = None
+                append_log("INFO", "RISK", "loss_streak cleared by win → halt_for_day lifted")
 
 
 def check_day_drawdown_guard(state: dict):

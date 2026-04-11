@@ -139,7 +139,18 @@ def auto_renew_kite_token() -> tuple[bool, str]:
     except Exception as e:
         return False, f"generate_session_failed: {e}"
 
-    # ── Step 5: Persist + invalidate cached instance ───────────────────────
+    # ── Step 5: Validate token before persisting ──────────────────────────
+    # Call margins() with a fresh KiteConnect instance. If this fails the
+    # token is bad (clock-skew, API error, etc.) and we must NOT overwrite
+    # the .env — the current (possibly still-valid) token stays intact.
+    try:
+        test_kite = KiteConnect(api_key=api_key)
+        test_kite.set_access_token(access_token)
+        test_kite.margins()
+    except Exception as e:
+        return False, f"token_validation_failed: {e}"
+
+    # ── Step 6: Persist + invalidate cached instance ───────────────────────
     try:
         set_env_value("KITE_ACCESS_TOKEN", access_token)
         os.environ["KITE_ACCESS_TOKEN"] = access_token
