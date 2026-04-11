@@ -546,6 +546,7 @@ def manual_reset_day():
         STATE["profit_milestone_hit"] = False
         STATE["cooldown_until"] = None
         STATE["loss_streak"] = 0
+        STATE["consecutive_wins"] = 0
         STATE["reduce_size_factor"] = 1.0
         STATE["pause_entries_until"] = None
         STATE["halt_for_day"] = False
@@ -1051,19 +1052,17 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
         qty = short_policy_qty
         reason_chain.append(f"short_policy_qty={short_policy_qty}")
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
-    if size_factor < 1.0:
-        qty = int(qty * max(0.1, size_factor))
-        reason_chain.append(f"size_factor_qty={qty}")
 
-    # Win-streak scaling: compound hot streaks instead of staying flat.
-    # Only active on FULL-tier TRENDING/TRENDING_UP setups — no uplift on weak/sideways.
+    # Win-streak scaling applied BEFORE size_factor reduction so uplift acts on
+    # the base qty, not on an already-penalised qty. Guard: only when no active
+    # loss-driven reduction (size_factor==1.0 and loss_streak==0).
     loss_streak = int(STATE.get("loss_streak") or 0)
     regime_u_local = str(regime or "UNKNOWN").upper()
     if (
         loss_streak == 0
+        and size_factor >= 1.0
         and tier_u == "FULL"
         and regime_u_local in ("TRENDING", "TRENDING_UP")
-        and size_factor >= 1.0
     ):
         recent_wins = int(STATE.get("consecutive_wins") or 0)
         if recent_wins >= 2:
@@ -1073,6 +1072,10 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
             )
             qty = int(math.floor(qty * win_uplift))
             reason_chain.append(f"win_streak_uplift={win_uplift:.2f}(wins={recent_wins})")
+
+    if size_factor < 1.0:
+        qty = int(qty * max(0.1, size_factor))
+        reason_chain.append(f"size_factor_qty={qty}")
 
     qty = qty if qty >= 1 else 0
     reason_chain.append(f"final_qty={qty}")
@@ -3233,7 +3236,7 @@ def _maybe_enter_from_signal(sig):
         return False
 
     if strategy_family in ("mean_reversion", "fallback_long") and regime == "SIDEWAYS" and trend_direction == "DOWN":
-        mode = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "BLOCK") or "BLOCK").upper()
+        mode = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "REDUCED") or "REDUCED").upper()
         hh, mm = _parse_hhmm(str(getattr(CFG, "MEAN_REVERSION_CUTOFF_HHMM", "11:30") or "11:30"))
         now_t = datetime.now(IST).time()
         cutoff_t = datetime.now(IST).replace(hour=hh, minute=mm, second=0, microsecond=0).time()
@@ -4202,9 +4205,14 @@ def run_loop_forever():
     # broker balance, not CAPITAL_INR fallback or a stale yesterday snapshot.
     try:
         _sync_wallet_and_caps(force=True)
-        append_log("INFO", "BOOT", f"startup_wallet_sync wallet_net={float(STATE.get('wallet_net_inr') or 0.0):.2f}")
+        wallet_at_boot = float(STATE.get("wallet_net_inr") or 0.0)
+        append_log("INFO", "BOOT", f"startup_wallet_sync wallet_net={wallet_at_boot:.2f}")
+        if wallet_at_boot <= 0:
+            append_log("CRITICAL", "BOOT", "wallet_net=0 after startup sync — all trades will use minimum bucket (500 INR). Check KITE_ACCESS_TOKEN and CAPITAL_INR.")
     except Exception as _e:
         append_log("WARN", "BOOT", f"startup_wallet_sync_failed={_e}")
+        if float(STATE.get("wallet_net_inr") or 0.0) <= 0:
+            append_log("CRITICAL", "BOOT", "wallet_net=0 and startup sync failed — trades will use minimum bucket until wallet syncs successfully.")
     if not _active_trade_universe():
         _load_research_universe_from_file()
     while True:

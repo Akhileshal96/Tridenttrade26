@@ -257,7 +257,25 @@ async def token_renewal_scheduler(client):
                 last_renew_day = today
                 owner = int(os.getenv("OWNER_USER_ID", "0") or 0)
                 if ok:
-                    msg = "🔑 Kite token auto-renewed via TOTP ✅\nBot is ready for today's session."
+                    # Validate the new token with a lightweight API call to catch
+                    # clock-skew TOTP issues before the trading session starts.
+                    try:
+                        margins = await asyncio.to_thread(lambda: get_kite().margins())
+                        wallet = float((margins or {}).get("equity", {}).get("net") or 0.0)
+                        msg = f"🔑 Kite token auto-renewed via TOTP ✅\nWallet: ₹{wallet:.2f}\nBot is ready for today's session."
+                        append_log("INFO", "AUTH", f"TOTP renewal validated wallet={wallet:.2f}")
+                    except Exception as _ve:
+                        ok = False
+                        result = f"token_invalid_post_renewal: {_ve}"
+                        msg = (
+                            f"⚠️ Kite token renewed but validation FAILED\n\n"
+                            f"Reason: {result}\n\n"
+                            f"Please renew manually:\n"
+                            f"1. Send /renewtoken\n"
+                            f"2. Login and send /token <request_token>"
+                        )
+                        append_log("ERROR", "AUTH", f"TOTP post-renewal validation failed: {_ve}")
+                if ok:
                     append_log("INFO", "AUTH", "TOTP renewal succeeded")
                 else:
                     msg = (
