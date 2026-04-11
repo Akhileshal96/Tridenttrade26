@@ -8,6 +8,7 @@ import trading_cycle as CYCLE
 from trading_cycle import STATE_LOCK
 import night_research
 from night_scheduler import run_nightly_maintenance
+from kite_auto_login import auto_renew_kite_token
 
 from telethon import TelegramClient, events
 from kiteconnect import KiteConnect
@@ -227,6 +228,55 @@ def _in_time_range(now_t, start_t, end_t):
     if start_t <= end_t:
         return start_t <= now_t <= end_t
     return now_t >= start_t or now_t <= end_t
+
+
+async def token_renewal_scheduler(client):
+    """Auto-renew Kite access token daily at 6:15 AM IST via TOTP.
+
+    Only runs if KITE_TOTP_SECRET, KITE_USER_ID, and KITE_PASSWORD are set.
+    Falls back gracefully — sends Telegram alert on failure so manual /token
+    is still available as a backup.
+    """
+    IST = ZoneInfo("Asia/Kolkata")
+    required = ("KITE_TOTP_SECRET", "KITE_USER_ID", "KITE_PASSWORD")
+    if not all(os.getenv(k, "").strip() for k in required):
+        append_log("INFO", "AUTH", "TOTP auto-renewal disabled (KITE_TOTP_SECRET/USER_ID/PASSWORD not set)")
+        return
+
+    append_log("INFO", "AUTH", "TOTP token renewal scheduler active — runs daily at 06:15 IST")
+    last_renew_day = ""
+
+    while True:
+        try:
+            now = datetime.now(IST)
+            today = now.strftime("%Y-%m-%d")
+            # Trigger between 06:15 and 06:30 once per day
+            if today != last_renew_day and dtime(6, 15) <= now.time() <= dtime(6, 30):
+                append_log("INFO", "AUTH", "Starting TOTP auto token renewal")
+                ok, result = await asyncio.to_thread(auto_renew_kite_token)
+                last_renew_day = today
+                owner = int(os.getenv("OWNER_USER_ID", "0") or 0)
+                if ok:
+                    msg = "🔑 Kite token auto-renewed via TOTP ✅\nBot is ready for today's session."
+                    append_log("INFO", "AUTH", "TOTP renewal succeeded")
+                else:
+                    msg = (
+                        f"⚠️ Kite token auto-renewal FAILED\n\n"
+                        f"Reason: {result}\n\n"
+                        f"Please renew manually:\n"
+                        f"1. Send /renewtoken\n"
+                        f"2. Login and send /token <request_token>"
+                    )
+                    append_log("ERROR", "AUTH", f"TOTP renewal failed: {result}")
+                if owner:
+                    try:
+                        await client.send_message(owner, msg)
+                    except Exception as _e:
+                        append_log("WARN", "AUTH", f"Could not send token renewal alert: {_e}")
+            await asyncio.sleep(30)
+        except Exception as e:
+            append_log("ERROR", "AUTH", f"token_renewal_scheduler error: {e}")
+            await asyncio.sleep(60)
 
 
 async def night_scheduler():
@@ -943,6 +993,7 @@ async def main():
         client.run_until_disconnected(),
         asyncio.to_thread(CYCLE.run_loop_forever),
         night_scheduler(),
+        token_renewal_scheduler(client),
     )
 
 
