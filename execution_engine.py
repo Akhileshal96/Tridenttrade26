@@ -90,7 +90,20 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         except Exception:
             ltp = None
         if ltp is None:
+            # Track consecutive LTP failures per symbol. After 3 consecutive
+            # failures, close position at last known price to avoid holding
+            # a position we can no longer monitor.
+            fail_key = f"_ltp_fail_{sym}"
+            fails = int(trade.get(fail_key) or 0) + 1
+            trade[fail_key] = fails
+            append_log("WARN", "LTP", f"{sym} ltp_unavailable consecutive_fails={fails}")
+            if fails >= 3:
+                last_entry = float(trade.get("entry") or entry)
+                append_log("ERROR", "LTP", f"{sym} ltp_unavailable for {fails} cycles → emergency close at entry price")
+                close_position(sym, reason="LTP_UNAVAILABLE", ltp_override=last_entry)
             continue
+        # Reset LTP failure counter on successful fetch
+        trade.pop(f"_ltp_fail_{sym}", None)
 
         if check_time_exit(force_exit_check):
             close_position(sym, reason="TIME", ltp_override=ltp)

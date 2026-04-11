@@ -901,6 +901,10 @@ def _sync_wallet_and_caps(force=False):
         wallet_net = _cached_wallet_value()
         wallet_avail = wallet_net
         append_log("WARNING", "WALLET", f"API failure → using cached wallet={wallet_net:.2f}")
+        # Alert trader via Telegram if wallet sync fails during market hours
+        # so they know position sizing may be based on stale data.
+        if _is_market_hours(datetime.now(IST)):
+            _notify(f"⚠️ Wallet sync failed — using cached ₹{wallet_net:.2f}\nPosition sizing may be inaccurate. Check Zerodha API.")
 
     if wallet_net <= 0:
         wallet_net = float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
@@ -3101,13 +3105,16 @@ def _maybe_enter_short_from_signal(sig):
         regime=regime,
         trend_direction=str((get_market_regime_snapshot() or {}).get("trend_direction") or STATE.get("last_trend_direction") or "UNKNOWN"),
     )
+    if qty <= 0:
+        append_log("INFO", "SKIP", f"{sym} reason=qty_zero_post_allocation strategy={strategy_tag}")
+        return False
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="SHORT")
         if not allowed_open:
-            append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
+            append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
         if open_reason == "fallback_min_trade":
@@ -3138,6 +3145,10 @@ def _maybe_enter_short_from_signal(sig):
     if not _can_open_new_trade(sym, entry, qty, momentum_positive=False):
         return False
 
+    if sym in _positions():
+        append_log("WARN", "SKIP", f"{sym} reason=already_held_pre_order side=SHORT")
+        return False
+
     mode = "LIVE" if is_live_enabled() else "PAPER"
     oid = None
     booked_entry = entry
@@ -3149,7 +3160,7 @@ def _maybe_enter_short_from_signal(sig):
         append_log("INFO", "ORDER", f"symbol={sym} side=SELL family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
         oid = _place_live_order(kite, sym, "SELL", qty)
         if not oid:
-            append_log("INFO", "SKIP", f"{sym} reason=order_failed")
+            append_log("WARN", "SKIP", f"{sym} reason=order_failed side=SHORT qty={qty}")
             return False
         booked_entry = _wait_for_fill(kite, oid, booked_entry)
         append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid}")
@@ -3348,13 +3359,18 @@ def _maybe_enter_from_signal(sig):
         regime=regime,
         trend_direction=trend_direction,
     )
+    # Guard: strategy allocation can reduce qty to 0 in edge cases not covered
+    # by the floor override. Never submit a zero-qty order to the exchange.
+    if qty <= 0:
+        append_log("INFO", "SKIP", f"{sym} reason=qty_zero_post_allocation strategy={strategy_tag}")
+        return False
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
     if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
         if not allowed_open:
-            append_log("INFO", "OPEN", f"blocked {sym} reason={open_reason}")
+            append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
             return False
         open_mult = _opening_size_multiplier()
         if open_reason == "fallback_min_trade":
@@ -3385,6 +3401,12 @@ def _maybe_enter_from_signal(sig):
     if not _can_open_new_trade(sym, entry, qty, momentum_positive=momentum_positive):
         return False
 
+    # Final guard: re-check position doesn't exist immediately before placing order.
+    # Prevents double-entry if two signals arrive in the same tick.
+    if sym in _positions():
+        append_log("WARN", "SKIP", f"{sym} reason=already_held_pre_order")
+        return False
+
     mode = "LIVE" if is_live_enabled() else "PAPER"
     oid = None
     booked_entry = entry
@@ -3400,7 +3422,7 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "ORDER", f"symbol={sym} side=BUY family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
         oid = _place_live_order(kite, sym, "BUY", qty)
         if not oid:
-            append_log("INFO", "SKIP", f"{sym} reason=order_failed")
+            append_log("WARN", "SKIP", f"{sym} reason=order_failed side=BUY qty={qty}")
             return False
         booked_entry = _wait_for_fill(kite, oid, booked_entry)
         append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid}")
