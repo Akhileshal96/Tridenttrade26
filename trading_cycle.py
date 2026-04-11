@@ -4179,7 +4179,7 @@ def run_loop_forever():
     append_log(
         "INFO",
         "MARKET",
-        f"weak mode config top_n={int(_cfg_get('WEAK_MARKET_TOP_N', 10) or 10)} "
+        f"weak mode config top_n={int(_cfg_get('WEAK_MARKET_TOP_N', 20) or 20)} "
         f"min_score={float(_cfg_get('WEAK_MARKET_MIN_SCORE', 0.75) or 0.75):.2f} "
         f"size_multiplier={float(_cfg_get('WEAK_MARKET_SIZE_MULTIPLIER', 0.5) or 0.5):.2f}",
     )
