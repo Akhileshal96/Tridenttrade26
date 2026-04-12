@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import os
 import sys
 from datetime import datetime
@@ -25,8 +26,10 @@ logger.setLevel(_level())
 if not logger.handlers:
     fmt = ISTFormatter("%(asctime)s | %(levelname)s | %(message)s")
 
-    # File handler
-    fh = logging.FileHandler(LOG_FILE)
+    # Rotating file handler: 5 MB per file, keep 5 backups (25 MB total max)
+    fh = logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
     fh.setLevel(_level())
     fh.setFormatter(fmt)
     logger.addHandler(fh)

@@ -572,6 +572,8 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         if arg in ("INTRADAY", "MIS"):
             with CYCLE.STATE_LOCK:
                 CYCLE.STATE["trading_mode"] = "INTRADAY"
+            set_env_value("TRADING_MODE", "INTRADAY")
+            os.environ["TRADING_MODE"] = "INTRADAY"
             await event.reply(
                 "📊 Mode: **INTRADAY** (MIS)\n"
                 "• Orders: MIS (margin intraday)\n"
@@ -582,6 +584,8 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         elif arg in ("SWING", "CNC", "DELIVERY"):
             with CYCLE.STATE_LOCK:
                 CYCLE.STATE["trading_mode"] = "SWING"
+            set_env_value("TRADING_MODE", "SWING")
+            os.environ["TRADING_MODE"] = "SWING"
             await event.reply(
                 "📈 Mode: **SWING** (CNC)\n"
                 "• Orders: CNC (delivery)\n"

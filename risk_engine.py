@@ -1,63 +1,11 @@
 import os
-import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import config as CFG
-from broker_zerodha import get_kite
 from log_store import append_log
 
 IST = ZoneInfo("Asia/Kolkata")
-
-
-def sync_wallet(state: dict):
-    now = datetime.now(IST)
-    last = state.get("last_wallet_sync_ts")
-    interval = int(getattr(CFG, "WALLET_SYNC_INTERVAL_SEC", 120))
-    night_interval = int(getattr(CFG, "WALLET_NIGHT_SYNC_INTERVAL_SEC", 900))
-    start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-    end = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    in_market = start <= now <= end
-    min_interval = interval if in_market else night_interval
-    if last and (now - last) < timedelta(seconds=min_interval):
-        if not in_market:
-            append_log("INFO", "WALLET", "Night skip → cached wallet used")
-        return get_wallet_safe(state)
-
-    retries = int(getattr(CFG, "WALLET_SYNC_RETRIES", 3))
-    base = float(getattr(CFG, "WALLET_RETRY_BASE_SEC", 1.5))
-    for attempt in range(retries):
-        try:
-            data = get_kite().margins() or {}
-            eq = data.get("equity", {}) if isinstance(data, dict) else {}
-            wallet = float(eq.get("net") or state.get("last_wallet") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
-            avail = eq.get("available", {}) if isinstance(eq, dict) else {}
-            if isinstance(avail, dict):
-                w_av = float(avail.get("live_balance") or avail.get("cash") or avail.get("opening_balance") or wallet)
-            else:
-                w_av = wallet
-            state["last_wallet"] = wallet
-            state["wallet_net_inr"] = max(0.0, wallet)
-            state["wallet_available_inr"] = max(0.0, w_av)
-            state["last_wallet_sync_ts"] = now
-            append_log("INFO", "WALLET", f"Synced wallet={wallet:.2f}")
-            return wallet
-        except Exception as e:
-            append_log("WARNING", "WALLET", f"Attempt {attempt + 1} failed: {e}")
-            if attempt + 1 < retries:
-                append_log("WARNING", "WALLET", f"Retry {attempt + 2}/{retries}")
-                time.sleep(base * (attempt + 1))
-
-    wallet = get_wallet_safe(state)
-    state["wallet_net_inr"] = wallet
-    state["wallet_available_inr"] = wallet
-    state["last_wallet_sync_ts"] = now
-    append_log("WARNING", "WALLET", f"API failed → using cached wallet={wallet:.2f}")
-    return wallet
-
-
-def get_wallet_safe(state: dict):
-    return float(state.get("last_wallet") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
 
 
 def get_bucket_from_slab(wallet: float):

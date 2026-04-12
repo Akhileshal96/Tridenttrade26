@@ -514,7 +514,16 @@ def _ensure_day_key():
         if STATE.get("day_key") != today:
             STATE["day_key"] = today
             STATE["today_pnl"] = 0.0
+            # Preserve CNC (swing) positions across day rollover — they hold overnight.
+            # Only clear MIS (intraday) positions which should have been force-exited.
+            cnc_kept = {}
+            for sym, trade in _positions().items():
+                if str((trade or {}).get("product") or "MIS").upper() == "CNC":
+                    cnc_kept[sym] = trade
             _positions().clear()
+            if cnc_kept:
+                _positions().update(cnc_kept)
+                append_log("INFO", "DAY", f"Preserved {len(cnc_kept)} CNC positions across day rollover: {','.join(cnc_kept.keys())}")
             STATE["profit_milestone_hit"] = False
             STATE["cooldown_until"] = None
             STATE["loss_streak"] = 0
@@ -1290,12 +1299,12 @@ def _place_live_order(kite, sym, side, qty, product_override: str | None = None)
         return None
 
 
-def _wait_for_fill(kite, order_id: str, fallback_price: float, timeout: float = 6.0) -> float:
+def _wait_for_fill(kite, order_id: str, fallback_price: float, timeout: float = 6.0) -> float | None:
     """Poll order history until COMPLETE or timeout, returning the average fill price.
 
-    Falls back to *fallback_price* if the order hasn't filled within *timeout* seconds
-    or if the API call fails.  A REJECTED/CANCELLED status is logged and the fallback
-    is returned so the caller can decide how to handle it.
+    Returns ``None`` when the order was REJECTED or CANCELLED so the caller can
+    abort position creation instead of tracking a phantom trade.  Falls back to
+    *fallback_price* only on timeout (order still pending — likely to fill).
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -1311,10 +1320,10 @@ def _wait_for_fill(kite, order_id: str, fallback_price: float, timeout: float = 
                         return avg
                 elif status in ("REJECTED", "CANCELLED"):
                     append_log(
-                        "WARN", "FILL",
-                        f"order_id={order_id} status={status} — using pre-order LTP as fallback",
+                        "ERROR", "FILL",
+                        f"order_id={order_id} status={status} — aborting position creation",
                     )
-                    return fallback_price
+                    return None
         except Exception as exc:
             append_log("WARN", "FILL", f"order_history_poll_failed order_id={order_id}: {exc}")
         time.sleep(0.5)
@@ -3235,7 +3244,11 @@ def _maybe_enter_short_from_signal(sig):
         if not oid:
             append_log("WARN", "SKIP", f"{sym} reason=order_failed side=SHORT qty={qty}")
             return False
-        booked_entry = _wait_for_fill(kite, oid, booked_entry)
+        fill_price = _wait_for_fill(kite, oid, booked_entry)
+        if fill_price is None:
+            append_log("ERROR", "SKIP", f"{sym} reason=order_rejected_or_cancelled side=SHORT order_id={oid}")
+            return False
+        booked_entry = fill_price
         append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
@@ -3498,7 +3511,11 @@ def _maybe_enter_from_signal(sig):
         if not oid:
             append_log("WARN", "SKIP", f"{sym} reason=order_failed side=BUY qty={qty}")
             return False
-        booked_entry = _wait_for_fill(kite, oid, booked_entry)
+        fill_price = _wait_for_fill(kite, oid, booked_entry)
+        if fill_price is None:
+            append_log("ERROR", "SKIP", f"{sym} reason=order_rejected_or_cancelled side=BUY order_id={oid}")
+            return False
+        booked_entry = fill_price
         append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid}")
 
     PM.set(sym, {
@@ -3847,8 +3864,9 @@ def get_trailing_status_text():
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
 
         tier = str(t.get("confidence_tier") or "FULL").upper()
-        activate_inr = ee_calc_trail_activate_inr(entry, qty, tier=tier, side=side)
-        min_locked_pnl, allowed_giveback_inr = ee_dynamic_trail_levels(peak_pnl_inr, tier)
+        trade_product = str(t.get("product") or "MIS").upper()
+        activate_inr = ee_calc_trail_activate_inr(entry, qty, tier=tier, side=side, product=trade_product)
+        min_locked_pnl, allowed_giveback_inr = ee_dynamic_trail_levels(peak_pnl_inr, tier, product=trade_product)
         trigger_inr = max(min_locked_pnl, peak_pnl_inr - allowed_giveback_inr)
         trail_active = bool(t.get("trailing_active", t.get("trail_active", False)))
 

@@ -4,7 +4,7 @@ ENV_PATH = os.path.join(os.getcwd(), ".env")
 
 def set_env_value(key: str, value: str) -> None:
     """
-    Upserts KEY=VALUE into .env safely.
+    Upserts KEY=VALUE into .env safely using atomic write (temp + replace).
     """
     lines = []
     if os.path.exists(ENV_PATH):
@@ -23,8 +23,10 @@ def set_env_value(key: str, value: str) -> None:
     if not found:
         out.append(f"{key}={value}")
 
-    with open(ENV_PATH, "w") as f:
+    tmp = ENV_PATH + ".tmp"
+    with open(tmp, "w") as f:
         f.write("\n".join(out) + "\n")
+    os.replace(tmp, ENV_PATH)
 
 
 def get_env_value(key: str, default: str = "") -> str:
