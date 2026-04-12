@@ -3273,6 +3273,7 @@ def _maybe_enter_short_from_signal(sig):
         "universe_source": universe_source,
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
+        "entry_atr": float(sig.get("atr") or 0.0),
     })
     STATE["entry_tier_for_cooldown"] = str(decision.get("tier") or "").upper()
     _set_cooldown()
@@ -3540,6 +3541,7 @@ def _maybe_enter_from_signal(sig):
         "universe_source": universe_source,
         "sector": _sector_for_symbol(sym),
         "entry_time": datetime.now(IST).isoformat(timespec="seconds"),
+        "entry_atr": float(sig.get("atr") or 0.0),
     })
     STATE["entry_tier_for_cooldown"] = str(decision.get("tier") or "").upper()
     _set_cooldown()

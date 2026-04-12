@@ -48,6 +48,66 @@ def _cfg_int(name: str, default: int) -> int:
         return int(default)
 
 
+def _calc_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """Compute ATR (Average True Range) for volatility measurement."""
+    if not all(c in df.columns for c in ("high", "low", "close")):
+        return 0.0
+    if len(df) < period + 1:
+        return 0.0
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
+    prev_close = close.shift(1)
+    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    atr_val = tr.rolling(period).mean().iloc[-1]
+    return float(atr_val) if not pd.isna(atr_val) else 0.0
+
+
+def _calc_adx(df: pd.DataFrame, period: int = 14) -> float | None:
+    """Compute ADX (Average Directional Index) for trend strength.
+
+    Returns None if insufficient data. ADX > 20 indicates a meaningful trend;
+    ADX > 25 indicates a strong trend.
+    """
+    if not all(c in df.columns for c in ("high", "low", "close")):
+        return None
+    if len(df) < period * 2 + 1:
+        return None
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    prev_close = close.shift(1)
+
+    # True Range
+    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+
+    # Directional Movement
+    plus_dm = (high - prev_high).clip(lower=0)
+    minus_dm = (prev_low - low).clip(lower=0)
+    # Keep only the larger directional movement
+    plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0.0)
+
+    # Smooth with EMA
+    atr_smooth = tr.ewm(span=period, adjust=False).mean()
+    plus_dm_smooth = plus_dm.ewm(span=period, adjust=False).mean()
+    minus_dm_smooth = minus_dm.ewm(span=period, adjust=False).mean()
+
+    # Directional Indicators
+    plus_di = (plus_dm_smooth / atr_smooth.replace(0, pd.NA)) * 100.0
+    minus_di = (minus_dm_smooth / atr_smooth.replace(0, pd.NA)) * 100.0
+
+    # DX and ADX
+    di_sum = plus_di + minus_di
+    dx = ((plus_di - minus_di).abs() / di_sum.replace(0, pd.NA)) * 100.0
+    adx = dx.ewm(span=period, adjust=False).mean()
+
+    last_adx = adx.iloc[-1]
+    return float(last_adx) if not pd.isna(last_adx) else None
+
+
 def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: str = "") -> float:
     fixed_pct = _cfg_float("SMA20_ENTRY_BUFFER_PCT", 0.1) / 100.0
     pct_buffer = max(0.0, sma20 * fixed_pct)
@@ -198,15 +258,18 @@ def generate_signal(universe):
                     avg_vol = float(vol.tail(20).mean())
                     rel_vol = (float(vol.iloc[-1]) / avg_vol) if avg_vol > 0 else 0.0
                 sma_prev = float(sma20.iloc[-2]) if len(sma20) >= 2 and not pd.isna(sma20.iloc[-2]) else avg
-                atr = 0.0
-                if all(c in df.columns for c in ("high", "low", "close")) and len(df) >= 15:
-                    high = df["high"].astype(float)
-                    low = df["low"].astype(float)
-                    close = df["close"].astype(float)
-                    prev_close = close.shift(1)
-                    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
-                    atr_val = tr.rolling(14).mean().iloc[-1]
-                    atr = float(atr_val) if not pd.isna(atr_val) else 0.0
+                atr = _calc_atr(df)
+
+                # ADX trend strength filter: reject if no meaningful trend
+                if bool(getattr(_cfg_obj(), "USE_ADX_FILTER", True)):
+                    adx_val = _calc_adx(df)
+                    adx_min = _cfg_float("ADX_MIN_TREND", 20.0)
+                    if adx_val is not None and adx_val < adx_min:
+                        _reject_signal(sym, "trend_long", f"adx_too_low={adx_val:.1f}<{adx_min:.0f}")
+                        continue
+                    if adx_val is not None:
+                        append_log("INFO", "SIG", f"{sym} ADX={adx_val:.1f} (min={adx_min:.0f}) OK")
+
                 signal_score = _score_momentum_setup(last, trigger, rel_vol, avg, sma_prev, atr)
                 append_log(
                     "INFO",
@@ -222,6 +285,7 @@ def generate_signal(universe):
                     "strategy_setup": "trend_breakout",
                     "strategy_family": "trend_long",
                     "signal_score": float(signal_score),
+                    "atr": atr,
                 })
                 LAST_SIGNAL_REJECT_REASONS.pop(sym, None)
 
@@ -292,6 +356,7 @@ def generate_mean_reversion_signal(universe):
                 _reject_signal(sym, "mean_reversion", "mean_reversion_conditions_not_met")
                 continue
 
+            atr = _calc_atr(df)
             bounce_size_pct = (((last - lower) / lower) * 100.0) if lower > 0 else 0.0
             recovery_momentum_pct = (((last - prev) / prev) * 100.0) if prev > 0 else 0.0
             signal_score = _score_mean_reversion_setup(rsi_last, bounce_size_pct, recovery_momentum_pct)
@@ -309,6 +374,7 @@ def generate_mean_reversion_signal(universe):
                 "rsi": rsi_last,
                 "lower_bb": lower,
                 "signal_score": float(signal_score),
+                "atr": atr,
             })
             LAST_SIGNAL_REJECT_REASONS.pop(sym, None)
 
@@ -365,6 +431,15 @@ def generate_pullback_signal(universe):
             if not (reclaimed and shallow_pullback):
                 continue
 
+            # ADX filter: pullback continuation needs a real trend
+            if bool(getattr(_cfg_obj(), "USE_ADX_FILTER", True)):
+                adx_val = _calc_adx(df)
+                adx_min = _cfg_float("ADX_MIN_TREND", 20.0)
+                if adx_val is not None and adx_val < adx_min:
+                    _reject_signal(sym, "pullback_long", f"adx_too_low={adx_val:.1f}<{adx_min:.0f}")
+                    continue
+
+            atr = _calc_atr(df)
             append_log(
                 "INFO",
                 "SIG",
@@ -377,6 +452,7 @@ def generate_pullback_signal(universe):
                 "strategy_setup": "pullback_long",
                 "strategy_family": "pullback_long",
                 "sma20": sma_now,
+                "atr": atr,
             }
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
@@ -471,6 +547,7 @@ def generate_vwap_ema_signal(universe: list) -> dict | None:
             if score < min_score:
                 continue
 
+            atr = _calc_atr(df)
             append_log("INFO", "SIG", f"{sym} VWAP+EMA candidate score={score:.4f} last={last:.2f} vwap={vwap:.2f} ema9={ema9:.2f} ema21={ema21:.2f}")
             candidates.append(
                 {
@@ -482,6 +559,7 @@ def generate_vwap_ema_signal(universe: list) -> dict | None:
                     "ema21": ema21,
                     "signal_score": float(score),
                     "strategy_tag": "vwap_ema",
+                    "atr": atr,
                 }
             )
         except Exception as e:

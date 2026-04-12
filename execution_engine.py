@@ -1,5 +1,10 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import config as CFG
 from log_store import append_log
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def check_time_exit(force_exit_check) -> bool:
@@ -161,16 +166,49 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         if min_locked_pnl > 0:
             trade["breakeven_armed"] = True
 
-        if check_stoploss(pnl_pct, side=side, product=trade_product):
-            close_position(sym, reason="SL", ltp_override=ltp)
-            continue
+        # --- ATR-based adaptive stoploss (per-stock volatility) ---
+        entry_atr = float(trade.get("entry_atr") or 0.0)
+        sl_used = "FIXED"
+        if entry_atr > 0 and bool(getattr(CFG, "USE_ATR_STOPLOSS", True)):
+            atr_mult = float(getattr(CFG, "ATR_STOPLOSS_MULT", 1.5))
+            if side == "SHORT":
+                atr_mult = float(getattr(CFG, "ATR_STOPLOSS_SHORT_MULT", 1.2))
+            is_swing = trade_product == "CNC"
+            if is_swing:
+                atr_mult *= float(getattr(CFG, "SWING_STOPLOSS_MULT", 1.5) or 1.5)
+            atr_stop_dist = entry_atr * atr_mult
+            # Hard ceiling: never wider than ATR_STOPLOSS_MAX_PCT
+            max_pct = float(getattr(CFG, "ATR_STOPLOSS_MAX_PCT", 4.0))
+            atr_stop_pct = (atr_stop_dist / entry) * 100.0 if entry > 0 else 0.0
+            if atr_stop_pct > max_pct:
+                atr_stop_dist = entry * max_pct / 100.0
+                atr_stop_pct = max_pct
+            if side == "SHORT":
+                atr_sl_hit = ltp >= entry + atr_stop_dist
+            else:
+                atr_sl_hit = ltp <= entry - atr_stop_dist
+            if atr_sl_hit:
+                append_log(
+                    "WARN", "SL",
+                    f"{sym} ATR stoploss hit atr={entry_atr:.2f} mult={atr_mult:.2f} "
+                    f"stop_dist={atr_stop_dist:.2f} stop_pct={atr_stop_pct:.1f}%",
+                )
+                close_position(sym, reason="SL_ATR", ltp_override=ltp)
+                continue
+            sl_used = f"ATR({atr_stop_pct:.1f}%)"
+        else:
+            # Fallback: fixed % stoploss
+            if check_stoploss(pnl_pct, side=side, product=trade_product):
+                close_position(sym, reason="SL", ltp_override=ltp)
+                continue
 
         append_log(
             "INFO",
             "RISK",
             f"[RISK] {sym} side={side} qty={qty} tier={tier} entry={entry:.2f} ltp={ltp:.2f} pnl_inr={pnl_inr:.2f} "
             f"peak_pnl_inr={peak_pnl_inr:.2f} trail_active={trail_active} activate_inr={activate_inr:.2f} "
-            f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} trigger_inr={trigger_inr:.2f}",
+            f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} trigger_inr={trigger_inr:.2f} "
+            f"sl_type={sl_used}",
         )
 
         if check_trailing(trade, pnl_inr, trigger_inr):
@@ -182,6 +220,30 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
                 f"min_locked_pnl={min_locked_pnl:.2f} allowed_giveback_inr={allowed_giveback_inr:.2f} trigger_inr={trigger_inr:.2f}",
             )
             close_position(sym, reason=reason, ltp_override=ltp)
+            continue
+
+        # --- Time-decay exit: close flat positions held too long (MIS only) ---
+        entry_time_str = str(trade.get("entry_time") or "")
+        if (
+            entry_time_str
+            and trade_product != "CNC"
+            and not trail_active
+            and bool(getattr(CFG, "USE_TIME_DECAY_EXIT", True))
+        ):
+            try:
+                entry_dt = datetime.fromisoformat(entry_time_str)
+                elapsed_min = (datetime.now(IST) - entry_dt).total_seconds() / 60.0
+                decay_min = float(getattr(CFG, "TIME_DECAY_MINUTES", 90))
+                decay_max_pnl = float(getattr(CFG, "TIME_DECAY_MAX_PNL_PCT", 0.3))
+                if elapsed_min >= decay_min and abs(pnl_pct) <= decay_max_pnl:
+                    append_log(
+                        "WARN", "EXIT",
+                        f"{sym} TIME_DECAY exit elapsed={elapsed_min:.0f}min pnl_pct={pnl_pct:.2f}% "
+                        f"(flat>{decay_min:.0f}min, threshold={decay_max_pnl}%)",
+                    )
+                    close_position(sym, reason="TIME_DECAY", ltp_override=ltp)
+            except Exception:
+                pass
 
 
 def process_entries(universe, positions: dict, signal_fn, try_enter_fn, max_new=5):
