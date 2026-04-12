@@ -53,6 +53,8 @@ def _main_buttons(handlers=None):
         [Button.inline("▶ Start Loop", b"cp:cmd:startloop"), Button.inline("⏸ Stop Loop", b"cp:cmd:stoploop")],
         [Button.inline("📊 Status", b"cp:cmd:status"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
+        # Trading mode toggle
+        [Button.inline("📊 Intraday Mode", b"cp:cmd:mode_intraday"), Button.inline("📈 Swing Mode", b"cp:cmd:mode_swing")],
         # Category panels
         [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research")],
         [Button.inline("📜 Logs", b"cp:panel:logs"), Button.inline("🔐 Token", b"cp:panel:token")],

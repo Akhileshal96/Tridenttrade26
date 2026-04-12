@@ -556,8 +556,15 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         await event.reply("⏸️ Loop Paused")
         return True
 
-    # ===== Trading Mode Switch =====
-    if cmd_word == "/mode":
+    # ===== Trading Mode Switch (button + command) =====
+    if cmd_word in ("/mode_intraday", "/mode_swing"):
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        cmd_arg = "INTRADAY" if "intraday" in cmd_word else "SWING"
+        # Fall through to /mode handler below
+
+    if cmd_word == "/mode" or cmd_word in ("/mode_intraday", "/mode_swing"):
         if not _is_trader(sender):
             await event.reply("❌ Not permitted (Trader/Owner only).")
             return True
@@ -1003,6 +1010,8 @@ async def main():
         "panic": _mk_panel_handler("panic"),
         "resetday": _mk_panel_handler("resetday"),
         "excluded": _mk_panel_handler("excluded"),
+        "mode_intraday": _mk_panel_handler("mode_intraday"),
+        "mode_swing": _mk_panel_handler("mode_swing"),
     }
     register_control_panel(client, panel_handlers)
 
