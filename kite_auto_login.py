@@ -111,23 +111,31 @@ def auto_renew_kite_token() -> tuple[bool, str]:
     # ── Step 3: Extract request_token from redirect URL ────────────────────
     # After 2FA, the session cookie is set. Hit the Kite login URL to get
     # the redirect containing request_token.
+    #
+    # IMPORTANT: Do NOT follow redirects (allow_redirects=False).
+    # The redirect URL points to the app's configured redirect_url (often
+    # 127.0.0.1:8000) which doesn't exist on a headless EC2 server.
+    # The request_token is embedded in the Location header — extract it
+    # directly without actually connecting to the redirect target.
     login_url = (
         f"https://kite.zerodha.com/connect/login"
         f"?api_key={api_key}&v=3"
     )
     try:
-        r3 = session.get(login_url, timeout=15, allow_redirects=True)
+        r3 = session.get(login_url, timeout=15, allow_redirects=False)
     except Exception as e:
         return False, f"redirect_fetch_failed: {e}"
 
-    # request_token is in the final URL after redirect
-    final_url = r3.url
-    match = re.search(r"request_token=([A-Za-z0-9]+)", final_url)
+    # Extract from Location header (302 redirect) first, then fall back
+    # to final URL and response body.
+    redirect_url = r3.headers.get("Location") or r3.url or ""
+    match = re.search(r"request_token=([A-Za-z0-9]+)", redirect_url)
     if not match:
-        # Also check response text for embedded token
+        match = re.search(r"request_token=([A-Za-z0-9]+)", r3.url)
+    if not match:
         match = re.search(r"request_token=([A-Za-z0-9]+)", r3.text)
     if not match:
-        return False, f"request_token_not_found_in_redirect url={final_url[:120]}"
+        return False, f"request_token_not_found_in_redirect url={redirect_url[:120]}"
 
     request_token = match.group(1)
 
