@@ -48,8 +48,8 @@ STATE = {
     "wallet_net_inr": 0.0,
     "wallet_available_inr": 0.0,
     "last_wallet": float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0),
-    "daily_loss_cap_inr": float(getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0)),
-    "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 90.0)),
+    "daily_loss_cap_inr": float(getattr(CFG, "DAILY_LOSS_CAP_INR", 300.0)),
+    "daily_profit_milestone_inr": float(getattr(CFG, "DAILY_PROFIT_TARGET_INR", 200.0)),
     "profit_milestone_hit": False,
     "last_wallet_sync_ts": None,
     "wallet_cached_mode_until": None,
@@ -111,6 +111,8 @@ STATE = {
     "ip_last_check_ts": 0.0,
     "ip_manual_rearm_required": False,
     "live_order_allowed": False,
+    # Trading mode: "INTRADAY" (MIS, force exit 15:10) or "SWING" (CNC, hold overnight, zero brokerage)
+    "trading_mode": str(os.getenv("TRADING_MODE", "INTRADAY")).strip().upper(),
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -124,7 +126,7 @@ RUNTIME = {
     "BUCKET_INR": float(getattr(CFG, "BUCKET_INR", 1000.0)),
     "BUCKET_MIN_INR": float(getattr(CFG, "BUCKET_MIN_INR", 1000.0)),
     "BUCKET_MAX_INR": float(getattr(CFG, "BUCKET_MAX_INR", 5000.0)),
-    "MAX_EXPOSURE_PCT": float(getattr(CFG, "MAX_EXPOSURE_PCT", 60.0)),
+    "MAX_EXPOSURE_PCT": float(getattr(CFG, "MAX_EXPOSURE_PCT", 75.0)),
     "USE_BUCKET_SLABS": bool(getattr(CFG, "USE_BUCKET_SLABS", True)),
     "SOFT_PROFIT_TARGET": str(os.getenv("SOFT_PROFIT_TARGET", "true")).strip().lower() == "true",
 }
@@ -153,6 +155,7 @@ _STATE_PERSIST_KEYS = [
     "cooldown_until",
     "pause_entries_until",
     "positions",
+    "trading_mode",
 ]
 
 
@@ -914,8 +917,12 @@ def _sync_wallet_and_caps(force=False):
     STATE["wallet_net_inr"] = max(0.0, wallet_net)
     STATE["wallet_available_inr"] = max(0.0, wallet_avail if wallet_avail > 0 else wallet_net)
 
-    loss_pct = float(os.getenv("DAILY_LOSS_CAP_PCT", "2.0"))
-    prof_pct = float(os.getenv("DAILY_PROFIT_MILESTONE_PCT", os.getenv("DAILY_PROFIT_TARGET_PCT", "1.0")))
+    # Dynamic daily guards: percentage of wallet auto-fetched each sync.
+    # Raised defaults: 3% loss cap (was 2%), 2% profit milestone (was 1%)
+    # so a 10k wallet gets ₹300 loss cap / ₹200 profit milestone instead of
+    # the old ₹200/₹90 which choked profitable days too early.
+    loss_pct = float(os.getenv("DAILY_LOSS_CAP_PCT", "3.0"))
+    prof_pct = float(os.getenv("DAILY_PROFIT_MILESTONE_PCT", os.getenv("DAILY_PROFIT_TARGET_PCT", "2.0")))
     if STATE["wallet_net_inr"] > 0:
         STATE["daily_loss_cap_inr"] = STATE["wallet_net_inr"] * loss_pct / 100.0
         STATE["daily_profit_milestone_inr"] = STATE["wallet_net_inr"] * prof_pct / 100.0
@@ -943,27 +950,42 @@ def _max_exposure_inr():
 
 
 def _bucket_inr(wallet_net: float) -> float:
-    if bool(RUNTIME.get("USE_BUCKET_SLABS", True)):
-        if wallet_net < 5000:
-            return 500.0
-        if wallet_net <= 15000:
-            return 5000.0
-        if wallet_net <= 30000:
-            return 7000.0
-        if wallet_net <= 60000:
-            return 10000.0
-        if wallet_net <= 100000:
-            return 15000.0
-        return 20000.0
-
-    mode = str(RUNTIME.get("BUCKET_MODE", "PCT")).upper()
-    if mode == "PCT":
-        bucket = wallet_net * float(RUNTIME.get("BUCKET_PCT", 10.0)) / 100.0
-    else:
-        bucket = float(RUNTIME.get("BUCKET_INR", 1000.0))
-    bmin = float(RUNTIME.get("BUCKET_MIN_INR", 1000.0))
-    bmax = float(RUNTIME.get("BUCKET_MAX_INR", 5000.0))
+    # Aggressive percentage-based bucket for concentrated quality trades.
+    # Default 35% of wallet per trade — with max 3 concurrent on a 10k
+    # wallet, this means ~₹3,500 per position, filling 75% exposure fast
+    # with fewer, bigger bets on high-conviction setups.
+    bucket_pct = max(1.0, float(_cfg_get("BUCKET_ALLOC_PCT", 35.0) or 35.0))
+    bucket = wallet_net * bucket_pct / 100.0
+    # Floor: at least 15% of wallet (no dust positions)
+    # Ceiling: at most 50% of wallet (single trade can be half the wallet
+    # on a FULL-confidence trending setup)
+    floor_pct = max(1.0, float(_cfg_get("BUCKET_FLOOR_PCT", 15.0) or 15.0))
+    ceil_pct = max(floor_pct + 1, float(_cfg_get("BUCKET_CEIL_PCT", 50.0) or 50.0))
+    bmin = wallet_net * floor_pct / 100.0
+    bmax = wallet_net * ceil_pct / 100.0
     return max(bmin, min(bucket, bmax))
+
+
+def _dynamic_max_concurrent() -> int:
+    """Scale max concurrent trades with wallet size.
+
+    Concentrated approach: fewer, bigger trades for max profit.
+    Small accounts get 2-3 positions, larger accounts top out at 5.
+    """
+    wallet = float(STATE.get("wallet_net_inr") or 0.0)
+    cfg_override = int(_cfg_get("MAX_CONCURRENT_TRADES", 0) or 0)
+    if cfg_override > 0:
+        # User explicitly set a fixed value — respect it
+        return max(1, cfg_override)
+    if wallet <= 0:
+        return 2
+    if wallet < 15000:
+        return 2
+    if wallet < 30000:
+        return 3
+    if wallet < 60000:
+        return 4
+    return 5
 
 
 def _regime_size_multiplier(side: str, regime: str, trend_direction: str) -> float:
@@ -972,18 +994,20 @@ def _regime_size_multiplier(side: str, regime: str, trend_direction: str) -> flo
     td = str(trend_direction or "UNKNOWN").upper()
     if s == "BUY":
         if rg in ("TRENDING", "TRENDING_UP") and td == "UP":
-            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.10) or 1.10)
+            # Regime-aligned long: go big — this is the best setup.
+            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.25) or 1.25)
         if rg in ("VOLATILE", "UNKNOWN"):
-            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.85) or 0.85)
+            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.75) or 0.75)
         if rg == "SIDEWAYS":
-            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.95) or 0.95)
+            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.85) or 0.85)
     else:
         if rg in ("WEAK", "TRENDING_DOWN") and td == "DOWN":
-            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.10) or 1.10)
+            # Regime-aligned short: go big on confirmed downtrend.
+            return float(_cfg_get("SIZE_REGIME_ALIGNED_MULT", 1.25) or 1.25)
         if rg in ("VOLATILE", "UNKNOWN"):
-            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.85) or 0.85)
+            return float(_cfg_get("SIZE_REGIME_WEAK_MULT", 0.75) or 0.75)
         if rg == "SIDEWAYS":
-            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.90) or 0.90)
+            return float(_cfg_get("SIZE_REGIME_SIDEWAYS_MULT", 0.80) or 0.80)
     return 1.0
 
 
@@ -995,8 +1019,8 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     wallet_available = float(STATE.get("wallet_available_inr") or wallet)
     open_exposure = float(_current_exposure_inr())
     open_count = int(_open_positions_count())
-    max_concurrent = max(1, int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8))
-    deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 60.0) or 60.0)))
+    max_concurrent = _dynamic_max_concurrent()
+    deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 75.0) or 75.0)))
     deployable_capital = wallet * (deployable_pct / 100.0)
     usable_capital = max(0.0, deployable_capital - open_exposure)
     exposure_remaining = max(0.0, _max_exposure_inr() - open_exposure)
@@ -1008,20 +1032,23 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     tw = float(tier_weight or 1.0)
     slot_pressure = max(0.0, 1.0 - (open_count / float(max_concurrent)))
     if slot_pressure >= 0.75:
-        # Raised from 0.42 → 0.52: more slots free means larger per-trade allocation.
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_HIGH", 0.52) or 0.52)
+        # Aggressive: when most slots free, deploy 65% of usable capital per trade.
+        # On a 10k wallet with 3 slots and 0 open: usable=7500, target=4875.
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_HIGH", 0.65) or 0.65)
     elif slot_pressure >= 0.50:
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_MED", 0.38) or 0.38)
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_MED", 0.45) or 0.45)
     else:
-        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_LOW", 0.25) or 0.25)
+        opportunity_share = float(_cfg_get("OPPORTUNITY_SHARE_LOW", 0.30) or 0.30)
     confidence_mult = max(0.2, tw)
     if tier_u == "FULL":
-        confidence_mult *= float(_cfg_get("SIZE_CONF_FULL_MULT", 1.20) or 1.20)
+        # FULL tier gets 1.40x — reward high-conviction trades with bigger size.
+        confidence_mult *= float(_cfg_get("SIZE_CONF_FULL_MULT", 1.40) or 1.40)
     elif tier_u == "REDUCED":
-        # Raised from 1.00 → 1.10: creates meaningful 3-tier gradient FULL=1.20 REDUCED=1.10 MICRO=0.60.
-        confidence_mult *= float(_cfg_get("SIZE_CONF_REDUCED_MULT", 1.10) or 1.10)
+        confidence_mult *= float(_cfg_get("SIZE_CONF_REDUCED_MULT", 1.00) or 1.00)
     else:
-        confidence_mult *= float(_cfg_get("SIZE_CONF_MICRO_MULT", 0.60) or 0.60)
+        # MICRO = low conviction — tiny size, barely worth taking.
+        # Better to skip than waste a slot on a weak setup.
+        confidence_mult *= float(_cfg_get("SIZE_CONF_MICRO_MULT", 0.40) or 0.40)
     regime_mult = _regime_size_multiplier(side, regime, trend_direction)
     utilization = (open_exposure / deployable_capital) if deployable_capital > 0 else 0.0
     uplift = 1.0
@@ -1041,17 +1068,29 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     symbol_cap_qty = int(symbol_cap / price) if price > 0 else 0
     affordability_qty = int(affordability_cap / price) if price > 0 else 0
     stoploss_pct = max(0.01, float(_cfg_get("SHORT_STOPLOSS_PCT", 1.2) if str(side).upper() == "SELL" else _cfg_get("STOPLOSS_PCT", 2.0)) or 2.0)
-    risk_per_trade_pct = max(0.01, float(_cfg_get("RISK_PER_TRADE_PCT", 1.0) or 1.0))
+    # Dynamic risk sizing: risk budget = RISK_PER_TRADE_PCT of wallet.
+    # Default raised from 1.0% → 2.0% so risk_qty doesn't strangle capital_qty
+    # on small accounts (10k wallet @ 1% = ₹100 risk budget = tiny positions).
+    risk_per_trade_pct = max(0.01, float(_cfg_get("RISK_PER_TRADE_PCT", 2.0) or 2.0))
     risk_amount = wallet * (risk_per_trade_pct / 100.0)
     per_share_risk = price * (stoploss_pct / 100.0) if price > 0 else 0.0
     risk_qty = int(risk_amount / per_share_risk) if per_share_risk > 0 else 0
 
-    qty = min(max(0, qty_from_capital), max(0, risk_qty))
+    # Blend capital_qty and risk_qty instead of strict min().
+    # Use weighted average (70% capital, 30% risk) when capital_qty > risk_qty,
+    # so risk acts as a drag, not a hard ceiling.  Still hard-capped at
+    # symbol_cap_qty and affordability_qty for safety.
+    cq = max(0, qty_from_capital)
+    rq = max(0, risk_qty)
+    if cq > rq and rq > 0:
+        qty = int(rq * 0.30 + cq * 0.70)
+    else:
+        qty = min(cq, rq)
     reason_chain = [f"capital_qty={qty_from_capital}", f"risk_qty={risk_qty}", f"symbol_cap_qty={symbol_cap_qty}", f"affordability_qty={affordability_qty}"]
     short_policy_qty = qty
     if str(side or "BUY").upper() == "SELL":
         short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
-        short_mult = float(_cfg_get("SHORT_SIZE_ALIGNED_MULT", 1.0) if short_aligned else _cfg_get("SHORT_SIZE_NON_ALIGNED_MULT", _cfg_get("SHORT_SIZE_MULTIPLIER", 0.5)) or 0.5)
+        short_mult = float(_cfg_get("SHORT_SIZE_ALIGNED_MULT", 1.0) if short_aligned else _cfg_get("SHORT_SIZE_NON_ALIGNED_MULT", _cfg_get("SHORT_SIZE_MULTIPLIER", 0.75)) or 0.75)
         short_policy_qty = int(math.floor(qty * max(0.1, short_mult)))
         qty = short_policy_qty
         reason_chain.append(f"short_policy_qty={short_policy_qty}")
@@ -1192,7 +1231,21 @@ def place_order_safe(kite, **kwargs):
     return _place_order_http_fallback(kite, params)
 
 
-def _place_live_order(kite, sym, side, qty):
+def _get_product_for_mode(product_override: str | None = None) -> str:
+    """Return order product type based on trading mode.
+
+    SWING mode → CNC (delivery, zero brokerage, hold overnight).
+    INTRADAY mode → MIS (margin intraday, auto-squared off by broker at 3:20).
+    """
+    if product_override:
+        return product_override
+    mode = str(STATE.get("trading_mode") or "INTRADAY").upper()
+    if mode == "SWING":
+        return "CNC"
+    return str(CFG.PRODUCT or "MIS")
+
+
+def _place_live_order(kite, sym, side, qty, product_override: str | None = None):
     evaluate_ip_compliance(force=False)
     if not bool(STATE.get("live_order_allowed")):
         append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: ip_non_compliant_or_not_rearmed")
@@ -1203,6 +1256,7 @@ def _place_live_order(kite, sym, side, qty):
         append_log("ERROR", "ORDER", f"Order blocked {sym} {side} qty={qty}: market_protection_invalid")
         return None
 
+    product = _get_product_for_mode(product_override)
     retries = 3
     backoff = 0.25
     try:
@@ -1216,12 +1270,13 @@ def _place_live_order(kite, sym, side, qty):
                     tradingsymbol=sym,
                     transaction_type=kite.TRANSACTION_TYPE_BUY if side == "BUY" else kite.TRANSACTION_TYPE_SELL,
                     quantity=qty,
-                    product=CFG.PRODUCT,
+                    product=product,
                 )
                 kwargs["order_type"] = order_type
                 slm_const = getattr(kite, "ORDER_TYPE_SLM", "SL-M")
                 if order_type in (kite.ORDER_TYPE_MARKET, slm_const):
                     kwargs["market_protection"] = market_protection
+                append_log("INFO", "ORDER", f"Placing {side} {qty}x {sym} product={product}")
                 return place_order_safe(kite, **kwargs)
             except Exception as e:
                 msg = str(e)
@@ -1231,7 +1286,7 @@ def _place_live_order(kite, sym, side, qty):
                     continue
                 raise
     except Exception as e:
-        append_log("ERROR", "ORDER", f"Order failed {sym} {side} qty={qty}: {e}")
+        append_log("ERROR", "ORDER", f"Order failed {sym} {side} qty={qty} product={product}: {e}")
         return None
 
 
@@ -1381,8 +1436,10 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     kite = get_kite()
     oid = None
     close_side = "BUY" if side == "SHORT" else "SELL"
+    # Close with the same product type the trade was opened with.
+    trade_product = str(trade.get("product") or _get_product_for_mode())
     for _ in range(3):
-        oid = _place_live_order(kite, sym, close_side, qty)
+        oid = _place_live_order(kite, sym, close_side, qty, product_override=trade_product)
         if oid:
             break
         time.sleep(0.6)
@@ -1496,8 +1553,15 @@ def _close_all_open_trades(reason="MANUAL"):
 
 def _within_entry_window():
     now = datetime.now(IST)
-    sh, sm = _parse_hhmm(getattr(CFG, "ENTRY_START", "09:20"))
-    eh, em = _parse_hhmm(getattr(CFG, "ENTRY_END", "14:30"))
+    mode = str(STATE.get("trading_mode") or "INTRADAY").upper()
+    if mode == "SWING":
+        # Swing/CNC: wider entry window — can buy anytime during market hours.
+        # Skip the volatile open (09:15-09:20), allow entries until 15:15.
+        sh, sm = _parse_hhmm(os.getenv("SWING_ENTRY_START", "09:20"))
+        eh, em = _parse_hhmm(os.getenv("SWING_ENTRY_END", "15:15"))
+    else:
+        sh, sm = _parse_hhmm(getattr(CFG, "ENTRY_START", "09:20"))
+        eh, em = _parse_hhmm(getattr(CFG, "ENTRY_END", "14:30"))
     start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
     end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     return start <= now <= end
@@ -1542,7 +1606,7 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=already_held")
         return False
 
-    max_pos = int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8)
+    max_pos = _dynamic_max_concurrent()
     if _open_positions_count() >= max_pos:
         append_log("INFO", "SKIP", f"{sym} reason=max_positions")
         return False
@@ -3052,6 +3116,11 @@ def build_fallback_universe() -> list:
 def _maybe_enter_short_from_signal(sig):
     if not sig:
         return False
+    # CNC (delivery) does not support short selling on Zerodha.
+    # Only MIS (intraday) allows shorting.
+    if str(STATE.get("trading_mode") or "INTRADAY").upper() == "SWING":
+        append_log("INFO", "SKIP", "Short blocked: SWING/CNC mode does not support short selling")
+        return False
     _record_signal_seen()
     sym = str(sig.get("symbol") or "").strip().upper()
     entry = float(sig.get("entry") or 0.0)
@@ -3060,7 +3129,11 @@ def _maybe_enter_short_from_signal(sig):
     if not sym or entry <= 0:
         return False
 
-    if _open_short_positions_count() >= int(getattr(CFG, "MAX_SHORT_POSITIONS", 2) or 2):
+    # Dynamic short limit: up to half of max concurrent slots (min 2).
+    # Scales with wallet — 10k wallet with 3 slots → max 2 shorts;
+    # 50k wallet with 6 slots → max 3 shorts.
+    max_short = max(2, _dynamic_max_concurrent() // 2)
+    if _open_short_positions_count() >= max_short:
         append_log("WARN", "RISK", "max short positions reached")
         return False
 
@@ -3178,6 +3251,7 @@ def _maybe_enter_short_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
+        "product": _get_product_for_mode(),
         "strategy_tag": strategy_tag,
         "strategy_family": strategy_family,
         "confidence_tier": str(decision.get("tier") or "BLOCK"),
@@ -3440,6 +3514,7 @@ def _maybe_enter_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
+        "product": _get_product_for_mode(),
         "strategy_tag": strategy_tag,
         "strategy_family": strategy_family,
         "confidence_tier": str(decision.get("tier") or "BLOCK"),
@@ -3548,6 +3623,7 @@ def get_status_text():
         "📟 Trident Status\n\n"
         f"Runtime: {runtime_ver}\n"
         f"Mode: {mode}\n"
+        f"Trading Mode: {str(STATE.get('trading_mode') or 'INTRADAY').upper()} ({'CNC ₹0 brokerage' if str(STATE.get('trading_mode') or '').upper() == 'SWING' else 'MIS ₹20/order'})\n"
         f"Paused: {STATE.get('paused')}\n"
         f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
         f"Universe(trading): {len(load_universe_trading())} symbols\n"
@@ -3870,7 +3946,10 @@ def reconcile_broker_positions():
             continue
         avg = float((p or {}).get("average_price") or 0.0)
         side = "BUY" if qty > 0 else "SHORT"
-        broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side}
+        # Capture product type from broker so reconciled positions get correct
+        # MIS/CNC handling (force exit, trailing, stoploss widths).
+        product = str((p or {}).get("product") or _get_product_for_mode()).upper()
+        broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side, "product": product}
     # Only remove local positions if broker returned at least one position OR
     # we have confirmed the account is genuinely flat (local also has no positions).
     # This prevents a network glitch / empty response from wiping position memory.
@@ -3901,6 +3980,7 @@ def reconcile_broker_positions():
             "trail_active": False,
             "trailing_active": False,
             "order_id": None,
+            "product": bp.get("product", _get_product_for_mode()),
             "strategy_tag": "reconciled_external",
             "strategy_family": "reconciled_external",
             "confidence_tier": "RECON",
@@ -3981,15 +4061,26 @@ def tick():
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):
             safe_set(STATE, "force_exit_done", True)
-            append_log("WARN", "TIME", "FORCE_EXIT triggered")
-            positions_before = _open_positions_count()
-            ee_force_exit_all(_positions(), _close_position, reason="TIME")
-            safe_set(STATE, "paused", True)
+            # Only force-exit MIS (intraday) positions. CNC (swing) positions
+            # are held overnight — broker won't auto-square them.
+            mis_positions = {s: t for s, t in _positions().items()
+                            if str(t.get("product") or "MIS").upper() == "MIS"}
+            cnc_positions = {s: t for s, t in _positions().items()
+                            if str(t.get("product") or "MIS").upper() == "CNC"}
+            if mis_positions:
+                append_log("WARN", "TIME", f"FORCE_EXIT triggered for {len(mis_positions)} MIS positions")
+                ee_force_exit_all(mis_positions, _close_position, reason="TIME")
+            if cnc_positions:
+                append_log("INFO", "TIME", f"SWING mode: {len(cnc_positions)} CNC positions held overnight")
+            # Only pause if no CNC positions remain — swing mode continues next day
+            if not cnc_positions:
+                safe_set(STATE, "paused", True)
             day_pnl = float(STATE.get("today_pnl") or 0.0)
             pnl_label = "Profit" if day_pnl >= 0 else "Loss"
             _notify(
                 "🧾 Trading Day Brief\n"
-                f"- Positions Closed (TIME): {positions_before}\n"
+                f"- MIS Closed (TIME): {len(mis_positions)}\n"
+                f"- CNC Held Overnight: {len(cnc_positions)}\n"
                 f"- Day {pnl_label}: ₹{abs(day_pnl):.2f}\n"
                 f"- Net Day PnL: ₹{day_pnl:.2f}\n"
                 f"- Open Positions Now: {_open_positions_count()}"
@@ -4049,7 +4140,7 @@ def tick():
         _record_universe_change("active_universe_fallback", "research_universe", active_universe, [], fallback_active=bool(STATE.get("fallback_mode_active")))
 
     max_new_cfg = int(os.getenv("MAX_NEW_ENTRIES_PER_TICK", "5"))
-    max_concurrent = int(_cfg_get("MAX_CONCURRENT_TRADES", 8) or 8)
+    max_concurrent = _dynamic_max_concurrent()
     remaining_slots = max(0, max_concurrent - _open_positions_count())
     max_new = max(0, min(max_new_cfg, remaining_slots))
     if max_new <= 0:

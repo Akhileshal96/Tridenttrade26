@@ -6,12 +6,18 @@ def check_time_exit(force_exit_check) -> bool:
     return bool(force_exit_check())
 
 
-def check_stoploss(pnl_pct: float, side: str = "LONG") -> bool:
+def check_stoploss(pnl_pct: float, side: str = "LONG", product: str = "MIS") -> bool:
     s = str(side or "LONG").upper()
+    is_swing = str(product or "MIS").upper() == "CNC"
     if s == "SHORT":
         lim = abs(float(getattr(CFG, "SHORT_STOPLOSS_PCT", 1.2)))
     else:
         lim = abs(float(getattr(CFG, "STOPLOSS_PCT", 2.0)))
+    # Swing/CNC trades get wider stoploss (1.5x) — overnight gaps and
+    # multi-day holds need more room to breathe.
+    if is_swing:
+        swing_mult = float(getattr(CFG, "SWING_STOPLOSS_MULT", 1.5) or 1.5)
+        lim = lim * swing_mult
     return pnl_pct <= -lim
 
 
@@ -28,7 +34,7 @@ def close_position(close_position_fn, sym: str, reason: str, ltp_override=None):
     return close_position_fn(sym, reason=reason, ltp_override=ltp_override)
 
 
-def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: str = "LONG") -> float:
+def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: str = "LONG", product: str = "MIS") -> float:
     position_value = float(entry) * max(1, int(qty))
     t = str(tier or "FULL").upper()
     s = str(side or "LONG").upper()
@@ -43,11 +49,16 @@ def _calc_trail_activate_inr(entry: float, qty: int, tier: str = "FULL", side: s
         floor = float(getattr(CFG, "TRAIL_ACTIVATE_FULL_FLOOR_INR", 5.0) or 5.0)
     if s == "SHORT" and position_value <= float(getattr(CFG, "SHORT_SMALL_POSITION_VALUE_INR", 8000.0) or 8000.0):
         floor = min(floor, float(getattr(CFG, "SHORT_SMALL_TRAIL_FLOOR_INR", 3.0) or 3.0))
+    # Swing trades: higher activation threshold — let profits build before
+    # engaging trail. Prevents premature trailing on normal intraday noise.
+    if str(product or "MIS").upper() == "CNC":
+        pct *= float(getattr(CFG, "SWING_TRAIL_ACTIVATE_MULT", 2.0) or 2.0)
+        floor *= float(getattr(CFG, "SWING_TRAIL_ACTIVATE_MULT", 2.0) or 2.0)
     dynamic = position_value * pct
     return max(floor, dynamic)
 
 
-def _dynamic_trail_levels(peak_pnl_inr: float, tier: str) -> tuple[float, float]:
+def _dynamic_trail_levels(peak_pnl_inr: float, tier: str, product: str = "MIS") -> tuple[float, float]:
     t = str(tier or "FULL").upper()
     if t == "MICRO":
         be_arm = float(getattr(CFG, "TRAIL_BE_ARM_MICRO_INR", 2.5) or 2.5)
@@ -58,14 +69,19 @@ def _dynamic_trail_levels(peak_pnl_inr: float, tier: str) -> tuple[float, float]
     else:
         be_arm = float(getattr(CFG, "TRAIL_BE_ARM_FULL_INR", 6.0) or 6.0)
         min_lock_floor = float(getattr(CFG, "TRAIL_BE_LOCK_FULL_INR", 0.5) or 0.5)
+    # Swing/CNC trades get wider giveback — multi-day holds have bigger
+    # intraday swings, tighter trailing causes premature exits.
+    is_swing = str(product or "MIS").upper() == "CNC"
+    swing_widen = float(getattr(CFG, "SWING_TRAIL_WIDEN_MULT", 1.5) or 1.5) if is_swing else 1.0
+
     if peak_pnl_inr < be_arm:
-        # Early profit stage: allow 35% giveback (was 60% — too wide, exited too early)
-        return 0.0, max(2.0, peak_pnl_inr * 0.35)
+        # Early profit stage: 35% giveback (intraday) / 52% (swing)
+        return 0.0, max(2.0 * swing_widen, peak_pnl_inr * 0.35 * swing_widen)
     if peak_pnl_inr < (be_arm * 2.0):
-        # Breakeven stage: allow 30% giveback once BE armed (was 45%)
-        return min_lock_floor, max(2.0, peak_pnl_inr * 0.30)
-    # Strong profit stage: lock 10%, allow only 20% giveback (was 30%)
-    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5, peak_pnl_inr * 0.20)
+        # Breakeven stage: 30% giveback (intraday) / 45% (swing)
+        return min_lock_floor, max(2.0 * swing_widen, peak_pnl_inr * 0.30 * swing_widen)
+    # Strong profit stage: lock 10%, 20% giveback (intraday) / 30% (swing)
+    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5 * swing_widen, peak_pnl_inr * 0.20 * swing_widen)
 
 
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
@@ -105,7 +121,9 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         # Reset LTP failure counter on successful fetch
         trade.pop(f"_ltp_fail_{sym}", None)
 
-        if check_time_exit(force_exit_check):
+        # Skip time-based exit for CNC (swing) trades — they hold overnight.
+        trade_product = str(trade.get("product") or "MIS").upper()
+        if trade_product != "CNC" and check_time_exit(force_exit_check):
             close_position(sym, reason="TIME", ltp_override=ltp)
             continue
 
@@ -129,7 +147,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         trade["peak_pct"] = peak_pct
         trade["peak"] = peak_pct
 
-        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=side)
+        activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=side, product=trade_product)
 
         trail_active = bool(trade.get("trail_active", trade.get("trailing_active", False)))
         if (not trail_active) and pnl_inr >= activate_inr:
@@ -138,12 +156,12 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             trade["trailing_active"] = True
             append_log("INFO", "TRAIL", f"{sym} activated pnl_inr={pnl_inr:.2f} activate_inr={activate_inr:.2f}")
 
-        min_locked_pnl, allowed_giveback_inr = _dynamic_trail_levels(peak_pnl_inr, tier)
+        min_locked_pnl, allowed_giveback_inr = _dynamic_trail_levels(peak_pnl_inr, tier, product=trade_product)
         trigger_inr = max(min_locked_pnl, peak_pnl_inr - allowed_giveback_inr)
         if min_locked_pnl > 0:
             trade["breakeven_armed"] = True
 
-        if check_stoploss(pnl_pct, side=side):
+        if check_stoploss(pnl_pct, side=side, product=trade_product):
             close_position(sym, reason="SL", ltp_override=ltp)
             continue
 

@@ -44,6 +44,10 @@ HELP_TEXT = (
     "LOOP [Trader/Owner]:\n"
     "• /startloop → start trading loop\n"
     "• /stoploop  → pause trading loop\n\n"
+    "MODE [Trader/Owner]:\n"
+    "• /mode           → show current trading mode\n"
+    "• /mode intraday  → MIS orders, exit by 15:10, ₹20/order\n"
+    "• /mode swing     → CNC delivery, hold overnight, ₹0 brokerage\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /pnl        → day P/L snapshot\n"
@@ -550,6 +554,43 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         with CYCLE.STATE_LOCK:
             CYCLE.STATE["paused"] = True
         await event.reply("⏸️ Loop Paused")
+        return True
+
+    # ===== Trading Mode Switch =====
+    if cmd_word == "/mode":
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        arg = str(cmd_arg or "").strip().upper()
+        if arg in ("INTRADAY", "MIS"):
+            with CYCLE.STATE_LOCK:
+                CYCLE.STATE["trading_mode"] = "INTRADAY"
+            await event.reply(
+                "📊 Mode: **INTRADAY** (MIS)\n"
+                "• Orders: MIS (margin intraday)\n"
+                "• Auto exit: 15:10\n"
+                "• Brokerage: ₹20/order\n"
+                "• Stoploss: 2%"
+            )
+        elif arg in ("SWING", "CNC", "DELIVERY"):
+            with CYCLE.STATE_LOCK:
+                CYCLE.STATE["trading_mode"] = "SWING"
+            await event.reply(
+                "📈 Mode: **SWING** (CNC)\n"
+                "• Orders: CNC (delivery)\n"
+                "• Hold: overnight, multi-day\n"
+                "• Brokerage: ₹0 (free!)\n"
+                "• Stoploss: 3% (wider)\n"
+                "• Trailing: 1.5x wider"
+            )
+        else:
+            current = str(CYCLE.STATE.get("trading_mode") or "INTRADAY")
+            await event.reply(
+                f"Current mode: **{current}**\n\n"
+                "Usage:\n"
+                "`/mode intraday` — MIS, exit by 15:10, ₹20/order\n"
+                "`/mode swing` — CNC delivery, hold overnight, ₹0 brokerage"
+            )
         return True
 
     # ===== Owner-only LIVE safety =====

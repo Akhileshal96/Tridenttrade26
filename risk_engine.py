@@ -61,26 +61,31 @@ def get_wallet_safe(state: dict):
 
 
 def get_bucket_from_slab(wallet: float):
-    if wallet < 5000:
-        return 500.0
-    if wallet <= 15000:
-        return 5000.0
-    if wallet <= 30000:
-        return 7000.0
-    if wallet <= 60000:
-        return 10000.0
-    if wallet <= 100000:
-        return 15000.0
-    return 20000.0
+    """Aggressive percentage-based bucket sizing for concentrated trades.
+
+    Allocates 35% of wallet per trade, clamped between 15-50% of wallet.
+    Fewer, bigger positions = more profit per winning trade.
+    """
+    bucket_pct = float(getattr(CFG, "BUCKET_ALLOC_PCT", 35.0) or 35.0)
+    bucket = wallet * max(1.0, bucket_pct) / 100.0
+    floor_pct = float(getattr(CFG, "BUCKET_FLOOR_PCT", 15.0) or 15.0)
+    ceil_pct = float(getattr(CFG, "BUCKET_CEIL_PCT", 50.0) or 50.0)
+    bmin = wallet * max(1.0, floor_pct) / 100.0
+    bmax = wallet * max(floor_pct + 1, ceil_pct) / 100.0
+    return max(bmin, min(bucket, bmax))
 
 
 def get_position_size(price: float, wallet: float, bucket: float | None = None):
     bucket_val = float(bucket if bucket is not None else get_bucket_from_slab(wallet))
     bucket_qty = int(bucket_val / price) if price > 0 else 0
-    risk_amt = bucket_val * float(getattr(CFG, "RISK_PER_TRADE_PCT", 1.0)) / 100.0
+    risk_amt = wallet * float(getattr(CFG, "RISK_PER_TRADE_PCT", 2.0)) / 100.0
     per_share_risk = price * float(getattr(CFG, "STOPLOSS_PCT", 2.0)) / 100.0
     risk_qty = int(risk_amt / per_share_risk) if per_share_risk > 0 else 0
-    qty = min(bucket_qty, risk_qty)
+    # Blend: risk acts as drag not hard cap (70/30 weighted average)
+    if bucket_qty > risk_qty and risk_qty > 0:
+        qty = int(risk_qty * 0.30 + bucket_qty * 0.70)
+    else:
+        qty = min(bucket_qty, risk_qty)
     return max(0, qty), bucket_val, bucket_qty, risk_qty
 
 
@@ -114,7 +119,7 @@ def check_sector_exposure(symbol: str, positions: dict, sector: str | None = Non
 def can_enter_trade(symbol: str, price: float, positions: dict, wallet: float, qty: int, *, sector: str | None = None):
     required = float(price) * max(1, int(qty or 1))
     current = get_current_exposure(positions)
-    max_exp = wallet * float(getattr(CFG, "MAX_EXPOSURE_PCT", 60.0)) / 100.0
+    max_exp = wallet * float(getattr(CFG, "MAX_EXPOSURE_PCT", 75.0)) / 100.0
     if current + required > max_exp:
         append_log("INFO", "SKIP", f"{symbol} reason=exposure next={current+required:.2f} max={max_exp:.2f}")
         return False
