@@ -235,8 +235,12 @@ def _in_time_range(now_t, start_t, end_t):
 
 
 async def token_renewal_scheduler(client):
-    """Auto-renew Kite access token daily at 6:15 AM IST via TOTP.
+    """Auto-renew Kite access token daily via TOTP with retry.
 
+    Schedule:
+      - First attempt at 06:15 IST.
+      - On failure: retry every 5 minutes until 08:30 IST (before market open).
+      - On success: stop retrying for the day.
     Only runs if KITE_TOTP_SECRET, KITE_USER_ID, and KITE_PASSWORD are set.
     Falls back gracefully — sends Telegram alert on failure so manual /token
     is still available as a backup.
@@ -247,47 +251,58 @@ async def token_renewal_scheduler(client):
         append_log("INFO", "AUTH", "TOTP auto-renewal disabled (KITE_TOTP_SECRET/USER_ID/PASSWORD not set)")
         return
 
-    append_log("INFO", "AUTH", "TOTP token renewal scheduler active — runs daily at 06:15 IST")
-    last_renew_day = ""
+    append_log("INFO", "AUTH", "TOTP token renewal scheduler active — runs daily 06:15-08:30 IST with retry")
+    last_success_day = ""
+    last_attempt_ts = 0.0  # epoch seconds of last attempt
 
     while True:
         try:
             now = datetime.now(IST)
             today = now.strftime("%Y-%m-%d")
-            # Trigger between 06:15 and 06:30 once per day
-            if today != last_renew_day and dtime(6, 15) <= now.time() <= dtime(6, 30):
-                append_log("INFO", "AUTH", "Starting TOTP auto token renewal")
+            in_window = dtime(6, 15) <= now.time() <= dtime(8, 30)
+            already_succeeded = last_success_day == today
+            retry_cooldown_ok = (now.timestamp() - last_attempt_ts) >= 300  # 5 min between retries
+
+            if in_window and not already_succeeded and retry_cooldown_ok:
+                last_attempt_ts = now.timestamp()
+                attempt_num = int(getattr(token_renewal_scheduler, '_attempts', 0)) + 1
+                token_renewal_scheduler._attempts = attempt_num
+                append_log("INFO", "AUTH", f"Starting TOTP auto token renewal (attempt {attempt_num})")
                 ok, result = await asyncio.to_thread(auto_renew_kite_token)
-                last_renew_day = today
                 owner = int(os.getenv("OWNER_USER_ID", "0") or 0)
                 if ok:
-                    # Token was already validated inside auto_renew_kite_token()
-                    # before being persisted to .env — fetch wallet for the alert.
+                    last_success_day = today
+                    token_renewal_scheduler._attempts = 0
                     try:
                         margins = await asyncio.to_thread(lambda: get_kite().margins())
                         wallet = float((margins or {}).get("equity", {}).get("net") or 0.0)
-                        msg = f"🔑 Kite token auto-renewed via TOTP ✅\nWallet: ₹{wallet:.2f}\nBot is ready for today's session."
-                        append_log("INFO", "AUTH", f"TOTP renewal validated wallet={wallet:.2f}")
+                        msg = f"🔑 Kite token auto-renewed via TOTP ✅\nAttempt: {attempt_num}\nWallet: ₹{wallet:.2f}\nBot is ready for today's session."
+                        append_log("INFO", "AUTH", f"TOTP renewal succeeded attempt={attempt_num} wallet={wallet:.2f}")
                     except Exception as _ve:
-                        # Token is valid (already checked), wallet fetch just failed
-                        msg = "🔑 Kite token auto-renewed via TOTP ✅\nBot is ready for today's session."
+                        msg = f"🔑 Kite token auto-renewed via TOTP ✅\nAttempt: {attempt_num}\nBot is ready for today's session."
                         append_log("WARN", "AUTH", f"Post-renewal wallet fetch failed (token OK): {_ve}")
-                if ok:
-                    append_log("INFO", "AUTH", "TOTP renewal succeeded")
                 else:
+                    remaining_min = max(0, (dtime(8, 30).hour * 60 + dtime(8, 30).minute) - (now.hour * 60 + now.minute))
                     msg = (
-                        f"⚠️ Kite token auto-renewal FAILED\n\n"
-                        f"Reason: {result}\n\n"
-                        f"Please renew manually:\n"
+                        f"⚠️ Kite token auto-renewal FAILED (attempt {attempt_num})\n\n"
+                        f"Reason: {result}\n"
+                        f"Retrying in 5 min (window closes in ~{remaining_min} min)\n\n"
+                        f"If all retries fail, renew manually:\n"
                         f"1. Send /renewtoken\n"
                         f"2. Login and send /token <request_token>"
                     )
-                    append_log("ERROR", "AUTH", f"TOTP renewal failed: {result}")
+                    append_log("ERROR", "AUTH", f"TOTP renewal failed attempt={attempt_num}: {result}")
                 if owner:
                     try:
                         await client.send_message(owner, msg)
                     except Exception as _e:
                         append_log("WARN", "AUTH", f"Could not send token renewal alert: {_e}")
+
+            # Reset attempt counter on new day
+            if today != getattr(token_renewal_scheduler, '_last_day', ''):
+                token_renewal_scheduler._attempts = 0
+                token_renewal_scheduler._last_day = today
+
             await asyncio.sleep(30)
         except Exception as e:
             append_log("ERROR", "AUTH", f"token_renewal_scheduler error: {e}")

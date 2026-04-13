@@ -108,36 +108,53 @@ def auto_renew_kite_token() -> tuple[bool, str]:
         msg = j2.get("message") or j2.get("error") or str(j2)
         return False, f"twofa_rejected: {msg}"
 
-    # ── Step 3: Extract request_token from redirect URL ────────────────────
+    # ── Step 3: Extract request_token from redirect chain ────────────────
     # After 2FA, the session cookie is set. Hit the Kite login URL to get
     # the redirect containing request_token.
     #
-    # IMPORTANT: Do NOT follow redirects (allow_redirects=False).
-    # The redirect URL points to the app's configured redirect_url (often
-    # 127.0.0.1:8000) which doesn't exist on a headless EC2 server.
-    # The request_token is embedded in the Location header — extract it
-    # directly without actually connecting to the redirect target.
+    # Zerodha may return a multi-step redirect chain:
+    #   /connect/login → /connect/finish?sess_id=...&api_key=... → redirect_url?request_token=...
+    # We must follow intermediate Zerodha redirects (like /connect/finish)
+    # but NOT follow the final redirect to our app's redirect_url (which
+    # may point to localhost and fail on headless EC2).
     login_url = (
         f"https://kite.zerodha.com/connect/login"
         f"?api_key={api_key}&v=3"
     )
-    try:
-        r3 = session.get(login_url, timeout=15, allow_redirects=False)
-    except Exception as e:
-        return False, f"redirect_fetch_failed: {e}"
 
-    # Extract from Location header (302 redirect) first, then fall back
-    # to final URL and response body.
-    redirect_url = r3.headers.get("Location") or r3.url or ""
-    match = re.search(r"request_token=([A-Za-z0-9]+)", redirect_url)
-    if not match:
-        match = re.search(r"request_token=([A-Za-z0-9]+)", r3.url)
-    if not match:
-        match = re.search(r"request_token=([A-Za-z0-9]+)", r3.text)
-    if not match:
-        return False, f"request_token_not_found_in_redirect url={redirect_url[:120]}"
+    request_token = None
+    max_hops = 5
+    current_url = login_url
 
-    request_token = match.group(1)
+    for hop in range(max_hops):
+        try:
+            r3 = session.get(current_url, timeout=15, allow_redirects=False)
+        except Exception as e:
+            return False, f"redirect_fetch_failed_hop{hop}: {e}"
+
+        # Check all possible locations for request_token
+        location = r3.headers.get("Location") or ""
+        for source in (location, str(r3.url), r3.text[:2000]):
+            match = re.search(r"request_token=([A-Za-z0-9]+)", source)
+            if match:
+                request_token = match.group(1)
+                break
+        if request_token:
+            break
+
+        # No request_token yet — if there's a redirect to another Zerodha
+        # page (like /connect/finish), follow it. Stop if it points off-site.
+        if location and "zerodha.com" in location:
+            append_log("INFO", "AUTH", f"following intermediate redirect hop={hop} url={location[:120]}")
+            current_url = location
+            continue
+
+        # Redirect goes off-site (our app's redirect_url) or no Location
+        # header at all — request_token should have been in it.
+        break
+
+    if not request_token:
+        return False, f"request_token_not_found_in_redirect url={location[:120] if location else current_url[:120]}"
 
     # ── Step 4: Generate access token ──────────────────────────────────────
     try:
