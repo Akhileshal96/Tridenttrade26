@@ -1066,8 +1066,14 @@ async def main():
         icon = "🟢" if pct >= 0 else "🔴"
         return f"{icon} P/L So Far {pct:+.2f}%"
 
+    def _analytics_summary():
+        txt = CYCLE.get_analytics_text()
+        parts = txt.split("\n", 2)
+        return parts[2] if len(parts) > 2 else txt
+
     panel_handlers = {
         "__pnl_so_far_label__": _pnl_so_far_button_label,
+        "__analytics_summary__": _analytics_summary,
         "myid": _mk_panel_handler("myid"),
         "help": _mk_panel_handler("help"),
         "commands": _mk_panel_handler("commands"),

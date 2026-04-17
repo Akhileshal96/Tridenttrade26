@@ -52,10 +52,8 @@ def _main_buttons(handlers=None):
         [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
         # Trading mode
         [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("📦 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
-        # Risk profile
-        [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god")],
-        # God Mode confirmation (only active if there's a pending confirmation)
-        [Button.inline("✅ Confirm God", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel God", b"cp:cmd:risk_god_cancel")],
+        # Risk profile + God Mode confirmation on one row
+        [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god"), Button.inline("✅ Confirm", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel", b"cp:cmd:risk_god_cancel")],
         # Sub-panels
         [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research")],
         [Button.inline("📜 Logs", b"cp:panel:logs"), Button.inline("🔐 Token", b"cp:panel:token")],
@@ -124,6 +122,18 @@ def _analytics_buttons():
     ]
 
 
+def _analytics_panel_title(handlers):
+    provider = (handlers or {}).get("__analytics_summary__")
+    if callable(provider):
+        try:
+            body = provider()
+            if body:
+                return f"{ANALYTICS_TITLE}\n\n{body}"
+        except Exception:
+            pass
+    return ANALYTICS_TITLE
+
+
 _PANEL_MAP = {
     "main": (MAIN_TITLE, _main_buttons),
     "research": (RESEARCH_TITLE, _research_buttons),
@@ -133,7 +143,7 @@ _PANEL_MAP = {
     "admin": (ADMIN_TITLE, _admin_buttons),
     "help": (MAIN_TITLE, _main_buttons),  # no separate help panel needed
     "logs": (LOGS_TITLE, _logs_buttons),
-    "analytics": (ANALYTICS_TITLE, _analytics_buttons),
+    "analytics": (_analytics_panel_title, _analytics_buttons),
 }
 
 _HINTS = {
@@ -165,17 +175,23 @@ async def _safe_invoke(handler_name, event, handlers):
             await out
     except Exception as e:
         await _popup(event, f"Handler failed: {handler_name} ({e})")
+        return
+    try:
+        await event.answer()
+    except Exception:
+        pass
 
 
 def register_control_panel(client, handlers):
     async def _render_panel(event, panel_name: str, edit=False):
         title, button_fn = _PANEL_MAP.get(panel_name, _PANEL_MAP["main"])
-        raw_btns = button_fn(handlers) if panel_name == "main" else button_fn()
+        raw_btns = button_fn(handlers) if panel_name in ("main", "analytics") else button_fn()
+        title_text = title(handlers) if callable(title) else title
         btns = _dedupe_rows(raw_btns)
         if edit:
-            await event.edit(title, buttons=btns)
+            await event.edit(title_text, buttons=btns)
         else:
-            await event.respond(title, buttons=btns)
+            await event.respond(title_text, buttons=btns)
 
     @client.on(events.NewMessage(pattern=r"^/start(?:@\w+)?$"))
     async def _start_panel(event):
