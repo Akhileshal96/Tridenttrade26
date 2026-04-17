@@ -224,6 +224,25 @@ def _load_state_snapshot() -> None:
                     except Exception:
                         pass
                 elif k == "positions" and isinstance(v, dict):
+                    cfg_mode = str(getattr(CFG, "TRADING_MODE", "INTRADAY") or "INTRADAY").upper()
+                    for psym, ptrade in list(v.items()):
+                        if not isinstance(ptrade, dict):
+                            continue
+                        # Clear stale LTP-failure counters so a restart never
+                        # inherits a "close after 1 more failure" state.
+                        cleaned = {pk: pv for pk, pv in ptrade.items()
+                                   if not pk.startswith("_ltp_fail_")}
+                        # In SWING mode drop any MIS positions — they should
+                        # have been force-exited at market close and have no
+                        # business surviving into a new SWING session.
+                        if cfg_mode == "SWING":
+                            product = str(cleaned.get("product") or
+                                         cleaned.get("trade_mode") or "MIS").upper()
+                            if product == "MIS":
+                                append_log("INFO", "STATE",
+                                           f"dropped stale MIS position {psym} on SWING-mode restore")
+                                continue
+                        v[psym] = cleaned
                     STATE["positions"].update(v)
                     STATE["open_trades"] = STATE["positions"]
                 else:
@@ -1008,13 +1027,24 @@ def _dynamic_max_concurrent() -> int:
     """Scale max concurrent trades with wallet size.
 
     Concentrated approach: fewer, bigger trades for max profit.
-    Small accounts get 2-3 positions, larger accounts top out at 5.
+    Small accounts get 2-3 positions, larger accounts top out at 5 (8 in GOD).
     """
     wallet = float(STATE.get("wallet_net_inr") or 0.0)
     cfg_override = int(_cfg_get("MAX_CONCURRENT_TRADES", 0) or 0)
     if cfg_override > 0:
-        # User explicitly set a fixed value — respect it
         return max(1, cfg_override)
+    god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+    if god:
+        god_cap = int(getattr(CFG, "GOD_MAX_CONCURRENT_TRADES", 8) or 8)
+        if wallet <= 0:
+            return min(3, god_cap)
+        if wallet < 15000:
+            return min(3, god_cap)
+        if wallet < 30000:
+            return min(5, god_cap)
+        if wallet < 60000:
+            return min(7, god_cap)
+        return god_cap
     if wallet <= 0:
         return 2
     if wallet < 15000:
@@ -1133,6 +1163,10 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
         qty = short_policy_qty
         reason_chain.append(f"short_policy_qty={short_policy_qty}")
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
+    # GOD mode ignores loss-streak size reductions — sizing is driven entirely
+    # by confidence tier and regime multipliers, not recent trade outcomes.
+    if str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD":
+        size_factor = 1.0
 
     # Win-streak scaling applied BEFORE size_factor reduction so uplift acts on
     # the base qty, not on an already-penalised qty. Guard: only when no active
@@ -1623,8 +1657,8 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
             ltp = entry
         pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
         safe_update(STATE, "today_pnl", lambda x: float(x or 0.0) + pnl)
-        RISK.update_loss_streak(STATE, pnl)
-        RISK.check_day_drawdown_guard(STATE)
+        RISK.update_loss_streak(STATE, pnl, risk_profile=current_risk_profile())
+        RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
         PM.remove(sym)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
         _set_cooldown()
@@ -1675,8 +1709,8 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
 
     pnl, pnl_pct = _calc_pnl(entry, ltp, qty, side=side)
     safe_update(STATE, "today_pnl", lambda x: float(x or 0.0) + pnl)
-    RISK.update_loss_streak(STATE, pnl)
-    RISK.check_day_drawdown_guard(STATE)
+    RISK.update_loss_streak(STATE, pnl, risk_profile=current_risk_profile())
+    RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
     PM.remove(sym)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
     _set_cooldown()
@@ -1812,8 +1846,8 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
         return False
 
-    reentry_block = int(getattr(CFG, "REENTRY_BLOCK_MINUTES", 30))
-    if last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
+    reentry_block = int(_cfg_get("REENTRY_BLOCK_MINUTES", 30) or 0)
+    if reentry_block > 0 and last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
         if not momentum_positive:
             append_log("INFO", "SKIP", f"{sym} reason=reentry_block")
             return False
@@ -1841,7 +1875,9 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=insufficient_wallet need={required_value:.2f} avail={wallet_avail:.2f}")
         return False
 
-    if not RISK.can_enter_trade(sym, float(entry), _positions(), wallet_net, int(qty), sector=_sector_for_symbol(sym)):
+    if not RISK.can_enter_trade(sym, float(entry), _positions(), wallet_net, int(qty),
+                                sector=_sector_for_symbol(sym),
+                                max_exposure_pct=_effective_max_exposure_pct()):
         _apply_skip_cooldown(sym, "risk_guard")
         return False
 
@@ -2861,11 +2897,11 @@ def _opening_size_multiplier() -> float:
     if mode == "OPEN_HARD_BLOCK":
         return 0.0
     if mode == "OPEN_UNSAFE":
-        return float(getattr(CFG, "OPEN_UNSAFE_SIZE_MULTIPLIER", 0.25) or 0.25)
+        return float(_cfg_get("OPEN_UNSAFE_SIZE_MULTIPLIER", 0.25) or 0.25)
     if mode == "OPEN_MODERATE":
-        return float(getattr(CFG, "OPEN_MODERATE_SIZE_MULTIPLIER", 0.5) or 0.5)
+        return float(_cfg_get("OPEN_MODERATE_SIZE_MULTIPLIER", 0.5) or 0.5)
     if mode == "OPEN_CLEAN":
-        return float(getattr(CFG, "OPEN_CLEAN_SIZE_MULTIPLIER", 1.0) or 1.0)
+        return float(_cfg_get("OPEN_CLEAN_SIZE_MULTIPLIER", 1.0) or 1.0)
     return 1.0
 
 def _opening_selective_entry_allowed(symbol: str, side: str = "BUY") -> tuple[bool, str]:
@@ -3543,7 +3579,7 @@ def _maybe_enter_from_signal(sig):
     allowed, reason, meta = is_market_entry_allowed(sym, regime, research_universe)
     weak_score = float(sig.get("signal_score") or 0.0)
     weak_score_min = float(getattr(CFG, "WEAK_MARKET_MIN_SCORE", 0.75) or 0.75)
-    weak_size_mult = float(getattr(CFG, "WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
+    weak_size_mult = float(_cfg_get("WEAK_MARKET_SIZE_MULTIPLIER", 0.5) or 0.5)
     weak_long_allowed = True
 
     if regime == "WEAK":
@@ -4216,7 +4252,11 @@ def _maybe_send_eod_report():
 
 
 def reconcile_broker_positions():
-    if not is_live_enabled():
+    # Reconcile reads broker positions and updates local STATE — no orders
+    # are placed here, so it is safe to run whenever the live API is
+    # configured (IS_LIVE=true or live_override), even before /initiate.
+    # Order placement still requires is_live_enabled() (initiated=True).
+    if not (bool(CFG.IS_LIVE) or bool(STATE.get("live_override"))):
         return
     try:
         kite = get_kite()
@@ -4352,7 +4392,7 @@ def tick():
     _sync_wallet_and_caps(force=False)
     reconcile_broker_positions()
     _refresh_runtime_pnl_fields()
-    RISK.check_day_drawdown_guard(STATE)
+    RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
 
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):

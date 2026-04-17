@@ -65,10 +65,24 @@ GOD_MAX_DEPLOYABLE_PCT         = _get_float("GOD_MAX_DEPLOYABLE_PCT",         "9
 GOD_MAX_SYMBOL_ALLOCATION_PCT  = _get_float("GOD_MAX_SYMBOL_ALLOCATION_PCT",  "40")
 GOD_FULL_TIER_WEIGHT           = _get_float("GOD_FULL_TIER_WEIGHT",           "1.50")
 GOD_REDUCED_TIER_WEIGHT        = _get_float("GOD_REDUCED_TIER_WEIGHT",        "1.20")
-GOD_WEAK_MARKET_SIZE_MULTIPLIER   = _get_float("GOD_WEAK_MARKET_SIZE_MULTIPLIER",   "0.90")
-GOD_OPEN_MODERATE_SIZE_MULTIPLIER = _get_float("GOD_OPEN_MODERATE_SIZE_MULTIPLIER", "0.90")
-GOD_OPEN_UNSAFE_SIZE_MULTIPLIER   = _get_float("GOD_OPEN_UNSAFE_SIZE_MULTIPLIER",   "0.60")
-GOD_FALLBACK_SIZE_MULTIPLIER      = _get_float("GOD_FALLBACK_SIZE_MULTIPLIER",      "0.90")
+GOD_MICRO_TIER_WEIGHT          = _get_float("GOD_MICRO_TIER_WEIGHT",          "0.80")
+GOD_WEAK_MARKET_SIZE_MULTIPLIER      = _get_float("GOD_WEAK_MARKET_SIZE_MULTIPLIER",      "0.90")
+GOD_OPEN_MODERATE_SIZE_MULTIPLIER    = _get_float("GOD_OPEN_MODERATE_SIZE_MULTIPLIER",    "0.90")
+GOD_OPEN_UNSAFE_SIZE_MULTIPLIER      = _get_float("GOD_OPEN_UNSAFE_SIZE_MULTIPLIER",      "0.60")
+GOD_FALLBACK_SIZE_MULTIPLIER         = _get_float("GOD_FALLBACK_SIZE_MULTIPLIER",         "0.90")
+# Bucket sizing — GOD gets larger per-trade allocation and higher ceiling
+GOD_BUCKET_ALLOC_PCT                 = _get_float("GOD_BUCKET_ALLOC_PCT",                 "50")
+GOD_BUCKET_CEIL_PCT                  = _get_float("GOD_BUCKET_CEIL_PCT",                  "70")
+# More concurrent positions in GOD mode
+GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "8")
+# Higher risk budget per trade
+GOD_RISK_PER_TRADE_PCT               = _get_float("GOD_RISK_PER_TRADE_PCT",               "3.0")
+# Re-entry cooldown lifted — GOD can re-enter immediately after an exit
+GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",            "0")
+# Profit drawdown guards relaxed (not removed) in GOD mode
+GOD_DAY_PROFIT_GIVEBACK_HALT_PCT     = _get_float("GOD_DAY_PROFIT_GIVEBACK_HALT_PCT",     "75")
+GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT    = _get_float("GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT",    "55")
+GOD_DAY_PROFIT_GIVEBACK_REDUCE_PCT   = _get_float("GOD_DAY_PROFIT_GIVEBACK_REDUCE_PCT",   "35")
 
 # ===== SIGNAL DATA =====
 HIST_INTERVAL = _get_str("HIST_INTERVAL", "15minute")

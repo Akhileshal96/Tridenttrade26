@@ -64,19 +64,24 @@ def check_sector_exposure(symbol: str, positions: dict, sector: str | None = Non
     return True
 
 
-def can_enter_trade(symbol: str, price: float, positions: dict, wallet: float, qty: int, *, sector: str | None = None):
+def can_enter_trade(symbol: str, price: float, positions: dict, wallet: float, qty: int, *,
+                    sector: str | None = None, max_exposure_pct: float | None = None):
     required = float(price) * max(1, int(qty or 1))
     current = get_current_exposure(positions)
-    max_exp = wallet * float(getattr(CFG, "MAX_EXPOSURE_PCT", 75.0)) / 100.0
+    # Caller may pass the effective (GOD-aware) exposure pct directly.
+    if max_exposure_pct is None:
+        max_exposure_pct = float(getattr(CFG, "MAX_EXPOSURE_PCT", 75.0))
+    max_exp = wallet * max_exposure_pct / 100.0
     if current + required > max_exp:
         append_log("INFO", "SKIP", f"{symbol} reason=exposure next={current+required:.2f} max={max_exp:.2f}")
         return False
     return check_sector_exposure(symbol, positions, sector=sector)
 
 
-def update_loss_streak(state: dict, result: float):
+def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD"):
     streak = int(state.get("loss_streak") or 0)
     wins = int(state.get("consecutive_wins") or 0)
+    god = str(risk_profile or "STANDARD").upper() == "GOD"
     if result < 0:
         streak += 1
         wins = 0
@@ -87,15 +92,22 @@ def update_loss_streak(state: dict, result: float):
     state["consecutive_wins"] = wins
 
     if streak >= 4:
+        # Hard halt applies even in GOD — 4 consecutive losses is a circuit breaker.
         state["halt_for_day"] = True
         append_log("WARN", "RISK", "loss_streak=4 → stopping new trades for the day")
     elif streak >= 3:
-        state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
-        state["reduce_size_factor"] = 0.5
-        append_log("WARN", "RISK", "loss_streak=3 → pausing new entries for 30 min")
+        if not god:
+            state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
+            state["reduce_size_factor"] = 0.5
+            append_log("WARN", "RISK", "loss_streak=3 → pausing new entries for 30 min")
+        else:
+            append_log("INFO", "RISK", "loss_streak=3 (GOD mode — pause/reduce skipped)")
     elif streak >= 2:
-        state["reduce_size_factor"] = 0.5
-        append_log("WARN", "RISK", "loss_streak=2 → reducing entry aggressiveness")
+        if not god:
+            state["reduce_size_factor"] = 0.5
+            append_log("WARN", "RISK", "loss_streak=2 → reducing entry aggressiveness")
+        else:
+            append_log("INFO", "RISK", "loss_streak=2 (GOD mode — reduce skipped)")
     else:
         state["reduce_size_factor"] = 1.0
         # A win breaks the streak — clear halt/pause flags so the bot can resume
@@ -109,7 +121,7 @@ def update_loss_streak(state: dict, result: float):
                 append_log("INFO", "RISK", "loss_streak cleared by win → halt_for_day lifted")
 
 
-def check_day_drawdown_guard(state: dict):
+def check_day_drawdown_guard(state: dict, risk_profile: str = "STANDARD"):
     pnl = float(state.get("today_pnl") or 0.0)
     peak = float(state.get("day_peak_pnl") or 0.0)
     if pnl > peak:
@@ -123,6 +135,9 @@ def check_day_drawdown_guard(state: dict):
     state["day_guard_reason"] = ""
     append_log("INFO", "DAY", f"day_guard_eval pnl={pnl:.2f} peak={peak:.2f} realized={realized:.2f} unrealized={unrealized:.2f} giveback={giveback:.2f}")
 
+    god = str(risk_profile or "STANDARD").upper() == "GOD"
+
+    # Daily loss cap — applies in all modes (hard broker/capital reality).
     loss_cap = abs(float(state.get("daily_loss_cap_inr") or getattr(CFG, "DAILY_LOSS_CAP_INR", 200.0) or 200.0))
     if loss_cap > 0 and pnl <= -loss_cap:
         state["halt_for_day"] = True
@@ -134,9 +149,15 @@ def check_day_drawdown_guard(state: dict):
         return True
 
     dd_pct = (giveback / peak) * 100.0 if peak > 0 else 0.0
-    halt_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_HALT_PCT", 60.0) or 60.0)
-    pause_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 40.0) or 40.0)
-    reduce_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 25.0) or 25.0)
+    # GOD mode gets relaxed (but not removed) profit-giveback thresholds.
+    if god:
+        halt_pct  = float(getattr(CFG, "GOD_DAY_PROFIT_GIVEBACK_HALT_PCT",  75.0) or 75.0)
+        pause_pct = float(getattr(CFG, "GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT", 55.0) or 55.0)
+        reduce_pct = float(getattr(CFG, "GOD_DAY_PROFIT_GIVEBACK_REDUCE_PCT", 35.0) or 35.0)
+    else:
+        halt_pct  = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_HALT_PCT",  60.0) or 60.0)
+        pause_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 40.0) or 40.0)
+        reduce_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 25.0) or 25.0)
 
     if dd_pct >= halt_pct:
         state["halt_for_day"] = True
