@@ -51,7 +51,11 @@ def _main_buttons(handlers=None):
         [Button.inline("▶ Start", b"cp:cmd:startloop"), Button.inline("⏸ Stop", b"cp:cmd:stoploop"), Button.inline("📟 Status", b"cp:cmd:status")],
         [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
         # Trading mode
-        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("📦 Swing (CNC)", b"cp:cmd:mode_swing")],
+        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("📦 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
+        # Risk profile
+        [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god")],
+        # God Mode confirmation (only active if there's a pending confirmation)
+        [Button.inline("✅ Confirm God", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel God", b"cp:cmd:risk_god_cancel")],
         # Sub-panels
         [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research")],
         [Button.inline("📜 Logs", b"cp:panel:logs"), Button.inline("🔐 Token", b"cp:panel:token")],

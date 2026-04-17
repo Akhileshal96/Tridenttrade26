@@ -50,8 +50,25 @@ ORDER_RATE_LIMIT_PER_SEC = _get_int("ORDER_RATE_LIMIT_PER_SEC", "10")
 
 # ===== MODE & LOOP =====
 IS_LIVE = _get_bool("IS_LIVE", "false")
-TRADING_MODE = _get_str("TRADING_MODE", "INTRADAY").upper()  # INTRADAY or SWING
+# TRADING_MODE: INTRADAY (MIS only) | SWING (CNC longs only) | HYBRID (per-trade routing)
+TRADING_MODE = _get_str("TRADING_MODE", "INTRADAY").upper()
+# RISK_PROFILE: STANDARD (current safe behavior) | GOD (neutralizes bot-imposed soft caps
+# but NEVER bypasses wallet/broker/affordability/market-protection/kill-switch)
+RISK_PROFILE = _get_str("RISK_PROFILE", "STANDARD").upper()
 TICK_SECONDS = _get_int("TICK_SECONDS", "20")
+
+# ===== GOD PROFILE OVERRIDES =====
+# Applied only when runtime risk_profile == "GOD". None of these bypass broker
+# reality or hard safety (wallet check, market protection, daily kill switch).
+GOD_MAX_EXPOSURE_PCT           = _get_float("GOD_MAX_EXPOSURE_PCT",           "95")
+GOD_MAX_DEPLOYABLE_PCT         = _get_float("GOD_MAX_DEPLOYABLE_PCT",         "95")
+GOD_MAX_SYMBOL_ALLOCATION_PCT  = _get_float("GOD_MAX_SYMBOL_ALLOCATION_PCT",  "40")
+GOD_FULL_TIER_WEIGHT           = _get_float("GOD_FULL_TIER_WEIGHT",           "1.50")
+GOD_REDUCED_TIER_WEIGHT        = _get_float("GOD_REDUCED_TIER_WEIGHT",        "1.20")
+GOD_WEAK_MARKET_SIZE_MULTIPLIER   = _get_float("GOD_WEAK_MARKET_SIZE_MULTIPLIER",   "0.90")
+GOD_OPEN_MODERATE_SIZE_MULTIPLIER = _get_float("GOD_OPEN_MODERATE_SIZE_MULTIPLIER", "0.90")
+GOD_OPEN_UNSAFE_SIZE_MULTIPLIER   = _get_float("GOD_OPEN_UNSAFE_SIZE_MULTIPLIER",   "0.60")
+GOD_FALLBACK_SIZE_MULTIPLIER      = _get_float("GOD_FALLBACK_SIZE_MULTIPLIER",      "0.90")
 
 # ===== SIGNAL DATA =====
 HIST_INTERVAL = _get_str("HIST_INTERVAL", "15minute")

@@ -151,8 +151,9 @@ def test_close_position_short_live_uses_buy_to_cover(monkeypatch):
 
     placed = {"side": None}
 
-    def fake_place(kite, sym, side, qty):
+    def fake_place(kite, sym, side, qty, **kwargs):
         placed["side"] = side
+        placed["product_override"] = kwargs.get("product_override")
         return "OID1"
 
     monkeypatch.setattr(tc, "_place_live_order", fake_place)

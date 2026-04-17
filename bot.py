@@ -47,7 +47,14 @@ HELP_TEXT = (
     "MODE [Trader/Owner]:\n"
     "• /mode           → show current trading mode\n"
     "• /mode intraday  → MIS orders, exit by 15:10, ₹20/order\n"
-    "• /mode swing     → CNC delivery, hold overnight, ₹0 brokerage\n\n"
+    "• /mode swing     → CNC longs only, hold overnight, ₹0 brokerage\n"
+    "• /mode hybrid    → per-trade routing: intraday default + narrow swing lane\n\n"
+    "RISK PROFILE [Trader/Owner]:\n"
+    "• /riskprofile                → show current profile\n"
+    "• /riskprofile standard       → safe default (current behaviour)\n"
+    "• /riskprofile god            → request GOD (shows warning)\n"
+    "• /riskprofile god confirm    → confirm + activate GOD\n"
+    "• /riskprofile cancel         → cancel pending GOD confirmation\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /pnl        → day P/L snapshot\n"
@@ -572,23 +579,25 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         return True
 
     # ===== Trading Mode Switch (button + command) =====
-    if cmd_word in ("/mode_intraday", "/mode_swing"):
+    if cmd_word in ("/mode_intraday", "/mode_swing", "/mode_hybrid"):
         if not _is_trader(sender):
             await event.reply("❌ Not permitted (Trader/Owner only).")
             return True
-        cmd_arg = "INTRADAY" if "intraday" in cmd_word else "SWING"
+        if "intraday" in cmd_word:
+            cmd_arg = "INTRADAY"
+        elif "hybrid" in cmd_word:
+            cmd_arg = "HYBRID"
+        else:
+            cmd_arg = "SWING"
         # Fall through to /mode handler below
 
-    if cmd_word == "/mode" or cmd_word in ("/mode_intraday", "/mode_swing"):
+    if cmd_word == "/mode" or cmd_word in ("/mode_intraday", "/mode_swing", "/mode_hybrid"):
         if not _is_trader(sender):
             await event.reply("❌ Not permitted (Trader/Owner only).")
             return True
         arg = str(cmd_arg or "").strip().upper()
         if arg in ("INTRADAY", "MIS"):
-            with CYCLE.STATE_LOCK:
-                CYCLE.STATE["trading_mode"] = "INTRADAY"
-            set_env_value("TRADING_MODE", "INTRADAY")
-            os.environ["TRADING_MODE"] = "INTRADAY"
+            ok, norm = CYCLE.set_trading_mode("INTRADAY")
             await event.reply(
                 "📊 Mode: **INTRADAY** (MIS)\n"
                 "• Orders: MIS (margin intraday)\n"
@@ -597,26 +606,103 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
                 "• Stoploss: 2%"
             )
         elif arg in ("SWING", "CNC", "DELIVERY"):
-            with CYCLE.STATE_LOCK:
-                CYCLE.STATE["trading_mode"] = "SWING"
-            set_env_value("TRADING_MODE", "SWING")
-            os.environ["TRADING_MODE"] = "SWING"
+            ok, norm = CYCLE.set_trading_mode("SWING")
             await event.reply(
                 "📈 Mode: **SWING** (CNC)\n"
-                "• Orders: CNC (delivery)\n"
-                "• Hold: overnight, multi-day\n"
-                "• Brokerage: ₹0 (free!)\n"
-                "• Stoploss: 3% (wider)\n"
-                "• Trailing: 1.5x wider"
+                "• Longs only → CNC delivery, hold overnight, ₹0 brokerage\n"
+                "• Shorts → remain INTRADAY/MIS (never routed to swing)\n"
+                "• Force-exit at 15:10 skipped for CNC positions"
+            )
+        elif arg in ("HYBRID", "HYB"):
+            ok, norm = CYCLE.set_trading_mode("HYBRID")
+            await event.reply(
+                "🧬 Mode: **HYBRID**\n"
+                "• Intraday engine preserved (default routing = MIS)\n"
+                "• Narrow swing lane for strongest long continuation trades:\n"
+                "  strategy=`mtf_confirmed_long`, tier=FULL,\n"
+                "  regime=TRENDING_UP/TRENDING, trend_direction=UP\n"
+                "• All shorts remain INTRADAY/MIS\n"
+                "• Weak-market / MR / fallback trades stay INTRADAY"
             )
         else:
-            current = str(CYCLE.STATE.get("trading_mode") or "INTRADAY")
+            current = CYCLE.current_trading_mode()
             await event.reply(
                 f"Current mode: **{current}**\n\n"
                 "Usage:\n"
                 "`/mode intraday` — MIS, exit by 15:10, ₹20/order\n"
-                "`/mode swing` — CNC delivery, hold overnight, ₹0 brokerage"
+                "`/mode swing`    — CNC longs only, hold overnight, ₹0 brokerage\n"
+                "`/mode hybrid`   — per-trade routing (intraday + narrow swing lane)"
             )
+        return True
+
+    # ===== Risk Profile (STANDARD / GOD with confirmation) =====
+    if cmd_word in ("/riskprofile_standard", "/riskprofile_god", "/riskprofile_god_confirm", "/riskprofile_god_cancel"):
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        if cmd_word == "/riskprofile_standard":
+            cmd_arg = "standard"
+        elif cmd_word == "/riskprofile_god":
+            cmd_arg = "god"
+        elif cmd_word == "/riskprofile_god_confirm":
+            cmd_arg = "god confirm"
+        else:
+            cmd_arg = "cancel"
+        # Fall through to /riskprofile handler
+
+    if cmd_word == "/riskprofile" or cmd_word in (
+        "/riskprofile_standard", "/riskprofile_god",
+        "/riskprofile_god_confirm", "/riskprofile_god_cancel",
+    ):
+        if not _is_trader(sender):
+            await event.reply("❌ Not permitted (Trader/Owner only).")
+            return True
+        raw = str(cmd_arg or "").strip().lower()
+        if raw in ("cancel", "god_cancel", "abort"):
+            cleared = CYCLE.cancel_god_confirmation()
+            msg = "🟢 GOD confirmation cancelled — profile unchanged." if cleared else "ℹ️ No pending GOD confirmation."
+            cur = CYCLE.current_risk_profile()
+            await event.reply(f"{msg}\nCurrent risk profile: **{cur}**")
+            return True
+        if raw in ("standard", "safe", "default"):
+            ok, norm = CYCLE.set_risk_profile("STANDARD")
+            await event.reply(
+                "🟢 Risk Profile: **STANDARD**\n"
+                "• Preserves current wallet/exposure/symbol caps and sizing.\n"
+                "• Any pending GOD confirmation cleared."
+            )
+            return True
+        if raw in ("god confirm", "god_confirm", "confirm god", "confirm"):
+            ok, norm = CYCLE.confirm_god_mode()
+            if ok:
+                await event.reply(
+                    "🔥 Risk Profile: **GOD** (ACTIVATED)\n"
+                    "• Bot-imposed soft caps neutralized (deployable %, exposure %, per-symbol %, tier weights).\n"
+                    "• Still enforced: wallet_available, broker margin / CNC affordability, market protection, panic, daily loss kill switch.\n"
+                    "• To disable: `/riskprofile standard`"
+                )
+            else:
+                await event.reply(
+                    "⚠️ No pending GOD confirmation.\n"
+                    "Run `/riskprofile god` first, then `/riskprofile god confirm`."
+                )
+            return True
+        if raw in ("god",):
+            warning = CYCLE.request_god_confirmation()
+            await event.reply(warning)
+            return True
+        # bare /riskprofile → show current
+        cur = CYCLE.current_risk_profile()
+        pending = CYCLE.STATE.get("pending_risk_profile_confirmation")
+        pending_note = f"\nPending confirmation: **{pending}**" if pending else ""
+        await event.reply(
+            f"Current risk profile: **{cur}**{pending_note}\n\n"
+            "Usage:\n"
+            "`/riskprofile standard`         — safe default (current behaviour)\n"
+            "`/riskprofile god`              — request GOD activation (shows warning)\n"
+            "`/riskprofile god confirm`      — confirm + activate GOD\n"
+            "`/riskprofile cancel`           — cancel a pending GOD confirmation"
+        )
         return True
 
     # ===== Owner-only LIVE safety =====
@@ -1031,6 +1117,11 @@ async def main():
         "excluded": _mk_panel_handler("excluded"),
         "mode_intraday": _mk_panel_handler("mode_intraday"),
         "mode_swing": _mk_panel_handler("mode_swing"),
+        "mode_hybrid": _mk_panel_handler("mode_hybrid"),
+        "risk_standard": _mk_panel_handler("riskprofile_standard"),
+        "risk_god": _mk_panel_handler("riskprofile_god"),
+        "risk_god_confirm": _mk_panel_handler("riskprofile_god_confirm"),
+        "risk_god_cancel": _mk_panel_handler("riskprofile_god_cancel"),
     }
     register_control_panel(client, panel_handlers)
 

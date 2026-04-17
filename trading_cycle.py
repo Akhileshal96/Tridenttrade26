@@ -111,8 +111,12 @@ STATE = {
     "ip_last_check_ts": 0.0,
     "ip_manual_rearm_required": False,
     "live_order_allowed": False,
-    # Trading mode: "INTRADAY" (MIS, force exit 15:10) or "SWING" (CNC, hold overnight, zero brokerage)
+    # Trading mode: INTRADAY (MIS, force exit 15:10) | SWING (CNC longs only) | HYBRID (per-trade)
     "trading_mode": str(os.getenv("TRADING_MODE", "INTRADAY")).strip().upper(),
+    # Risk profile: STANDARD (current safe behavior) | GOD (neutralizes bot-imposed soft caps)
+    "risk_profile": str(os.getenv("RISK_PROFILE", "STANDARD")).strip().upper(),
+    # Pending two-step confirmation state for GOD activation (cleared on confirm/cancel/standard switch)
+    "pending_risk_profile_confirmation": None,
 }
 
 # backwards compatibility for any caller that still checks open_trades key
@@ -156,6 +160,7 @@ _STATE_PERSIST_KEYS = [
     "pause_entries_until",
     "positions",
     "trading_mode",
+    "risk_profile",
 ]
 
 
@@ -241,6 +246,16 @@ def _cfg_obj():
 
 def _cfg_get(name: str, default):
     cfg = _cfg_obj()
+    # GOD profile overrides: check GOD_<NAME> first for specific keys when active.
+    try:
+        profile = str(STATE.get("risk_profile") or "STANDARD").upper()
+    except Exception:
+        profile = "STANDARD"
+    if profile == "GOD":
+        god_name = f"GOD_{name}"
+        god_val = getattr(cfg, god_name, None)
+        if god_val is not None:
+            return god_val
     val = getattr(cfg, name, None)
     if val is None:
         append_log("INFO", "CONFIRM", f"using config default for {name}={default}")
@@ -953,9 +968,23 @@ def _current_exposure_inr():
     return total
 
 
+def _effective_max_exposure_pct() -> float:
+    """Effective exposure cap: GOD uses GOD_MAX_EXPOSURE_PCT when active; else
+    STANDARD uses RUNTIME (which mirrors CFG) exactly as before."""
+    try:
+        profile = str(STATE.get("risk_profile") or "STANDARD").upper()
+    except Exception:
+        profile = "STANDARD"
+    if profile == "GOD":
+        god = getattr(CFG, "GOD_MAX_EXPOSURE_PCT", None)
+        if god is not None:
+            return float(god)
+    return float(RUNTIME.get("MAX_EXPOSURE_PCT", 60.0))
+
+
 def _max_exposure_inr():
     base = float(STATE.get("wallet_net_inr") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
-    return base * float(RUNTIME.get("MAX_EXPOSURE_PCT", 60.0)) / 100.0
+    return base * _effective_max_exposure_pct() / 100.0
 
 
 def _bucket_inr(wallet_net: float) -> float:
@@ -1240,15 +1269,202 @@ def place_order_safe(kite, **kwargs):
     return _place_order_http_fallback(kite, params)
 
 
+# ============================================================================
+# Trading mode + risk profile helpers (INTRADAY/SWING/HYBRID, STANDARD/GOD)
+# ============================================================================
+
+_VALID_MODES = ("INTRADAY", "SWING", "HYBRID")
+_VALID_PROFILES = ("STANDARD", "GOD")
+
+
+def _normalize_trading_mode(m) -> str:
+    m = str(m or "").strip().upper()
+    if m in ("MIS",):
+        return "INTRADAY"
+    if m in ("CNC", "DELIVERY"):
+        return "SWING"
+    return m if m in _VALID_MODES else "INTRADAY"
+
+
+def _normalize_risk_profile(p) -> str:
+    p = str(p or "").strip().upper()
+    return p if p in _VALID_PROFILES else "STANDARD"
+
+
+def current_trading_mode() -> str:
+    return _normalize_trading_mode(STATE.get("trading_mode"))
+
+
+def current_risk_profile() -> str:
+    return _normalize_risk_profile(STATE.get("risk_profile"))
+
+
+def effective_cfg(key: str):
+    """Return the effective config value, respecting GOD profile overrides.
+
+    GOD activates GOD_<KEY> overrides if defined. GOD NEVER bypasses:
+    wallet_available, broker margin/affordability, order safety / market
+    protection / compliance, panic, daily loss kill switch.
+    """
+    profile = current_risk_profile()
+    if profile == "GOD":
+        god_key = f"GOD_{key}"
+        if hasattr(CFG, god_key):
+            return getattr(CFG, god_key)
+    return getattr(CFG, key, None)
+
+
+def classify_trade_mode(signal_ctx: dict | None = None) -> tuple[str, str]:
+    """Classify an intended entry as INTRADAY or SWING.
+
+    Returns (trade_mode, reason). trade_mode ∈ {"INTRADAY","SWING"}.
+
+    INTRADAY mode  → every entry is INTRADAY (current behaviour).
+    SWING mode     → long entries become SWING; shorts stay INTRADAY.
+    HYBRID mode    → narrow swing lane for strong long continuation:
+        side in (BUY, LONG), strategy_tag == 'mtf_confirmed_long',
+        tier == 'FULL', regime ∈ (TRENDING_UP, TRENDING),
+        trend_direction == 'UP', not a weak-market/fallback/MR exception.
+    All shorts are always INTRADAY.
+    """
+    ctx = dict(signal_ctx or {})
+    mode = current_trading_mode()
+    side = str(ctx.get("side") or "").upper()
+
+    if side not in ("BUY", "LONG"):
+        return "INTRADAY", "short_always_intraday"
+
+    if mode == "INTRADAY":
+        return "INTRADAY", "mode_intraday"
+
+    if mode == "SWING":
+        return "SWING", "mode_swing_long"
+
+    if mode == "HYBRID":
+        tag = str(ctx.get("strategy_tag") or "").lower()
+        family = str(ctx.get("strategy_family") or "").lower()
+        tier = str(ctx.get("tier") or "").upper()
+        regime = str(ctx.get("regime") or "").upper()
+        trend_direction = str(ctx.get("trend_direction") or "").upper()
+        weak_exception = bool(ctx.get("weak_market_exception"))
+
+        if weak_exception:
+            return "INTRADAY", "weak_market_exception_not_swing_eligible"
+        if "mean_reversion" in family or "mean_reversion" in tag:
+            return "INTRADAY", "mean_reversion_not_swing_eligible"
+        if "fallback" in family or "fallback" in tag:
+            return "INTRADAY", "fallback_not_swing_eligible"
+        if tag != "mtf_confirmed_long":
+            return "INTRADAY", f"strategy_tag_not_mtf_confirmed_long({tag or 'none'})"
+        if tier != "FULL":
+            return "INTRADAY", f"tier_not_full({tier or 'none'})"
+        if regime not in ("TRENDING_UP", "TRENDING"):
+            return "INTRADAY", f"regime_not_trending({regime or 'none'})"
+        if trend_direction != "UP":
+            return "INTRADAY", f"trend_direction_not_up({trend_direction or 'none'})"
+        return "SWING", "hybrid_qualified_long_continuation"
+
+    return "INTRADAY", "fallback_intraday"
+
+
+def product_for_trade_mode(trade_mode: str) -> str:
+    """Map a trade_mode to its broker product. SWING → CNC, else MIS."""
+    return "CNC" if str(trade_mode or "").upper() == "SWING" else "MIS"
+
+
+def set_trading_mode(new_mode: str) -> tuple[bool, str]:
+    """Update STATE['trading_mode'] + persist to env. Returns (ok, normalized)."""
+    norm = _normalize_trading_mode(new_mode)
+    if norm not in _VALID_MODES:
+        return False, norm
+    with STATE_LOCK:
+        STATE["trading_mode"] = norm
+    try:
+        from env_utils import set_env_value as _sev
+        _sev("TRADING_MODE", norm)
+        os.environ["TRADING_MODE"] = norm
+    except Exception as exc:
+        append_log("WARN", "MODE", f"trading_mode_env_write_failed: {exc}")
+    append_log("INFO", "MODE", f"trading_mode_set mode={norm}")
+    return True, norm
+
+
+def set_risk_profile(new_profile: str) -> tuple[bool, str]:
+    """Switch runtime risk profile. Does NOT perform GOD confirmation — caller
+    must confirm separately via confirm_god_mode() when switching to GOD.
+    """
+    norm = _normalize_risk_profile(new_profile)
+    if norm not in _VALID_PROFILES:
+        return False, norm
+    with STATE_LOCK:
+        STATE["risk_profile"] = norm
+        STATE["pending_risk_profile_confirmation"] = None
+    try:
+        from env_utils import set_env_value as _sev
+        _sev("RISK_PROFILE", norm)
+        os.environ["RISK_PROFILE"] = norm
+    except Exception as exc:
+        append_log("WARN", "RISK", f"risk_profile_env_write_failed: {exc}")
+    append_log("INFO", "RISK", f"risk_profile_set profile={norm}")
+    return True, norm
+
+
+def request_god_confirmation() -> str:
+    """Stage a pending GOD activation. Returns a warning string for the UI."""
+    with STATE_LOCK:
+        STATE["pending_risk_profile_confirmation"] = "GOD"
+    append_log("INFO", "RISK", "god_confirmation_requested")
+    return (
+        "⚠️ GOD MODE — CONFIRM TO ACTIVATE\n\n"
+        "GOD removes bot-imposed soft caps (deployable %, max exposure %, "
+        "per-symbol allocation, tier weights, weak-market multipliers).\n\n"
+        "GOD does NOT bypass: wallet_available, broker margin / CNC "
+        "affordability, market protection / compliance, panic, or the daily "
+        "loss kill switch.\n\n"
+        "Risks:\n"
+        "• Higher exposure per trade and overall\n"
+        "• Larger drawdown potential\n"
+        "• More aggressive wallet usage\n\n"
+        "To activate, reply: `/riskprofile god confirm`\n"
+        "To cancel, reply: `/riskprofile cancel`"
+    )
+
+
+def confirm_god_mode() -> tuple[bool, str]:
+    """Finalize a pending GOD activation. Fails if no pending confirmation."""
+    with STATE_LOCK:
+        pending = STATE.get("pending_risk_profile_confirmation")
+    if str(pending or "").upper() != "GOD":
+        return False, "no_pending_god_confirmation"
+    ok, norm = set_risk_profile("GOD")
+    if ok:
+        append_log("INFO", "RISK", "god_confirmation_accepted")
+    return ok, norm
+
+
+def cancel_god_confirmation() -> bool:
+    """Clear any pending GOD confirmation without changing the active profile."""
+    with STATE_LOCK:
+        had = STATE.get("pending_risk_profile_confirmation")
+        STATE["pending_risk_profile_confirmation"] = None
+    if had:
+        append_log("INFO", "RISK", "god_confirmation_cancelled")
+    return bool(had)
+
+
 def _get_product_for_mode(product_override: str | None = None) -> str:
     """Return order product type based on trading mode.
 
-    SWING mode → CNC (delivery, zero brokerage, hold overnight).
-    INTRADAY mode → MIS (margin intraday, auto-squared off by broker at 3:20).
+    SWING mode   → CNC (delivery, zero brokerage, hold overnight).
+    INTRADAY     → MIS (margin intraday, auto-squared off by broker at 3:20).
+    HYBRID       → MIS by default; callers must pass an explicit
+                   `product_override` for per-trade swing routing. This keeps
+                   recon/UI paths that call _get_product_for_mode() without a
+                   trade context safely defaulting to intraday.
     """
     if product_override:
         return product_override
-    mode = str(STATE.get("trading_mode") or "INTRADAY").upper()
+    mode = current_trading_mode()
     if mode == "SWING":
         return "CNC"
     return str(CFG.PRODUCT or "MIS")
@@ -3239,8 +3455,16 @@ def _maybe_enter_short_from_signal(sig):
         now_price = _ltp(kite, sym)
         if now_price is not None:
             booked_entry = now_price
-        append_log("INFO", "ORDER", f"symbol={sym} side=SELL family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
-        oid = _place_live_order(kite, sym, "SELL", qty)
+        # Shorts are ALWAYS intraday — never routed to swing/CNC regardless of mode.
+        _short_regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN")
+        append_log(
+            "INFO", "ROUTE",
+            f"mode_route=INTRADAY symbol={sym} side=SHORT product=MIS "
+            f"strategy={strategy_tag} family={strategy_family} tier={decision.get('tier')} "
+            f"regime={_short_regime} risk_profile={current_risk_profile()} reason=short_always_intraday"
+        )
+        append_log("INFO", "ORDER", f"symbol={sym} side=SELL family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f} product=MIS trade_mode=INTRADAY risk_profile={current_risk_profile()}")
+        oid = _place_live_order(kite, sym, "SELL", qty, product_override="MIS")
         if not oid:
             append_log("WARN", "SKIP", f"{sym} reason=order_failed side=SHORT qty={qty}")
             return False
@@ -3249,7 +3473,14 @@ def _maybe_enter_short_from_signal(sig):
             append_log("ERROR", "SKIP", f"{sym} reason=order_rejected_or_cancelled side=SHORT order_id={oid}")
             return False
         booked_entry = fill_price
-        append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid}")
+        append_log("INFO", "FILL", f"symbol={sym} side=SELL qty={qty} fill={booked_entry:.2f} order_id={oid} product=MIS trade_mode=INTRADAY")
+    else:
+        append_log(
+            "INFO", "ROUTE",
+            f"mode_route=INTRADAY symbol={sym} side=SHORT product=MIS "
+            f"strategy={strategy_tag} family={strategy_family} tier={decision.get('tier')} "
+            f"risk_profile={current_risk_profile()} reason=short_always_intraday [paper]"
+        )
 
     PM.set(sym, {
         "symbol": sym,
@@ -3264,7 +3495,9 @@ def _maybe_enter_short_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
-        "product": _get_product_for_mode(),
+        "product": "MIS",
+        "trade_mode": "INTRADAY",
+        "risk_profile_at_entry": current_risk_profile(),
         "strategy_tag": strategy_tag,
         "strategy_family": strategy_family,
         "confidence_tier": str(decision.get("tier") or "BLOCK"),
@@ -3507,8 +3740,26 @@ def _maybe_enter_from_signal(sig):
                 append_log("INFO", "SKIP", f"{sym} reason=slippage")
                 return False
             booked_entry = now_price
-        append_log("INFO", "ORDER", f"symbol={sym} side=BUY family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f}")
-        oid = _place_live_order(kite, sym, "BUY", qty)
+        # Per-trade mode routing (INTRADAY/SWING/HYBRID-aware).
+        _signal_ctx = {
+            "side": "BUY",
+            "strategy_tag": strategy_tag,
+            "strategy_family": strategy_family,
+            "tier": str(decision.get("tier") or ""),
+            "regime": regime,
+            "trend_direction": str(STATE.get("last_trend_direction") or ""),
+            "weak_market_exception": bool(STATE.get("weak_market_entry_active")),
+        }
+        _trade_mode, _route_reason = classify_trade_mode(_signal_ctx)
+        _trade_product = product_for_trade_mode(_trade_mode)
+        append_log(
+            "INFO", "ROUTE",
+            f"mode_route={_trade_mode} symbol={sym} side=BUY product={_trade_product} "
+            f"strategy={strategy_tag} family={strategy_family} tier={decision.get('tier')} "
+            f"regime={regime} risk_profile={current_risk_profile()} reason={_route_reason}"
+        )
+        append_log("INFO", "ORDER", f"symbol={sym} side=BUY family={strategy_family} tier={decision.get('tier')} qty={qty} entry={booked_entry:.2f} product={_trade_product} trade_mode={_trade_mode} risk_profile={current_risk_profile()}")
+        oid = _place_live_order(kite, sym, "BUY", qty, product_override=_trade_product)
         if not oid:
             append_log("WARN", "SKIP", f"{sym} reason=order_failed side=BUY qty={qty}")
             return False
@@ -3517,7 +3768,26 @@ def _maybe_enter_from_signal(sig):
             append_log("ERROR", "SKIP", f"{sym} reason=order_rejected_or_cancelled side=BUY order_id={oid}")
             return False
         booked_entry = fill_price
-        append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid}")
+        append_log("INFO", "FILL", f"symbol={sym} side=BUY qty={qty} fill={booked_entry:.2f} order_id={oid} product={_trade_product} trade_mode={_trade_mode}")
+    else:
+        # PAPER mode still classifies so tests + status reflect routing decisions.
+        _signal_ctx = {
+            "side": "BUY",
+            "strategy_tag": strategy_tag,
+            "strategy_family": strategy_family,
+            "tier": str(decision.get("tier") or ""),
+            "regime": regime,
+            "trend_direction": str(STATE.get("last_trend_direction") or ""),
+            "weak_market_exception": bool(STATE.get("weak_market_entry_active")),
+        }
+        _trade_mode, _route_reason = classify_trade_mode(_signal_ctx)
+        _trade_product = product_for_trade_mode(_trade_mode)
+        append_log(
+            "INFO", "ROUTE",
+            f"mode_route={_trade_mode} symbol={sym} side=BUY product={_trade_product} "
+            f"strategy={strategy_tag} family={strategy_family} tier={decision.get('tier')} "
+            f"regime={regime} risk_profile={current_risk_profile()} reason={_route_reason} [paper]"
+        )
 
     PM.set(sym, {
         "symbol": sym,
@@ -3532,7 +3802,9 @@ def _maybe_enter_from_signal(sig):
         "trail_active": False,
         "trailing_active": False,
         "order_id": oid,
-        "product": _get_product_for_mode(),
+        "product": _trade_product,
+        "trade_mode": _trade_mode,
+        "risk_profile_at_entry": current_risk_profile(),
         "strategy_tag": strategy_tag,
         "strategy_family": strategy_family,
         "confidence_tier": str(decision.get("tier") or "BLOCK"),
@@ -3628,6 +3900,8 @@ def get_status_text():
         e, q = _trade_entry_qty(p)
         rows.append(
             f"- {sym} {str(p.get('side') or 'BUY').upper()} qty={q} entry={e:.2f} "
+            f"trade_mode={str(p.get('trade_mode') or ('SWING' if str(p.get('product') or '').upper()=='CNC' else 'INTRADAY'))} "
+            f"product={str(p.get('product') or '-').upper()} "
             f"strategy={p.get('strategy_tag','-')} family={p.get('strategy_family','-')} "
             f"tier={p.get('confidence_tier','-')} source={p.get('universe_source','-')} regime={p.get('market_regime','-')}"
         )
@@ -3642,7 +3916,9 @@ def get_status_text():
         "📟 Trident Status\n\n"
         f"Runtime: {runtime_ver}\n"
         f"Mode: {mode}\n"
-        f"Trading Mode: {str(STATE.get('trading_mode') or 'INTRADAY').upper()} ({'CNC ₹0 brokerage' if str(STATE.get('trading_mode') or '').upper() == 'SWING' else 'MIS ₹20/order'})\n"
+        f"Trading Mode: {current_trading_mode()} ({'CNC longs / MIS shorts' if current_trading_mode() == 'SWING' else ('per-trade MIS+CNC' if current_trading_mode() == 'HYBRID' else 'MIS ₹20/order')})\n"
+        f"Risk Profile: {current_risk_profile()}"
+        f"{' (pending GOD confirmation)' if str(STATE.get('pending_risk_profile_confirmation') or '').upper() == 'GOD' else ''}\n"
         f"Paused: {STATE.get('paused')}\n"
         f"Initiated: {STATE.get('initiated')} | LiveOverride: {STATE.get('live_override')}\n"
         f"Universe(trading): {len(load_universe_trading())} symbols\n"
@@ -3659,7 +3935,7 @@ def get_status_text():
         "Wallet/Caps:\n"
         f"- Wallet Net: ₹{float(STATE.get('wallet_net_inr') or 0):.2f}\n"
         f"- Wallet Available: ₹{float(STATE.get('wallet_available_inr') or 0):.2f}\n"
-        f"- Exposure: ₹{_current_exposure_inr():.2f} / ₹{_max_exposure_inr():.2f} ({RUNTIME.get('MAX_EXPOSURE_PCT')}%)\n"
+        f"- Exposure: ₹{_current_exposure_inr():.2f} / ₹{_max_exposure_inr():.2f} ({_effective_max_exposure_pct():.1f}%)\n"
         f"- Deployable: ₹{float(cu.get('deployable_capital') or 0.0):.2f}\n"
         f"- Unused Deployable: ₹{float(cu.get('unused_deployable') or 0.0):.2f}\n"
         f"- Utilization: {float(cu.get('utilization_pct') or 0.0):.1f}% | Avg Position Size: ₹{float(cu.get('avg_position_size') or 0.0):.2f}\n"
@@ -4081,18 +4357,23 @@ def tick():
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):
             safe_set(STATE, "force_exit_done", True)
-            # Only force-exit MIS (intraday) positions. CNC (swing) positions
-            # are held overnight — broker won't auto-square them.
-            mis_positions = {s: t for s, t in _positions().items()
-                            if str(t.get("product") or "MIS").upper() == "MIS"}
-            cnc_positions = {s: t for s, t in _positions().items()
-                            if str(t.get("product") or "MIS").upper() == "CNC"}
+            # Only force-exit INTRADAY (MIS) positions. SWING/CNC positions
+            # are held overnight — broker does NOT auto-square them.
+            # Primary field = trade_mode (new). Fallback = product (legacy).
+            def _is_intraday(t):
+                tm = str(t.get("trade_mode") or "").upper()
+                if tm in ("INTRADAY", "SWING"):
+                    return tm == "INTRADAY"
+                return str(t.get("product") or "MIS").upper() == "MIS"
+
+            mis_positions = {s: t for s, t in _positions().items() if _is_intraday(t)}
+            cnc_positions = {s: t for s, t in _positions().items() if not _is_intraday(t)}
             if mis_positions:
-                append_log("WARN", "TIME", f"FORCE_EXIT triggered for {len(mis_positions)} MIS positions")
+                append_log("WARN", "TIME", f"FORCE_EXIT triggered for {len(mis_positions)} INTRADAY/MIS positions")
                 ee_force_exit_all(mis_positions, _close_position, reason="TIME")
             if cnc_positions:
-                append_log("INFO", "TIME", f"SWING mode: {len(cnc_positions)} CNC positions held overnight")
-            # Only pause if no CNC positions remain — swing mode continues next day
+                append_log("INFO", "TIME", f"SWING/CNC held overnight: {len(cnc_positions)} positions (force-exit skipped)")
+            # Only pause if no swing positions remain — swing mode continues next day
             if not cnc_positions:
                 safe_set(STATE, "paused", True)
             day_pnl = float(STATE.get("today_pnl") or 0.0)
