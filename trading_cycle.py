@@ -3897,9 +3897,17 @@ def get_holdings_text():
     if not holdings:
         return "📦 Holdings\n\nNo holdings found."
 
+    open_holdings = [
+        h for h in holdings
+        if (h.get("quantity") or 0) > 0 or (h.get("t1_quantity") or 0) > 0
+    ]
+
+    if not open_holdings:
+        return "📦 Holdings\n\nNo open holdings."
+
     rows = []
     total_pnl = 0.0
-    for h in sorted(holdings, key=lambda x: x.get("tradingsymbol", "")):
+    for h in sorted(open_holdings, key=lambda x: x.get("tradingsymbol", "")):
         sym = h.get("tradingsymbol", "?")
         qty = h.get("quantity", 0)
         t1 = h.get("t1_quantity", 0)
@@ -3917,7 +3925,7 @@ def get_holdings_text():
 
     total_sign = "+" if total_pnl >= 0 else ""
     rows.append(f"\nTotal P&L: {total_sign}{total_pnl:.2f}")
-    return "📦 Holdings\n\n" + "\n".join(rows)
+    return f"📦 Open Holdings ({len(open_holdings)})\n\n" + "\n".join(rows)
 
 
 def _current_open_pnl_breakdown():
