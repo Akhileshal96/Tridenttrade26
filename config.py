@@ -74,7 +74,7 @@ GOD_FALLBACK_SIZE_MULTIPLIER         = _get_float("GOD_FALLBACK_SIZE_MULTIPLIER"
 GOD_BUCKET_ALLOC_PCT                 = _get_float("GOD_BUCKET_ALLOC_PCT",                 "50")
 GOD_BUCKET_CEIL_PCT                  = _get_float("GOD_BUCKET_CEIL_PCT",                  "70")
 # More concurrent positions in GOD mode
-GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "8")
+GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "50")
 # Higher risk budget per trade
 GOD_RISK_PER_TRADE_PCT               = _get_float("GOD_RISK_PER_TRADE_PCT",               "3.0")
 # Re-entry cooldown lifted — GOD can re-enter immediately after an exit

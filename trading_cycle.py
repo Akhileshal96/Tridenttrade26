@@ -1051,16 +1051,7 @@ def _dynamic_max_concurrent() -> int:
     with STATE_LOCK:
         god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     if god:
-        god_cap = int(getattr(CFG, "GOD_MAX_CONCURRENT_TRADES", 8) or 8)
-        if wallet <= 0:
-            return min(3, god_cap)
-        if wallet < 15000:
-            return min(3, god_cap)
-        if wallet < 30000:
-            return min(5, god_cap)
-        if wallet < 60000:
-            return min(7, god_cap)
-        return god_cap
+        return int(getattr(CFG, "GOD_MAX_CONCURRENT_TRADES", 50) or 50)
     if wallet <= 0:
         return 2
     if wallet < 15000:
@@ -1103,6 +1094,25 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     wallet_available = float(STATE.get("wallet_available_inr") or wallet)
     open_exposure = float(_current_exposure_inr())
     open_count = int(_open_positions_count())
+
+    with STATE_LOCK:
+        _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+
+    # GOD mode: size = everything the broker wallet can actually afford for this symbol.
+    # No deployable %, no symbol cap, no exposure cap, no risk_qty drag.
+    # Hard limit is wallet_available (broker affordability) only.
+    if _is_god:
+        god_affordability = max(0.0, wallet_available - open_exposure)
+        god_qty = int(god_affordability / price) if price > 0 else 0
+        short_policy_qty = god_qty
+        if str(side or "BUY").upper() == "SELL":
+            short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
+            short_mult = float(_cfg_get("SHORT_SIZE_ALIGNED_MULT", 1.0) if short_aligned else _cfg_get("SHORT_SIZE_NON_ALIGNED_MULT", _cfg_get("SHORT_SIZE_MULTIPLIER", 0.75)) or 0.75)
+            short_policy_qty = int(math.floor(god_qty * max(0.1, short_mult)))
+            god_qty = short_policy_qty
+        god_qty = god_qty if god_qty >= 1 else 0
+        append_log("INFO", "SIZE", f"[GOD-SIZE] symbol={symbol} side={side} wallet_available={wallet_available:.2f} open_exposure={open_exposure:.2f} god_affordability={god_affordability:.2f} price={price:.2f} final_qty={god_qty} final_notional={(god_qty * price):.2f}")
+        return god_qty, god_qty, god_qty
     max_concurrent = _dynamic_max_concurrent()
     deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 75.0) or 75.0)))
     deployable_capital = wallet * (deployable_pct / 100.0)
@@ -1179,12 +1189,9 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
         qty = short_policy_qty
         reason_chain.append(f"short_policy_qty={short_policy_qty}")
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
-    # GOD mode ignores loss-streak size reductions — sizing is driven entirely
-    # by confidence tier and regime multipliers, not recent trade outcomes.
-    with STATE_LOCK:
-        _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
-    if _is_god:
-        size_factor = 1.0
+    # GOD fast path already returned above; this branch is STANDARD only.
+    if size_factor < 1.0:
+        pass  # applied below
 
     # Win-streak scaling applied BEFORE size_factor reduction so uplift acts on
     # the base qty, not on an already-penalised qty. Guard: only when no active
@@ -1774,6 +1781,11 @@ def _apply_strategy_allocation(
     trend_direction: str = "",
 ) -> int:
     pre_qty = max(0, int(qty))
+    with STATE_LOCK:
+        _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+    if _is_god:
+        append_log("INFO", "ALLOC", f"strategy={strategy_tag} GOD mode — allocation multiplier bypassed pre_qty={pre_qty}")
+        return pre_qty
     mult, reason = SA.get_strategy_multiplier(strategy_tag, CFG)
     post_qty = max(0, int(math.floor(pre_qty * max(0.0, mult))))
 
@@ -1883,21 +1895,26 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=already_held")
         return False
 
-    max_pos = _dynamic_max_concurrent()
-    if _open_positions_count() >= max_pos:
-        append_log("INFO", "SKIP", f"{sym} reason=max_positions")
-        return False
+    with STATE_LOCK:
+        _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+
+    if not _is_god:
+        max_pos = _dynamic_max_concurrent()
+        if _open_positions_count() >= max_pos:
+            append_log("INFO", "SKIP", f"{sym} reason=max_positions")
+            return False
 
     required_value = float(entry) * max(1, int(qty or 1))
     if required_value > wallet_avail:
         append_log("INFO", "SKIP", f"{sym} reason=insufficient_wallet need={required_value:.2f} avail={wallet_avail:.2f}")
         return False
 
-    if not RISK.can_enter_trade(sym, float(entry), _positions(), wallet_net, int(qty),
-                                sector=_sector_for_symbol(sym),
-                                max_exposure_pct=_effective_max_exposure_pct()):
-        _apply_skip_cooldown(sym, "risk_guard")
-        return False
+    if not _is_god:
+        if not RISK.can_enter_trade(sym, float(entry), _positions(), wallet_net, int(qty),
+                                    sector=_sector_for_symbol(sym),
+                                    max_exposure_pct=_effective_max_exposure_pct()):
+            _apply_skip_cooldown(sym, "risk_guard")
+            return False
 
     return True
 
@@ -3462,8 +3479,10 @@ def _maybe_enter_short_from_signal(sig):
         return False
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
+    with STATE_LOCK:
+        _is_god_open_short = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+    if not _is_god_open_short and _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="SHORT")
         if not allowed_open:
             append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
@@ -3480,6 +3499,8 @@ def _maybe_enter_short_from_signal(sig):
             append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
             append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+    elif _is_god_open_short and _in_open_filter_window():
+        append_log("INFO", "OPEN", f"GOD mode — opening filter bypassed mode={mode}")
 
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
@@ -3741,8 +3762,10 @@ def _maybe_enter_from_signal(sig):
         return False
     append_log("INFO", "CONFIRM", f"symbol={sym} tier={decision['tier']} size_weight_applied={tier_mult:.2f}")
 
+    with STATE_LOCK:
+        _is_god_open = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+    if not _is_god_open and _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
         allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
         if not allowed_open:
             append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
@@ -3759,6 +3782,8 @@ def _maybe_enter_from_signal(sig):
             append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
         else:
             append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
+    elif _is_god_open and _in_open_filter_window():
+        append_log("INFO", "OPEN", f"GOD mode — opening filter bypassed mode={mode}")
 
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
