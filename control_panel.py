@@ -47,17 +47,19 @@ def _main_buttons(handlers=None):
     except Exception:
         pass
     rows = [
-        # Controls
+        # ── Session ──────────────────────────────────────────────────────────
         [Button.inline("▶ Start", b"cp:cmd:startloop"), Button.inline("⏸ Stop", b"cp:cmd:stoploop"), Button.inline("📟 Status", b"cp:cmd:status")],
-        [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions"), Button.inline("📦 Holdings", b"cp:cmd:holdings"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
-        # Trading mode
-        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("📦 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
-        # Risk profile + God Mode confirmation on one row
-        [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god"), Button.inline("✅ Confirm", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel", b"cp:cmd:risk_god_cancel")],
-        # Sub-panels
-        [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research")],
-        [Button.inline("📜 Logs", b"cp:panel:logs"), Button.inline("🔐 Token", b"cp:panel:token")],
-        [Button.inline("🛡 Live & Safety", b"cp:panel:live"), Button.inline("⚙ Admin", b"cp:panel:admin")],
+        # ── Portfolio ────────────────────────────────────────────────────────
+        [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions")],
+        [Button.inline("📦 Holdings", b"cp:cmd:holdings"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
+        # ── Trading Mode ─────────────────────────────────────────────────────
+        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("🌙 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
+        # ── Risk Profile ─────────────────────────────────────────────────────
+        [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god")],
+        [Button.inline("✅ Confirm God", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel God", b"cp:cmd:risk_god_cancel")],
+        # ── Panels ───────────────────────────────────────────────────────────
+        [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("📜 Logs", b"cp:panel:logs")],
+        [Button.inline("🔐 Token", b"cp:panel:token"), Button.inline("🛡 Live & Safety", b"cp:panel:live"), Button.inline("⚙ Admin", b"cp:panel:admin")],
         [Button.inline("❓ Help", b"cp:cmd:help")],
     ]
     return _dedupe_rows(rows)
@@ -113,10 +115,9 @@ def _logs_buttons():
 
 def _analytics_buttons():
     return [
-        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Scores", b"cp:cmd:strategyscores")],
-        [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("🔀 Route", b"cp:cmd:routestatus")],
-        [Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
+        [Button.inline("📌 Top 3", b"cp:cmd:top3"), Button.inline("🧠 Scores", b"cp:cmd:strategyscores"), Button.inline("📊 Strategy Report", b"cp:cmd:strategyreport")],
         [Button.inline("🏆 Best", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst", b"cp:cmd:worststrategy")],
+        [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("🔀 Route", b"cp:cmd:routestatus")],
         [Button.inline("📈 Regime PnL", b"cp:cmd:regimereport"), Button.inline("🏭 Sector PnL", b"cp:cmd:sectorreport")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]
