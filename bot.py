@@ -246,8 +246,8 @@ async def token_renewal_scheduler(client):
     """Auto-renew Kite access token daily via TOTP with retry.
 
     Schedule:
-      - First attempt at 06:15 IST.
-      - On failure: retry every 5 minutes until 08:30 IST (before market open).
+      - First attempt at 08:15 IST.
+      - On failure: retry every 5 minutes until 08:55 IST (before market open).
       - On success: stop retrying for the day.
     Only runs if KITE_TOTP_SECRET, KITE_USER_ID, and KITE_PASSWORD are set.
     Falls back gracefully — sends Telegram alert on failure so manual /token
@@ -259,7 +259,7 @@ async def token_renewal_scheduler(client):
         append_log("INFO", "AUTH", "TOTP auto-renewal disabled (KITE_TOTP_SECRET/USER_ID/PASSWORD not set)")
         return
 
-    append_log("INFO", "AUTH", "TOTP token renewal scheduler active — runs daily 06:15-08:30 IST with retry")
+    append_log("INFO", "AUTH", "TOTP token renewal scheduler active — runs daily 08:15-08:55 IST with retry")
     last_success_day = ""
     last_attempt_ts = 0.0  # epoch seconds of last attempt
 
@@ -267,7 +267,7 @@ async def token_renewal_scheduler(client):
         try:
             now = datetime.now(IST)
             today = now.strftime("%Y-%m-%d")
-            in_window = dtime(6, 15) <= now.time() <= dtime(8, 30)
+            in_window = dtime(8, 15) <= now.time() <= dtime(8, 55)
             already_succeeded = last_success_day == today
             retry_cooldown_ok = (now.timestamp() - last_attempt_ts) >= 300  # 5 min between retries
 
@@ -290,7 +290,7 @@ async def token_renewal_scheduler(client):
                         msg = f"🔑 Kite token auto-renewed via TOTP ✅\nAttempt: {attempt_num}\nBot is ready for today's session."
                         append_log("WARN", "AUTH", f"Post-renewal wallet fetch failed (token OK): {_ve}")
                 else:
-                    remaining_min = max(0, (dtime(8, 30).hour * 60 + dtime(8, 30).minute) - (now.hour * 60 + now.minute))
+                    remaining_min = max(0, (dtime(8, 55).hour * 60 + dtime(8, 55).minute) - (now.hour * 60 + now.minute))
                     msg = (
                         f"⚠️ Kite token auto-renewal FAILED (attempt {attempt_num})\n\n"
                         f"Reason: {result}\n"
