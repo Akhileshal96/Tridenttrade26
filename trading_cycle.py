@@ -206,6 +206,17 @@ def _load_state_snapshot() -> None:
         today = datetime.now(IST).strftime("%Y-%m-%d")
         if saved_day != today:
             append_log("INFO", "STATE", f"state_snapshot stale (saved={saved_day} today={today}) — skipping restore")
+            # GOD mode written to .env on a prior day must not carry over.
+            if str(os.getenv("RISK_PROFILE", "STANDARD")).upper() == "GOD":
+                try:
+                    from env_utils import set_env_value as _sev
+                    _sev("RISK_PROFILE", "STANDARD")
+                    os.environ["RISK_PROFILE"] = "STANDARD"
+                    with STATE_LOCK:
+                        STATE["risk_profile"] = "STANDARD"
+                    append_log("INFO", "RISK", "god_mode_auto_reverted stale_day cross-day reset")
+                except Exception as _e:
+                    append_log("WARN", "RISK", f"god_auto_revert_failed: {_e}")
             return
         with STATE_LOCK:
             for k in _STATE_PERSIST_KEYS:
@@ -267,7 +278,8 @@ def _cfg_get(name: str, default):
     cfg = _cfg_obj()
     # GOD profile overrides: check GOD_<NAME> first for specific keys when active.
     try:
-        profile = str(STATE.get("risk_profile") or "STANDARD").upper()
+        with STATE_LOCK:
+            profile = str(STATE.get("risk_profile") or "STANDARD").upper()
     except Exception:
         profile = "STANDARD"
     if profile == "GOD":
@@ -607,7 +619,9 @@ def manual_reset_day():
         STATE["last_route_universe_source"] = "n/a"
         STATE["last_trend_direction"] = "UNKNOWN"
         STATE["force_exit_done"] = False
-    append_log("INFO", "DAY", "Manual day reset executed")
+    # Always revert GOD at day reset — GOD is a single-session override.
+    set_risk_profile("STANDARD")
+    append_log("INFO", "DAY", "Manual day reset executed — risk_profile reverted to STANDARD")
     return True
 
 
@@ -991,7 +1005,8 @@ def _effective_max_exposure_pct() -> float:
     """Effective exposure cap: GOD uses GOD_MAX_EXPOSURE_PCT when active; else
     STANDARD uses RUNTIME (which mirrors CFG) exactly as before."""
     try:
-        profile = str(STATE.get("risk_profile") or "STANDARD").upper()
+        with STATE_LOCK:
+            profile = str(STATE.get("risk_profile") or "STANDARD").upper()
     except Exception:
         profile = "STANDARD"
     if profile == "GOD":
@@ -1033,7 +1048,8 @@ def _dynamic_max_concurrent() -> int:
     cfg_override = int(_cfg_get("MAX_CONCURRENT_TRADES", 0) or 0)
     if cfg_override > 0:
         return max(1, cfg_override)
-    god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+    with STATE_LOCK:
+        god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     if god:
         god_cap = int(getattr(CFG, "GOD_MAX_CONCURRENT_TRADES", 8) or 8)
         if wallet <= 0:
@@ -1165,7 +1181,9 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     size_factor = float(STATE.get("reduce_size_factor") or 1.0)
     # GOD mode ignores loss-streak size reductions — sizing is driven entirely
     # by confidence tier and regime multipliers, not recent trade outcomes.
-    if str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD":
+    with STATE_LOCK:
+        _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
+    if _is_god:
         size_factor = 1.0
 
     # Win-streak scaling applied BEFORE size_factor reduction so uplift acts on
