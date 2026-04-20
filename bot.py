@@ -79,7 +79,8 @@ HELP_TEXT = (
     "• /dailylog   → today's log as txt\n"
     "• /tradinglog → today's trading-hours log as txt\n"
     "• /resetlogs  → truncate all logs (Owner)\n"
-    "• /positions  → Zerodha net positions\n\n"
+    "• /positions  → Zerodha net positions\n"
+    "• /holdings   → Zerodha holdings (CNC)\n\n"
     "• /ipstatus  → Kite static-IP compliance status\n\n"
     "RESEARCH [Trader/Owner]:\n"
     "• /nightnow       → rebuild live universe now\n"
@@ -796,6 +797,11 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             txt = CYCLE.get_positions_text()
         except Exception as e:
             txt = f"❌ Failed to fetch positions: {e}"
+        await event.reply(txt)
+        return True
+
+    if cmd_word == "/holdings":
+        txt = CYCLE.get_holdings_text()
         await event.reply(txt)
         return True
 

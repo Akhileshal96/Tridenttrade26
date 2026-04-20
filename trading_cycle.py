@@ -3887,6 +3887,39 @@ def get_positions_text():
     return "📍 Positions\n\n" + "\n".join(rows)
 
 
+def get_holdings_text():
+    try:
+        kite = get_kite()
+        holdings = kite.holdings()
+    except Exception as e:
+        return f"❌ Failed to fetch holdings: {e}"
+
+    if not holdings:
+        return "📦 Holdings\n\nNo holdings found."
+
+    rows = []
+    total_pnl = 0.0
+    for h in sorted(holdings, key=lambda x: x.get("tradingsymbol", "")):
+        sym = h.get("tradingsymbol", "?")
+        qty = h.get("quantity", 0)
+        t1 = h.get("t1_quantity", 0)
+        avg = float(h.get("average_price") or 0)
+        ltp = float(h.get("last_price") or 0)
+        pnl = float(h.get("pnl") or 0)
+        day_chg_pct = float(h.get("day_change_percentage") or 0)
+        total_pnl += pnl
+        pnl_sign = "+" if pnl >= 0 else ""
+        t1_str = f" (T1:{t1})" if t1 else ""
+        rows.append(
+            f"- {sym}: qty={qty}{t1_str} avg={avg:.2f} ltp={ltp:.2f} "
+            f"pnl={pnl_sign}{pnl:.2f} day={day_chg_pct:+.2f}%"
+        )
+
+    total_sign = "+" if total_pnl >= 0 else ""
+    rows.append(f"\nTotal P&L: {total_sign}{total_pnl:.2f}")
+    return "📦 Holdings\n\n" + "\n".join(rows)
+
+
 def _current_open_pnl_breakdown():
     """Returns tuple: (profit_inr, loss_inr_abs) for currently open positions."""
     profit_inr = 0.0

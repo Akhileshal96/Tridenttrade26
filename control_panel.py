@@ -49,7 +49,7 @@ def _main_buttons(handlers=None):
     rows = [
         # Controls
         [Button.inline("▶ Start", b"cp:cmd:startloop"), Button.inline("⏸ Stop", b"cp:cmd:stoploop"), Button.inline("📟 Status", b"cp:cmd:status")],
-        [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
+        [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions"), Button.inline("📦 Holdings", b"cp:cmd:holdings"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
         # Trading mode
         [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("📦 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
         # Risk profile + God Mode confirmation on one row
