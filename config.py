@@ -276,6 +276,17 @@ ATR_STOPLOSS_MULT = _get_float("ATR_STOPLOSS_MULT", "1.5")
 ATR_STOPLOSS_SHORT_MULT = _get_float("ATR_STOPLOSS_SHORT_MULT", "1.2")
 ATR_STOPLOSS_MAX_PCT = _get_float("ATR_STOPLOSS_MAX_PCT", "4.0")
 
+# ===== HIGH-PROFIT TRAIL LOCK =====
+# When peak P&L >= TRAIL_HIGH_PROFIT_INR, lock LOCK_PCT and allow only GIVEBACK_PCT pullback.
+TRAIL_HIGH_PROFIT_INR          = _get_float("TRAIL_HIGH_PROFIT_INR",          "100")
+TRAIL_HIGH_PROFIT_LOCK_PCT     = _get_float("TRAIL_HIGH_PROFIT_LOCK_PCT",     "0.90")
+TRAIL_HIGH_PROFIT_GIVEBACK_PCT = _get_float("TRAIL_HIGH_PROFIT_GIVEBACK_PCT", "0.10")
+
+# ===== TRAIL RE-ENTRY =====
+# After a TRAIL exit, allow re-entry if price moves favorably past exit price + buffer.
+TRAIL_REENTRY_EXPIRE_MINUTES = _get_int(  "TRAIL_REENTRY_EXPIRE_MINUTES", "15")
+TRAIL_REENTRY_BUFFER_PCT     = _get_float("TRAIL_REENTRY_BUFFER_PCT",     "0.2")
+
 # ===== TIME-DECAY EXIT =====
 USE_TIME_DECAY_EXIT = _get_bool("USE_TIME_DECAY_EXIT", "true")
 TIME_DECAY_MINUTES = _get_int("TIME_DECAY_MINUTES", "90")

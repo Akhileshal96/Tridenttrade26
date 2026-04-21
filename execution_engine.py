@@ -79,6 +79,14 @@ def _dynamic_trail_levels(peak_pnl_inr: float, tier: str, product: str = "MIS") 
     is_swing = str(product or "MIS").upper() == "CNC"
     swing_widen = float(getattr(CFG, "SWING_TRAIL_WIDEN_MULT", 1.5) or 1.5) if is_swing else 1.0
 
+    # High-profit stage: once peak crosses threshold (default ₹100), lock 90%
+    # and only allow 10% giveback — keeps nearly all of a big winner.
+    high_profit_inr = float(getattr(CFG, "TRAIL_HIGH_PROFIT_INR", 100.0) or 100.0)
+    if peak_pnl_inr >= high_profit_inr:
+        lock_pct = float(getattr(CFG, "TRAIL_HIGH_PROFIT_LOCK_PCT", 0.90) or 0.90)
+        give_pct = float(getattr(CFG, "TRAIL_HIGH_PROFIT_GIVEBACK_PCT", 0.10) or 0.10)
+        return peak_pnl_inr * lock_pct, peak_pnl_inr * give_pct
+
     if peak_pnl_inr < be_arm:
         # Early profit stage: 35% giveback (intraday) / 52% (swing)
         return 0.0, max(2.0 * swing_widen, peak_pnl_inr * 0.35 * swing_widen)

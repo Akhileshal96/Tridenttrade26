@@ -56,6 +56,7 @@ STATE = {
     "wallet_cached_mode_reason": "",
     "cooldown_until": None,
     "last_exit_ts": {},
+    "trail_reentry": {},
     "skip_cooldown": {},
     "loss_streak": 0,
     "consecutive_wins": 0,
@@ -1098,11 +1099,13 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     with STATE_LOCK:
         _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
 
-    # GOD mode: size = everything the broker wallet can actually afford for this symbol.
-    # No deployable %, no symbol cap, no exposure cap, no risk_qty drag.
-    # Hard limit is wallet_available (broker affordability) only.
+    # GOD mode: size against full wallet_net (not live_balance slice).
+    # wallet_available can be artificially low when Zerodha blocks margin for
+    # collateral/pledged holdings — wallet_net reflects actual capital.
+    # Hard floor is wallet_available so we never exceed broker affordability.
     if _is_god:
-        god_affordability = max(0.0, wallet_available - open_exposure)
+        god_base = max(wallet_available, wallet)
+        god_affordability = max(0.0, god_base - open_exposure)
         god_qty = int(god_affordability / price) if price > 0 else 0
         short_policy_qty = god_qty
         if str(side or "BUY").upper() == "SELL":
@@ -1111,7 +1114,7 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
             short_policy_qty = int(math.floor(god_qty * max(0.1, short_mult)))
             god_qty = short_policy_qty
         god_qty = god_qty if god_qty >= 1 else 0
-        append_log("INFO", "SIZE", f"[GOD-SIZE] symbol={symbol} side={side} wallet_available={wallet_available:.2f} open_exposure={open_exposure:.2f} god_affordability={god_affordability:.2f} price={price:.2f} final_qty={god_qty} final_notional={(god_qty * price):.2f}")
+        append_log("INFO", "SIZE", f"[GOD-SIZE] symbol={symbol} side={side} wallet_net={wallet:.2f} wallet_available={wallet_available:.2f} god_base={god_base:.2f} open_exposure={open_exposure:.2f} god_affordability={god_affordability:.2f} price={price:.2f} final_qty={god_qty} final_notional={(god_qty * price):.2f}")
         return god_qty, god_qty, god_qty
     max_concurrent = _dynamic_max_concurrent()
     deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 75.0) or 75.0)))
@@ -1686,6 +1689,13 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
         RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
         PM.remove(sym)
         STATE["last_exit_ts"][sym] = datetime.now(IST)
+        if reason in ("TRAIL", "BREAKEVEN_LOCK"):
+            STATE.setdefault("trail_reentry", {})[sym] = {
+                "exit_price": ltp,
+                "side": side,
+                "exit_time": datetime.now(IST),
+                "tier": str(trade.get("confidence_tier") or "FULL"),
+            }
         _set_cooldown()
         exit_time = datetime.now(IST).isoformat(timespec="seconds")
         enriched = dict(trade)
@@ -1738,6 +1748,13 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
     RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
     PM.remove(sym)
     STATE["last_exit_ts"][sym] = datetime.now(IST)
+    if reason in ("TRAIL", "BREAKEVEN_LOCK"):
+        STATE.setdefault("trail_reentry", {})[sym] = {
+            "exit_price": ltp,
+            "side": side,
+            "exit_time": datetime.now(IST),
+            "tier": str(trade.get("confidence_tier") or "FULL"),
+        }
     _set_cooldown()
     exit_time = datetime.now(IST).isoformat(timespec="seconds")
     enriched = dict(trade)
@@ -1867,6 +1884,7 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         pause_until = STATE.get("pause_entries_until")
         wallet_avail = float(STATE.get("wallet_available_inr") or 0.0)
         wallet_net = float(STATE.get("wallet_net_inr") or 0.0)
+        trail_reentry_info = dict(STATE.get("trail_reentry", {}).get(sym) or {})
 
     if cooldown_until and now < cooldown_until:
         append_log("INFO", "SKIP", f"{sym} reason=cooldown")
@@ -1876,12 +1894,38 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
         return False
 
+    # Check if this symbol is eligible for re-entry after a trail exit.
+    # Eligible when price has moved favorably past the trail-exit price + buffer,
+    # within the expiry window. Bypasses the normal reentry_block when true.
+    trail_reentry_eligible = False
+    if trail_reentry_info:
+        expire_min = float(getattr(CFG, "TRAIL_REENTRY_EXPIRE_MINUTES", 15.0) or 15.0)
+        exit_price = float(trail_reentry_info.get("exit_price") or 0.0)
+        trail_side = str(trail_reentry_info.get("side") or "LONG").upper()
+        exit_time_dt = trail_reentry_info.get("exit_time")
+        still_valid = exit_time_dt and (now - exit_time_dt).total_seconds() / 60.0 <= expire_min
+        if still_valid and exit_price > 0:
+            buf = exit_price * float(getattr(CFG, "TRAIL_REENTRY_BUFFER_PCT", 0.2) or 0.2) / 100.0
+            favorable = (trail_side == "LONG" and entry >= exit_price + buf) or \
+                        (trail_side == "SHORT" and entry <= exit_price - buf)
+            if favorable:
+                trail_reentry_eligible = True
+                with STATE_LOCK:
+                    STATE.get("trail_reentry", {}).pop(sym, None)
+                append_log("INFO", "TRAIL_REENTRY", f"{sym} eligible exit_px={exit_price:.2f} now={entry:.2f} side={trail_side}")
+        else:
+            with STATE_LOCK:
+                STATE.get("trail_reentry", {}).pop(sym, None)
+
     reentry_block = int(_cfg_get("REENTRY_BLOCK_MINUTES", 30) or 0)
     if reentry_block > 0 and last_exit and (now - last_exit) < timedelta(minutes=reentry_block):
-        if not momentum_positive:
+        if trail_reentry_eligible:
+            append_log("INFO", "TRAIL_REENTRY", f"{sym} reentry_block bypassed reason=trail_reentry")
+        elif not momentum_positive:
             append_log("INFO", "SKIP", f"{sym} reason=reentry_block")
             return False
-        append_log("INFO", "SKIP", f"{sym} reentry_block bypassed reason=positive_momentum")
+        else:
+            append_log("INFO", "SKIP", f"{sym} reentry_block bypassed reason=positive_momentum")
 
     if halt_for_day:
         append_log("INFO", "SKIP", f"{sym} reason=halt_for_day")
