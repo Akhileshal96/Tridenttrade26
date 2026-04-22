@@ -83,6 +83,13 @@ GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",  
 GOD_DAY_PROFIT_GIVEBACK_HALT_PCT     = _get_float("GOD_DAY_PROFIT_GIVEBACK_HALT_PCT",     "75")
 GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT    = _get_float("GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT",    "55")
 GOD_DAY_PROFIT_GIVEBACK_REDUCE_PCT   = _get_float("GOD_DAY_PROFIT_GIVEBACK_REDUCE_PCT",   "35")
+# Minimum peak profit (INR) before the giveback guard activates.
+# Prevents tiny early gains from locking the bot for the rest of the day.
+GOD_MIN_PEAK_FOR_GIVEBACK_INR        = _get_float("GOD_MIN_PEAK_FOR_GIVEBACK_INR",        "200")
+MIN_PEAK_FOR_GIVEBACK_INR            = _get_float("MIN_PEAK_FOR_GIVEBACK_INR",            "150")
+# Mean-reversion signals in SIDEWAYS with HTF_FAIL get MICRO size if score >= this.
+# MR is counter-trend by design, so HTF alignment is less critical in SIDEWAYS.
+MR_SIDEWAYS_HTF_FAIL_MIN_SCORE       = _get_float("MR_SIDEWAYS_HTF_FAIL_MIN_SCORE",       "25")
 
 # ===== SIGNAL DATA =====
 HIST_INTERVAL = _get_str("HIST_INTERVAL", "15minute")

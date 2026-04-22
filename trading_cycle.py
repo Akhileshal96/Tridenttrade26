@@ -3742,6 +3742,12 @@ def _maybe_enter_from_signal(sig):
             if regime == "WEAK" and 30.0 <= dscore <= 60.0:
                 tier_mult = max(0.0, weak_size_mult)
                 append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=HTF_Score_Below_Req_for_WEAK score={dscore:.0f} size_mult={tier_mult:.2f}")
+            elif regime == "SIDEWAYS" and strategy_family == "mean_reversion" and dscore >= float(_cfg_get("MR_SIDEWAYS_HTF_FAIL_MIN_SCORE", 25)):
+                # MR is counter-trend by design — HTF alignment is less relevant in SIDEWAYS.
+                # Allow at MICRO size so extreme oversold setups (RSI<30) can participate.
+                tier_mult = max(0.0, _entry_tier_multiplier("MICRO"))
+                decision["tier"] = "MICRO"
+                append_log("INFO", "CONFIRM", f"BUY soft-allowed {sym} reason=MR_SIDEWAYS_HTF_FAIL tier=MICRO score={dscore:.0f}")
             else:
                 append_log("INFO", "CONFIRM", f"BUY blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
                 append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")

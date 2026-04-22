@@ -148,6 +148,12 @@ def check_day_drawdown_guard(state: dict, risk_profile: str = "STANDARD"):
     if peak <= 0:
         return True
 
+    # Don't fire giveback guard on trivially small peaks — they're just noise
+    # relative to wallet size and would lock entries for the rest of the day.
+    min_peak = float(getattr(CFG, "GOD_MIN_PEAK_FOR_GIVEBACK_INR" if god else "MIN_PEAK_FOR_GIVEBACK_INR", 200.0 if god else 150.0) or (200.0 if god else 150.0))
+    if peak < min_peak:
+        return True
+
     dd_pct = (giveback / peak) * 100.0 if peak > 0 else 0.0
     # GOD mode gets relaxed (but not removed) profit-giveback thresholds.
     if god:
