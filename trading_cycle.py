@@ -1106,7 +1106,17 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     if _is_god:
         god_base = max(wallet_available, wallet)
         god_affordability = max(0.0, god_base - open_exposure)
-        god_qty = int(god_affordability / price) if price > 0 else 0
+        # Per-symbol cap: never put more than GOD_MAX_SYMBOL_ALLOCATION_PCT in one symbol.
+        # Previously uncapped, allowing the full wallet into a single position.
+        god_sym_pct = max(1.0, float(_cfg_get("GOD_MAX_SYMBOL_ALLOCATION_PCT", 40.0) or 40.0))
+        god_sym_cap = god_base * (god_sym_pct / 100.0)
+        god_entry_budget = min(god_affordability, god_sym_cap)
+        # Tier scaling: GOD removes soft-caps but tier reflects signal confidence,
+        # not a bot-imposed limit. MICRO signals should still get MICRO size.
+        # Uses the tier_weight already computed by the entry engine (GOD tier
+        # weights from config.py are intentionally higher than STANDARD weights).
+        tw_eff = max(0.05, float(tier_weight if tier_weight is not None else 1.0))
+        god_qty = int((god_entry_budget * tw_eff) / price) if price > 0 else 0
         short_policy_qty = god_qty
         if str(side or "BUY").upper() == "SELL":
             short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
@@ -1114,7 +1124,7 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
             short_policy_qty = int(math.floor(god_qty * max(0.1, short_mult)))
             god_qty = short_policy_qty
         god_qty = god_qty if god_qty >= 1 else 0
-        append_log("INFO", "SIZE", f"[GOD-SIZE] symbol={symbol} side={side} wallet_net={wallet:.2f} wallet_available={wallet_available:.2f} god_base={god_base:.2f} open_exposure={open_exposure:.2f} god_affordability={god_affordability:.2f} price={price:.2f} final_qty={god_qty} final_notional={(god_qty * price):.2f}")
+        append_log("INFO", "SIZE", f"[GOD-SIZE] symbol={symbol} side={side} wallet_net={wallet:.2f} wallet_available={wallet_available:.2f} god_base={god_base:.2f} open_exposure={open_exposure:.2f} god_affordability={god_affordability:.2f} god_sym_cap={god_sym_cap:.2f} tier={tier} tier_weight={tw_eff:.2f} price={price:.2f} final_qty={god_qty} final_notional={(god_qty * price):.2f}")
         return god_qty, god_qty, god_qty
     max_concurrent = _dynamic_max_concurrent()
     deployable_pct = max(1.0, min(100.0, float(_cfg_get("MAX_DEPLOYABLE_PCT", 75.0) or 75.0)))
@@ -3774,9 +3784,16 @@ def _maybe_enter_from_signal(sig):
         mode_sd = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "REDUCED") or "REDUCED").upper()
         if mode_sd in ("MICRO", "REDUCED"):
             forced_tier = mode_sd if mode_sd in ("MICRO", "REDUCED") else "MICRO"
-            decision["tier"] = forced_tier
-            tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier(forced_tier))
-            append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier={forced_tier}")
+            _tier_rank = {"MICRO": 0, "REDUCED": 1, "FULL": 2}
+            current_rank = _tier_rank.get(str(decision.get("tier") or "FULL").upper(), 2)
+            forced_rank = _tier_rank.get(forced_tier, 1)
+            if forced_rank < current_rank:
+                # Only tighten — never upgrade a soft-allowed MICRO back to REDUCED.
+                decision["tier"] = forced_tier
+                tier_mult = min(max(0.0, tier_mult), _entry_tier_multiplier(forced_tier))
+                append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier={forced_tier}")
+            else:
+                append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier_skipped current={decision['tier']}>={forced_tier}")
     qty, bucket_qty, risk_qty = _calc_qty(
         sym,
         entry,
