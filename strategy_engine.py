@@ -71,6 +71,36 @@ def _calc_atr(df: pd.DataFrame, period: int = 14) -> float:
     return float(atr_val) if not pd.isna(atr_val) else 0.0
 
 
+def _calc_intraday_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """ATR from today's candles only — avoids overnight gaps distorting intraday volatility.
+
+    Falls back to full-history ATR when insufficient today candles exist (pre-market / early session).
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    _IST = ZoneInfo("Asia/Kolkata")
+    today = _dt.datetime.now(_IST).date()
+    try:
+        if "date" in df.columns:
+            dates_s = pd.to_datetime(df["date"])
+            if dates_s.dt.tz is None:
+                dates_s = dates_s.dt.tz_localize("Asia/Kolkata")
+            else:
+                dates_s = dates_s.dt.tz_convert("Asia/Kolkata")
+            mask = (dates_s.dt.date == today).values
+        elif isinstance(df.index, pd.DatetimeIndex):
+            idx = df.index.tz_localize("Asia/Kolkata") if df.index.tz is None else df.index.tz_convert("Asia/Kolkata")
+            mask = (pd.Series(idx.date) == today).values
+        else:
+            return _calc_atr(df, period)
+        today_df = df[mask].reset_index(drop=True)
+        if len(today_df) >= period + 1:
+            return _calc_atr(today_df, period)
+    except Exception:
+        pass
+    return _calc_atr(df, period)
+
+
 def _calc_adx(df: pd.DataFrame, period: int = 14) -> float | None:
     """Compute ADX (Average Directional Index) for trend strength.
 
@@ -277,7 +307,7 @@ def generate_signal(universe):
                     avg_vol = float(vol.tail(20).mean())
                     rel_vol = (float(vol.iloc[-1]) / avg_vol) if avg_vol > 0 else 0.0
                 sma_prev = float(sma20.iloc[-2]) if len(sma20) >= 2 and not pd.isna(sma20.iloc[-2]) else avg
-                atr = _calc_atr(df)
+                atr = _calc_intraday_atr(df)
 
                 # ADX trend strength filter: reject if no meaningful trend
                 if bool(getattr(_cfg_obj(), "USE_ADX_FILTER", True)):
@@ -375,7 +405,7 @@ def generate_mean_reversion_signal(universe):
                 _reject_signal(sym, "mean_reversion", "mean_reversion_conditions_not_met")
                 continue
 
-            atr = _calc_atr(df)
+            atr = _calc_intraday_atr(df)
             bounce_size_pct = (((last - lower) / lower) * 100.0) if lower > 0 else 0.0
             recovery_momentum_pct = (((last - prev) / prev) * 100.0) if prev > 0 else 0.0
             signal_score = _score_mean_reversion_setup(rsi_last, bounce_size_pct, recovery_momentum_pct)
@@ -485,7 +515,7 @@ def generate_pullback_signal(universe):
             reclaim_pct = ((last - sma_now) / sma_now * 100.0) if sma_now > 0 else 0.0
             score = _score_pullback_setup(sma_slope_pct, float(adx_val or 20.0), rel_vol, reclaim_pct)
 
-            atr = _calc_atr(df)
+            atr = _calc_intraday_atr(df)
             append_log("INFO", "SIG", f"{sym} PULLBACK candidate score={score:.4f} last={last:.2f} sma20={sma_now:.2f} adx={adx_val:.1f if adx_val else 'n/a'} rel_vol={rel_vol:.2f}")
             candidates.append({
                 "symbol": sym,
@@ -595,7 +625,7 @@ def generate_vwap_ema_signal(universe: list) -> dict | None:
             if score < min_score:
                 continue
 
-            atr = _calc_atr(df)
+            atr = _calc_intraday_atr(df)
             append_log("INFO", "SIG", f"{sym} VWAP+EMA candidate score={score:.4f} last={last:.2f} vwap={vwap:.2f} ema9={ema9:.2f} ema21={ema21:.2f}")
             candidates.append(
                 {

@@ -62,13 +62,21 @@ def detect_market_regime(df: pd.DataFrame) -> str:
 
     chg1 = ((nifty - prev1) / prev1) * 100.0 if prev1 > 0 else 0.0
 
+    # Granular gradient: TRENDING_UP → TRENDING → SIDEWAYS → TRENDING_DOWN → WEAK
+    # Previously: "TRENDING" was returned for anything above EMA (even -0.28% days).
+    # Now: TRENDING_UP requires a positive day; TRENDING_DOWN catches below-EMA selling.
     regime = "SIDEWAYS"
-    if nifty > ema20 and chg1 > -0.3:
+    if nifty > ema20 and chg1 >= 0:
+        regime = "TRENDING_UP"
+    elif nifty > ema20:
+        # Above EMA but slightly down — could be distribution. Stay conservative.
         regime = "TRENDING"
     elif nifty < ema20 and chg1 < -0.5:
         regime = "WEAK"
+    elif nifty < ema20 and chg1 <= -0.3:
+        regime = "TRENDING_DOWN"
 
-    # Optional volatility gate via ATR proxy
+    # VOLATILE overrides all — extreme intraday range warrants reduced sizing regardless of trend.
     if all(c in df.columns for c in ["High", "Low"]):
         high = df["High"].astype(float)
         low = df["Low"].astype(float)

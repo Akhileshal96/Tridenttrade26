@@ -174,17 +174,26 @@ def _optimal_f_multiplier(trades: list[dict], cfg) -> float:
             best_g = g
             best_f = f
     frac = float(getattr(cfg, "OPTIMAL_F_FRACTION", 0.25) or 0.25)
-    raw = max(0.0, best_f * frac / 0.1)  # normalize around 10%
     lo = float(getattr(cfg, "OPTIMAL_F_MIN_MULTIPLIER", 0.25) or 0.25)
     # Raised default cap from 1.25 to 1.50 — allows proven edge strategies to deploy
     # more capital instead of being capped at 25% above base.
     hi = float(getattr(cfg, "OPTIMAL_F_MAX_MULTIPLIER", 1.50) or 1.50)
-    return max(lo, min(hi, raw if raw > 0 else 1.0))
+    if best_f <= 0:
+        return lo
+    raw = max(0.0, best_f * frac / 0.1)  # normalize around 10%
+    return max(lo, min(hi, raw))
 
 
 def get_strategy_multiplier(strategy_tag: str, cfg) -> tuple[float, str]:
     rows = _read_csv_rows(TRADE_HISTORY_PATH)
     tag_rows = [r for r in rows if str(r.get("strategy_tag") or "") == str(strategy_tag or "")]
+
+    lookback_days = int(getattr(cfg, "STRATEGY_STATS_LOOKBACK_DAYS", 90) or 90)
+    if lookback_days > 0:
+        cutoff = datetime.now(IST) - timedelta(days=lookback_days)
+        windowed = [r for r in tag_rows if _parse_iso_dt(r.get("exit_time") or "") is not None and _parse_iso_dt(r.get("exit_time") or "") >= cutoff]
+        if windowed:
+            tag_rows = windowed
 
     min_n = int(getattr(cfg, "MIN_TRADES_FOR_ALLOCATION", 20) or 20)
     if len(tag_rows) < min_n:

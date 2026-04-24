@@ -1117,6 +1117,9 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
         # weights from config.py are intentionally higher than STANDARD weights).
         tw_eff = max(0.05, float(tier_weight if tier_weight is not None else 1.0))
         god_qty = int((god_entry_budget * tw_eff) / price) if price > 0 else 0
+        # Re-enforce hard symbol cap — tw_eff can push notional past god_sym_cap.
+        max_qty_by_sym_cap = int(god_sym_cap / price) if price > 0 else god_qty
+        god_qty = min(god_qty, max_qty_by_sym_cap)
         short_policy_qty = god_qty
         if str(side or "BUY").upper() == "SELL":
             short_aligned = str(regime or "UNKNOWN").upper() in ("WEAK", "TRENDING_DOWN") and str(trend_direction or "UNKNOWN").upper() == "DOWN"
@@ -1224,6 +1227,7 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
                 1.0 + 0.10 * min(recent_wins, 3),
             )
             qty = int(math.floor(qty * win_uplift))
+            qty = min(qty, symbol_cap_qty)  # never breach symbol cap after uplift
             reason_chain.append(f"win_streak_uplift={win_uplift:.2f}(wins={recent_wins})")
 
     if size_factor < 1.0:
@@ -3836,25 +3840,30 @@ def _maybe_enter_from_signal(sig):
     with STATE_LOCK:
         _is_god_open = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     mode = str(STATE.get("opening_mode") or "OPEN_CLEAN").upper()
-    if not _is_god_open and _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
-        allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
-        if not allowed_open:
-            append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
-            return False
-        open_mult = _opening_size_multiplier()
-        if open_reason == "fallback_min_trade":
-            append_log("INFO", "OPEN", "fallback min-trade activated after prolonged no-exec cycles")
-            qty = 1
+    if _in_open_filter_window() and mode in ("OPEN_HARD_BLOCK", "OPEN_UNSAFE", "OPEN_MODERATE", "OPEN_CLEAN"):
+        if mode == "OPEN_HARD_BLOCK" or not _is_god_open:
+            # HARD_BLOCK applies even in GOD — gap opens are too dangerous for large positions.
+            # STANDARD mode: enforce all opening filters with size reduction.
+            allowed_open, open_reason = _opening_selective_entry_allowed(sym, side="BUY")
+            if not allowed_open:
+                append_log("WARN", "OPEN", f"blocked {sym} reason={open_reason}")
+                return False
+            if not _is_god_open:
+                open_mult = _opening_size_multiplier()
+                if open_reason == "fallback_min_trade":
+                    append_log("INFO", "OPEN", "fallback min-trade activated after prolonged no-exec cycles")
+                    qty = 1
+                else:
+                    qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
+                if mode == "OPEN_UNSAFE":
+                    append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → micro-size selective entry allowed mult={open_mult:.2f}")
+                elif mode == "OPEN_MODERATE":
+                    append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
+                else:
+                    append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
         else:
-            qty = max(1, int(math.floor(qty * open_mult))) if qty > 0 and open_mult > 0 else 0
-        if mode == "OPEN_UNSAFE":
-            append_log("INFO", "OPEN", f"mode=OPEN_UNSAFE → micro-size selective entry allowed mult={open_mult:.2f}")
-        elif mode == "OPEN_MODERATE":
-            append_log("INFO", "OPEN", f"mode=OPEN_MODERATE → reduced-size entry allowed mult={open_mult:.2f}")
-        else:
-            append_log("INFO", "OPEN", "mode=OPEN_CLEAN → normal early-session trading allowed")
-    elif _is_god_open and _in_open_filter_window():
-        append_log("INFO", "OPEN", f"GOD mode — opening filter bypassed mode={mode}")
+            # GOD mode, non-HARD_BLOCK: size reduction skipped, entry allowed
+            append_log("INFO", "OPEN", f"GOD mode — opening size reduction bypassed mode={mode}")
 
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero bucket_qty={bucket_qty} risk_qty={risk_qty}")
