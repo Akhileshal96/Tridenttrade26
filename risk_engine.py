@@ -101,13 +101,15 @@ def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD
             state["reduce_size_factor"] = 0.5
             append_log("WARN", "RISK", "loss_streak=3 → pausing new entries for 30 min")
         else:
-            append_log("INFO", "RISK", "loss_streak=3 (GOD mode — pause/reduce skipped)")
+            state["reduce_size_factor"] = 0.5
+            append_log("WARN", "RISK", "loss_streak=3 (GOD mode — halving size, no pause)")
     elif streak >= 2:
         if not god:
             state["reduce_size_factor"] = 0.5
             append_log("WARN", "RISK", "loss_streak=2 → reducing entry aggressiveness")
         else:
-            append_log("INFO", "RISK", "loss_streak=2 (GOD mode — reduce skipped)")
+            state["reduce_size_factor"] = 0.75
+            append_log("WARN", "RISK", "loss_streak=2 (GOD mode — reducing size to 75%)")
     else:
         state["reduce_size_factor"] = 1.0
         # A win breaks the streak — clear halt/pause flags so the bot can resume
@@ -116,9 +118,14 @@ def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD
         # requires manual /resetday or next-day rollover.
         if result >= 0 and int(state.get("loss_streak") or 0) == 0:
             if state.get("halt_for_day") and not state.get("day_guard_reason"):
-                state["halt_for_day"] = False
-                state["pause_entries_until"] = None
-                append_log("INFO", "RISK", "loss_streak cleared by win → halt_for_day lifted")
+                now = datetime.now(IST)
+                too_late = now.hour > 14 or (now.hour == 14 and now.minute >= 30)
+                if too_late:
+                    append_log("INFO", "RISK", "loss_streak cleared by win but halt_for_day preserved — too late in session to resume")
+                else:
+                    state["halt_for_day"] = False
+                    state["pause_entries_until"] = None
+                    append_log("INFO", "RISK", "loss_streak cleared by win → halt_for_day lifted")
 
 
 def check_day_drawdown_guard(state: dict, risk_profile: str = "STANDARD"):

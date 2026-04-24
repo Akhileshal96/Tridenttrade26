@@ -204,11 +204,11 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
                 close_position(sym, reason="SL_ATR", ltp_override=ltp)
                 continue
             sl_used = f"ATR({atr_stop_pct:.1f}%)"
-        else:
-            # Fallback: fixed % stoploss
-            if check_stoploss(pnl_pct, side=side, product=trade_product):
-                close_position(sym, reason="SL", ltp_override=ltp)
-                continue
+        # Fixed SL is always checked as a hard floor — even when ATR is active and
+        # hasn't triggered yet. Prevents ATR's 4% ceiling from overriding the 2% cap.
+        if check_stoploss(pnl_pct, side=side, product=trade_product):
+            close_position(sym, reason="SL", ltp_override=ltp)
+            continue
 
         append_log(
             "INFO",

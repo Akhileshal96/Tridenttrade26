@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import pandas as pd
 from zoneinfo import ZoneInfo
 
@@ -54,11 +55,18 @@ def _calc_atr(df: pd.DataFrame, period: int = 14) -> float:
         return 0.0
     if len(df) < period + 1:
         return 0.0
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
-    prev_close = close.shift(1)
-    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    prev_close = np.empty_like(close)
+    prev_close[0] = np.nan
+    prev_close[1:] = close[:-1]
+    tr_mat = np.column_stack([
+        np.abs(high - low),
+        np.abs(high - prev_close),
+        np.abs(low - prev_close),
+    ])
+    tr = pd.Series(np.nanmax(tr_mat, axis=1), index=df.index)
     atr_val = tr.rolling(period).mean().iloc[-1]
     return float(atr_val) if not pd.isna(atr_val) else 0.0
 
@@ -73,15 +81,25 @@ def _calc_adx(df: pd.DataFrame, period: int = 14) -> float | None:
         return None
     if len(df) < period * 2 + 1:
         return None
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
-    prev_high = high.shift(1)
-    prev_low = low.shift(1)
-    prev_close = close.shift(1)
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    prev_high_arr = np.empty_like(high); prev_high_arr[0] = np.nan; prev_high_arr[1:] = high[:-1]
+    prev_low_arr = np.empty_like(low); prev_low_arr[0] = np.nan; prev_low_arr[1:] = low[:-1]
+    prev_close_arr = np.empty_like(close); prev_close_arr[0] = np.nan; prev_close_arr[1:] = close[:-1]
+    high = pd.Series(high, index=df.index)
+    low = pd.Series(low, index=df.index)
+    prev_high = pd.Series(prev_high_arr, index=df.index)
+    prev_low = pd.Series(prev_low_arr, index=df.index)
+    prev_close = pd.Series(prev_close_arr, index=df.index)
 
     # True Range
-    tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    tr_mat = np.column_stack([
+        np.abs(high.to_numpy(dtype=float) - low.to_numpy(dtype=float)),
+        np.abs(high.to_numpy(dtype=float) - prev_close_arr),
+        np.abs(low.to_numpy(dtype=float) - prev_close_arr),
+    ])
+    tr = pd.Series(np.nanmax(tr_mat, axis=1), index=df.index)
 
     # Directional Movement
     plus_dm = (high - prev_high).clip(lower=0)
@@ -122,11 +140,12 @@ def _compute_entry_buffer(df: pd.DataFrame, last: float, sma20: float, symbol: s
             if symbol:
                 append_log("INFO", "SIG", f"{symbol} partial_eval reason=insufficient_history_for_indicator indicator=ATR")
         else:
-            high = df["high"].astype(float)
-            low = df["low"].astype(float)
-            close = df["close"].astype(float)
-            prev_close = close.shift(1)
-            tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+            h = df["high"].to_numpy(dtype=float)
+            l = df["low"].to_numpy(dtype=float)
+            c = df["close"].to_numpy(dtype=float)
+            pc = np.empty_like(c); pc[0] = np.nan; pc[1:] = c[:-1]
+            tr_mat = np.column_stack([np.abs(h - l), np.abs(h - pc), np.abs(l - pc)])
+            tr = pd.Series(np.nanmax(tr_mat, axis=1), index=df.index)
             atr = tr.rolling(14).mean().iloc[-1]
             if not pd.isna(atr):
                 atr_buffer = float(atr) * atr_mult

@@ -3696,7 +3696,11 @@ def _maybe_enter_from_signal(sig):
         append_log("WARN", "MARKET", f"regime=UNKNOWN → blocked {sym} reason=unknown_regime")
         return False
 
-    if strategy_family in ("mean_reversion", "fallback_long") and regime == "SIDEWAYS" and trend_direction == "DOWN":
+    if strategy_family in ("mean_reversion", "fallback_long") and trend_direction == "DOWN" and regime == "TRENDING_DOWN":
+        append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_trending_down_blocked regime={regime} trend={trend_direction}")
+        return False
+
+    if strategy_family in ("mean_reversion", "fallback_long") and trend_direction == "DOWN" and regime in ("SIDEWAYS", "WEAK"):
         mode = str(getattr(CFG, "SIDEWAYS_DOWN_MR_MODE", "REDUCED") or "REDUCED").upper()
         hh, mm = _parse_hhmm(str(getattr(CFG, "MEAN_REVERSION_CUTOFF_HHMM", "11:30") or "11:30"))
         now_t = datetime.now(IST).time()
@@ -3705,13 +3709,13 @@ def _maybe_enter_from_signal(sig):
         q = _quality_metrics(sym)
         reclaim_ok = bool(q.get("ok")) and float(q.get("price") or 0.0) > float(q.get("sma20") or 0.0) and float(q.get("vol_score") or 0.0) >= float(getattr(CFG, "MEAN_REVERSION_MIN_VOL_SCORE", 1.0) or 1.0)
         if now_t >= cutoff_t and not exceptional:
-            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_cutoff_sideways_down trend={trend_direction}")
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_cutoff_down trend={trend_direction} regime={regime}")
             return False
         if not reclaim_ok:
-            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_reclaim_missing trend={trend_direction}")
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_reclaim_missing trend={trend_direction} regime={regime}")
             return False
         if mode == "BLOCK":
-            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_sideways_down_block trend={trend_direction}")
+            append_log("INFO", "MARKET", f"blocked {sym} family={strategy_family} reason=mr_down_block trend={trend_direction} regime={regime}")
             return False
 
     # 2) Universe membership check against active dynamic universe (if available)

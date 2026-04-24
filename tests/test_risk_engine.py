@@ -8,12 +8,13 @@ import risk_engine as re
 
 
 def test_bucket_slab_exact_values():
-    assert re.get_bucket_from_slab(4000) == 500.0
-    assert re.get_bucket_from_slab(5000) == 5000.0
-    assert re.get_bucket_from_slab(20000) == 7000.0
-    assert re.get_bucket_from_slab(50000) == 10000.0
-    assert re.get_bucket_from_slab(90000) == 15000.0
-    assert re.get_bucket_from_slab(120000) == 20000.0
+    # 35% of wallet clamped between 15% floor and 50% ceil (default config)
+    assert re.get_bucket_from_slab(4000) == 1400.0    # 35% of 4000
+    assert re.get_bucket_from_slab(5000) == 1750.0    # 35% of 5000
+    assert re.get_bucket_from_slab(20000) == 7000.0   # 35% of 20000
+    assert re.get_bucket_from_slab(50000) == 17500.0  # 35% of 50000
+    assert re.get_bucket_from_slab(90000) == 31500.0  # 35% of 90000
+    assert re.get_bucket_from_slab(120000) == 42000.0 # 35% of 120000
 
 
 def test_loss_streak_rules():
