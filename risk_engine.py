@@ -85,16 +85,18 @@ def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD
     if result < 0:
         streak += 1
         wins = 0
-    else:
+    elif result > 0:
         streak = 0
         wins += 1
+    # result == 0 (scratch/break-even): neither extends streak nor counts as recovery win
     state["loss_streak"] = streak
     state["consecutive_wins"] = wins
 
-    if streak >= 4:
-        # Hard halt applies even in GOD — 4 consecutive losses is a circuit breaker.
+    halt_threshold = int(getattr(CFG, "LOSS_STREAK_HALT_THRESHOLD", 4) or 4)
+    if streak >= halt_threshold:
+        # Hard halt applies even in GOD — consecutive losses circuit breaker.
         state["halt_for_day"] = True
-        append_log("WARN", "RISK", "loss_streak=4 → stopping new trades for the day")
+        append_log("WARN", "RISK", f"loss_streak={streak} (>={halt_threshold}) → stopping new trades for the day")
     elif streak >= 3:
         if not god:
             state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
@@ -119,11 +121,12 @@ def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD
             append_log("INFO", "RISK", "consecutive wins → full size restored")
         elif prev_factor < 1.0:
             append_log("INFO", "RISK", f"win → size partially restored to {state['reduce_size_factor']:.2f}")
-        # A win breaks the streak — clear halt/pause flags so the bot can resume
-        # trading normally mid-day without waiting for next day rollover.
+        # A profitable win breaks the streak — clear halt/pause flags so the bot
+        # can resume trading normally mid-day without waiting for next day rollover.
+        # Scratch (result=0) does not clear halt — only a genuine profit does.
         # Note: daily_loss_cap halt is intentionally NOT cleared here — that
         # requires manual /resetday or next-day rollover.
-        if result >= 0 and int(state.get("loss_streak") or 0) == 0:
+        if result > 0 and int(state.get("loss_streak") or 0) == 0:
             if state.get("halt_for_day") and not state.get("day_guard_reason"):
                 now = datetime.now(IST)
                 too_late = now.hour > 14 or (now.hour == 14 and now.minute >= 30)

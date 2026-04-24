@@ -2961,6 +2961,7 @@ def _quality_metrics(symbol: str) -> dict:
     ret_20d = ((float(close.iloc[-1]) - float(close.iloc[-21])) / float(close.iloc[-21]) * 100.0) if float(close.iloc[-21]) > 0 else 0.0
     nifty_20d = _nifty_reference_return(days=45, bars=20)
     rs_vs_nifty = (ret_20d - nifty_20d) if nifty_20d is not None else None
+    atr = SE._calc_intraday_atr(df) if all(c in df.columns for c in ("high", "low", "close")) else 0.0
     return {
         "ok": True,
         "price": float(close.iloc[-1]),
@@ -2969,6 +2970,7 @@ def _quality_metrics(symbol: str) -> dict:
         "vol_score": vol_score,
         "ret_20d": ret_20d,
         "rs_vs_nifty": rs_vs_nifty,
+        "atr": atr,
     }
 
 
@@ -3430,6 +3432,7 @@ def generate_short_signal(symbol: str, strategy_family: str = "short_breakdown")
         "volume_score": vol_score,
         "rs_vs_nifty": rs_vs_nifty,
         "strategy_family": fam,
+        "atr": float(q.get("atr") or 0.0),
     }
 
 
@@ -3587,6 +3590,12 @@ def _maybe_enter_short_from_signal(sig):
         kite = get_kite()
         now_price = _ltp(kite, sym)
         if now_price is not None:
+            max_slip = float(RUNTIME.get("MAX_ENTRY_SLIPPAGE_PCT", 0.30)) / 100.0
+            if now_price < entry * (1.0 - max_slip):
+                # Price fell below signal entry by more than slippage allowance —
+                # SL is now very close to current price, poor risk/reward.
+                append_log("INFO", "SKIP", f"{sym} reason=slippage_short signal={entry:.2f} now={now_price:.2f}")
+                return False
             booked_entry = now_price
         # Shorts are ALWAYS intraday — never routed to swing/CNC regardless of mode.
         _short_regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN")
@@ -4604,8 +4613,9 @@ def tick():
         safe_set(STATE, "paused", True)
         return
 
-    if float(STATE.get("daily_loss_cap_inr") or 0.0) > 0 and STATE["today_pnl"] <= -abs(float(STATE["daily_loss_cap_inr"])):
-        append_log("WARN", "CAP", "Daily loss cap hit. Pausing loop.")
+    if not RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile()):
+        reason = STATE.get("day_guard_reason") or "drawdown_guard"
+        append_log("WARN", "CAP", f"Day guard triggered reason={reason}. Pausing loop.")
         safe_set(STATE, "paused", True)
         return
 
