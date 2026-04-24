@@ -186,7 +186,7 @@ async def _safe_invoke(handler_name, event, handlers):
 def register_control_panel(client, handlers):
     async def _render_panel(event, panel_name: str, edit=False):
         title, button_fn = _PANEL_MAP.get(panel_name, _PANEL_MAP["main"])
-        raw_btns = button_fn(handlers) if panel_name in ("main", "analytics") else button_fn()
+        raw_btns = button_fn(handlers) if panel_name == "main" else button_fn()
         title_text = title(handlers) if callable(title) else title
         btns = _dedupe_rows(raw_btns)
         if edit:
