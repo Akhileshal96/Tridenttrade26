@@ -111,7 +111,14 @@ def update_loss_streak(state: dict, result: float, risk_profile: str = "STANDARD
             state["reduce_size_factor"] = 0.75
             append_log("WARN", "RISK", "loss_streak=2 (GOD mode — reducing size to 75%)")
     else:
-        state["reduce_size_factor"] = 1.0
+        # Gradual size recovery: each win adds 0.25 back toward 1.0.
+        # Prevents a scratch trade from immediately restoring full size after 3 losses.
+        prev_factor = float(state.get("reduce_size_factor") or 1.0)
+        state["reduce_size_factor"] = min(1.0, prev_factor + 0.25)
+        if prev_factor < 1.0 and state["reduce_size_factor"] >= 1.0:
+            append_log("INFO", "RISK", "consecutive wins → full size restored")
+        elif prev_factor < 1.0:
+            append_log("INFO", "RISK", f"win → size partially restored to {state['reduce_size_factor']:.2f}")
         # A win breaks the streak — clear halt/pause flags so the bot can resume
         # trading normally mid-day without waiting for next day rollover.
         # Note: daily_loss_cap halt is intentionally NOT cleared here — that

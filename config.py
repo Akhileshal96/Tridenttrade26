@@ -77,8 +77,9 @@ GOD_BUCKET_CEIL_PCT                  = _get_float("GOD_BUCKET_CEIL_PCT",        
 GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "50")
 # Higher risk budget per trade
 GOD_RISK_PER_TRADE_PCT               = _get_float("GOD_RISK_PER_TRADE_PCT",               "3.0")
-# Re-entry cooldown lifted — GOD can re-enter immediately after an exit
-GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",            "0")
+# Re-entry cooldown: 5 min minimum even in GOD — prevents immediate re-entry into a
+# stopped-out position before the setup has had time to resolve.
+GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",            "5")
 # Profit drawdown guards relaxed (not removed) in GOD mode
 GOD_DAY_PROFIT_GIVEBACK_HALT_PCT     = _get_float("GOD_DAY_PROFIT_GIVEBACK_HALT_PCT",     "75")
 GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT    = _get_float("GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT",    "55")
@@ -294,10 +295,19 @@ TRAIL_HIGH_PROFIT_GIVEBACK_PCT = _get_float("TRAIL_HIGH_PROFIT_GIVEBACK_PCT", "0
 TRAIL_REENTRY_EXPIRE_MINUTES = _get_int(  "TRAIL_REENTRY_EXPIRE_MINUTES", "15")
 TRAIL_REENTRY_BUFFER_PCT     = _get_float("TRAIL_REENTRY_BUFFER_PCT",     "0.2")
 
+# ===== PER-TRADE PROFIT TARGET =====
+# Hard exit at PROFIT_TARGET_R × risk (e.g. 2R = 2× the stoploss distance).
+# Guarantees locking a portion of a big winner before a reversal can give it back.
+USE_PROFIT_TARGET  = _get_bool( "USE_PROFIT_TARGET",  "true")
+PROFIT_TARGET_R    = _get_float("PROFIT_TARGET_R",    "2.0")
+
 # ===== TIME-DECAY EXIT =====
 USE_TIME_DECAY_EXIT = _get_bool("USE_TIME_DECAY_EXIT", "true")
 TIME_DECAY_MINUTES = _get_int("TIME_DECAY_MINUTES", "90")
 TIME_DECAY_MAX_PNL_PCT = _get_float("TIME_DECAY_MAX_PNL_PCT", "0.3")
+# Positions bleeding below this % after TIME_DECAY_MINUTES are also exited — slow
+# bleeders that haven't hit SL but have clearly failed should not be held open.
+TIME_DECAY_BLEED_FLOOR_PCT = _get_float("TIME_DECAY_BLEED_FLOOR_PCT", "-1.5")
 
 # ===== ADX TREND STRENGTH FILTER =====
 USE_ADX_FILTER = _get_bool("USE_ADX_FILTER", "true")

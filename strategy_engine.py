@@ -411,9 +411,26 @@ def generate_mean_reversion_signal(universe):
     return best
 
 
+def _score_pullback_setup(sma_slope_pct: float, adx: float, rel_vol: float, reclaim_pct: float) -> float:
+    slope_component  = min(max(sma_slope_pct, 0.0), 0.5) / 0.5   # 0→1 over 0–0.5% slope
+    adx_component    = min(max(adx - 20.0,    0.0), 30.0) / 30.0  # 0→1 over ADX 20–50
+    vol_component    = min(max(rel_vol,        0.0), 3.0)  / 3.0   # 0→1 over 0–3× vol
+    reclaim_component = min(max(reclaim_pct,   0.0), 0.5) / 0.5   # 0→1 over 0–0.5%
+    return (
+        (0.30 * slope_component)
+        + (0.30 * adx_component)
+        + (0.25 * vol_component)
+        + (0.15 * reclaim_component)
+    )
+
+
 def generate_pullback_signal(universe):
-    """Pullback continuation long: price holds above rising SMA20 and reclaims it from below."""
+    """Pullback continuation long: price holds above rising SMA20 and reclaims it from below.
+
+    Evaluates all qualifying symbols and returns the highest-scored setup.
+    """
     kite = get_kite()
+    candidates = []
 
     for sym in universe:
         sym = (sym or "").strip().upper()
@@ -450,7 +467,7 @@ def generate_pullback_signal(universe):
             if not (reclaimed and shallow_pullback):
                 continue
 
-            # ADX filter: pullback continuation needs a real trend
+            adx_val = None
             if bool(getattr(_cfg_obj(), "USE_ADX_FILTER", True)):
                 adx_val = _calc_adx(df)
                 adx_min = _cfg_float("ADX_MIN_TREND", 20.0)
@@ -458,27 +475,39 @@ def generate_pullback_signal(universe):
                     _reject_signal(sym, "pullback_long", f"adx_too_low={adx_val:.1f}<{adx_min:.0f}")
                     continue
 
+            vol = df["volume"].astype(float) if "volume" in df.columns else pd.Series(dtype=float)
+            rel_vol = 0.0
+            if not vol.empty and len(vol) >= 20:
+                avg_vol = float(vol.tail(20).mean())
+                rel_vol = float(vol.iloc[-1]) / avg_vol if avg_vol > 0 else 0.0
+
+            sma_slope_pct = ((sma_now - sma_prev) / sma_prev * 100.0) if sma_prev > 0 else 0.0
+            reclaim_pct = ((last - sma_now) / sma_now * 100.0) if sma_now > 0 else 0.0
+            score = _score_pullback_setup(sma_slope_pct, float(adx_val or 20.0), rel_vol, reclaim_pct)
+
             atr = _calc_atr(df)
-            append_log(
-                "INFO",
-                "SIG",
-                f"{sym} PULLBACK BUY trigger last={last:.2f} sma20={sma_now:.2f} prev={prev:.2f}",
-            )
-            return {
+            append_log("INFO", "SIG", f"{sym} PULLBACK candidate score={score:.4f} last={last:.2f} sma20={sma_now:.2f} adx={adx_val:.1f if adx_val else 'n/a'} rel_vol={rel_vol:.2f}")
+            candidates.append({
                 "symbol": sym,
                 "side": "BUY",
                 "entry": last,
                 "strategy_setup": "pullback_long",
                 "strategy_family": "pullback_long",
                 "sma20": sma_now,
+                "signal_score": score,
                 "atr": atr,
-            }
+            })
         except Exception as e:
             append_log("WARN", "SIG", f"{sym} skipped: {e}")
             continue
 
-    append_log("INFO", "SIG", "No pullback signal found")
-    return None
+    if not candidates:
+        append_log("INFO", "SIG", "No pullback signal found")
+        return None
+    candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
+    best = candidates[0]
+    append_log("INFO", "SIG", f"pullback candidates evaluated={len(candidates)} selected={best['symbol']} score={float(best['signal_score']):.4f}")
+    return best
 
 
 def _score_vwap_ema_setup(dist_above_vwap_pct: float, ema_sep_pct: float, rel_vol: float, momentum_pct: float) -> float:

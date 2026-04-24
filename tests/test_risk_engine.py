@@ -31,6 +31,24 @@ def test_loss_streak_rules():
     assert state["halt_for_day"] is True
 
 
+def test_loss_streak_recovery_is_gradual():
+    state = {"reduce_size_factor": 1.0}
+    re.update_loss_streak(state, -10)
+    re.update_loss_streak(state, -5)
+    re.update_loss_streak(state, -2)
+    assert state["reduce_size_factor"] == 0.5  # 3 losses → halved
+    re.update_loss_streak(state, 10)            # first win
+    assert state["reduce_size_factor"] == 0.75  # partial recovery
+    re.update_loss_streak(state, 10)            # second win
+    assert state["reduce_size_factor"] == 1.0   # full recovery
+
+
+def test_loss_streak_single_loss_no_reduction():
+    state = {"reduce_size_factor": 1.0}
+    re.update_loss_streak(state, -5)
+    assert state["reduce_size_factor"] == 1.0  # one loss, no reduction yet
+
+
 def test_drawdown_guard_sets_pause():
     state = {"today_pnl": 100.0, "day_peak_pnl": 0.0}
     assert re.check_day_drawdown_guard(state) is True

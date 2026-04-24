@@ -210,6 +210,23 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             close_position(sym, reason="SL", ltp_override=ltp)
             continue
 
+        # --- Per-trade profit target (2R hard exit) ---
+        if bool(getattr(CFG, "USE_PROFIT_TARGET", True)):
+            r_mult = float(getattr(CFG, "PROFIT_TARGET_R", 2.0))
+            if entry_atr > 0 and bool(getattr(CFG, "USE_ATR_STOPLOSS", True)):
+                sl_mult = float(getattr(CFG, "ATR_STOPLOSS_SHORT_MULT" if side == "SHORT" else "ATR_STOPLOSS_MULT", 1.5))
+                r_dist = entry_atr * sl_mult
+            else:
+                sl_pct = float(getattr(CFG, "SHORT_STOPLOSS_PCT" if side == "SHORT" else "STOPLOSS_PCT", 2.0))
+                r_dist = entry * sl_pct / 100.0
+            target_dist = r_dist * r_mult
+            target_hit = (ltp <= entry - target_dist) if side == "SHORT" else (ltp >= entry + target_dist)
+            if target_hit:
+                target_pct = (target_dist / entry) * 100.0 if entry > 0 else 0.0
+                append_log("WARN", "EXIT", f"{sym} PROFIT_TARGET r_mult={r_mult:.1f}x target_pct={target_pct:.1f}% pnl_inr={pnl_inr:.2f}")
+                close_position(sym, reason="PROFIT_TARGET", ltp_override=ltp)
+                continue
+
         append_log(
             "INFO",
             "RISK",
@@ -243,11 +260,14 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
                 elapsed_min = (datetime.now(IST) - entry_dt).total_seconds() / 60.0
                 decay_min = float(getattr(CFG, "TIME_DECAY_MINUTES", 90))
                 decay_max_pnl = float(getattr(CFG, "TIME_DECAY_MAX_PNL_PCT", 0.3))
-                if elapsed_min >= decay_min and abs(pnl_pct) <= decay_max_pnl:
+                # Also exit slow bleeders: positions held too long at a small loss
+                # (above the bleed floor) that haven't hit the SL are dead weight.
+                decay_bleed_floor = float(getattr(CFG, "TIME_DECAY_BLEED_FLOOR_PCT", -1.5))
+                if elapsed_min >= decay_min and decay_bleed_floor <= pnl_pct <= decay_max_pnl:
                     append_log(
                         "WARN", "EXIT",
                         f"{sym} TIME_DECAY exit elapsed={elapsed_min:.0f}min pnl_pct={pnl_pct:.2f}% "
-                        f"(flat>{decay_min:.0f}min, threshold={decay_max_pnl}%)",
+                        f"(held>{decay_min:.0f}min range=[{decay_bleed_floor}%,{decay_max_pnl}%])",
                     )
                     close_position(sym, reason="TIME_DECAY", ltp_override=ltp)
             except Exception:
