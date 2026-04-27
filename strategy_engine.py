@@ -144,12 +144,15 @@ def _calc_adx(df: pd.DataFrame, period: int = 14) -> float | None:
     minus_dm_smooth = minus_dm.ewm(span=period, adjust=False).mean()
 
     # Directional Indicators
-    plus_di = (plus_dm_smooth / atr_smooth.replace(0, pd.NA)) * 100.0
-    minus_di = (minus_dm_smooth / atr_smooth.replace(0, pd.NA)) * 100.0
+    # Use .where() instead of .replace(0, pd.NA) to preserve float64 dtype;
+    # pd.NA converts to nullable Float64 which breaks ewm().mean() in pandas 2.x.
+    atr_safe = atr_smooth.where(atr_smooth != 0)
+    plus_di = (plus_dm_smooth / atr_safe) * 100.0
+    minus_di = (minus_dm_smooth / atr_safe) * 100.0
 
     # DX and ADX
     di_sum = plus_di + minus_di
-    dx = ((plus_di - minus_di).abs() / di_sum.replace(0, pd.NA)) * 100.0
+    dx = ((plus_di - minus_di).abs() / di_sum.where(di_sum != 0)) * 100.0
     adx = dx.ewm(span=period, adjust=False).mean()
 
     last_adx = adx.iloc[-1]
@@ -356,7 +359,7 @@ def _calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
     loss = (-delta.clip(upper=0)).rolling(period).mean()
-    rs = gain / loss.replace(0, pd.NA)
+    rs = gain / loss.where(loss != 0)
     return 100 - (100 / (1 + rs))
 
 
@@ -601,7 +604,8 @@ def generate_vwap_ema_signal(universe: list) -> dict | None:
                 continue
 
             vwap_num = (close * vol).cumsum()
-            vwap_den = vol.cumsum().replace(0, pd.NA)
+            _vwap_cum = vol.cumsum()
+            vwap_den = _vwap_cum.where(_vwap_cum != 0)
             vwap_s = vwap_num / vwap_den
             ema9_s = close.ewm(span=fast_n, adjust=False).mean()
             ema21_s = close.ewm(span=slow_n, adjust=False).mean()

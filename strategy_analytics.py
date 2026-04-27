@@ -11,7 +11,7 @@ import pandas as pd
 from log_store import append_log
 
 IST = ZoneInfo("Asia/Kolkata")
-DATA_DIR = os.path.join(os.getcwd(), "data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 TRADE_HISTORY_PATH = os.path.join(DATA_DIR, "trade_history.csv")
 STRATEGY_STATS_PATH = os.path.join(DATA_DIR, "strategy_stats.json")

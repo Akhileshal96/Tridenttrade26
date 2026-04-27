@@ -33,7 +33,7 @@ import strategy_analytics as SA
 from state_lock import STATE_LOCK, safe_update, safe_set, PositionManager
 
 IST = ZoneInfo("Asia/Kolkata")
-DATA_DIR = os.path.join(os.getcwd(), "data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 STATE = {
@@ -3486,6 +3486,10 @@ def _maybe_enter_short_from_signal(sig):
     if not sym or entry <= 0:
         return False
 
+    if STATE.get("halt_for_day"):
+        append_log("INFO", "SKIP", f"{sym} reason=halt_for_day")
+        return False
+
     # Dynamic short limit: up to half of max concurrent slots (min 2).
     # Scales with wallet — 10k wallet with 3 slots → max 2 shorts;
     # 50k wallet with 6 slots → max 3 shorts.
@@ -3672,6 +3676,10 @@ def _maybe_enter_from_signal(sig):
     strategy_family = str(sig.get("strategy_family") or "trend_long")
     universe_source = str(sig.get("universe_source") or "primary")
     append_log("INFO", "SCAN", f"Scanning {sym}")
+
+    if STATE.get("halt_for_day"):
+        append_log("INFO", "SKIP", f"{sym} reason=halt_for_day")
+        return False
 
     if _skip_cooldown_active(sym):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
@@ -4515,9 +4523,14 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
     def _signal_with_family(cands):
         sig = signal_fn(cands)
         if not sig and signal_fn is generate_signal:
+            # Snapshot primary-family reject reasons before fallback calls overwrite them.
+            # Without this, log lines show family=trend_long reject=mean_reversion_conditions_not_met.
+            primary_rejects = dict(getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}) or {})
             sig = generate_vwap_ema_signal(cands)
-        if not sig and signal_fn is generate_signal:
-            sig = generate_mean_reversion_signal(cands)
+            if not sig:
+                sig = generate_mean_reversion_signal(cands)
+            if not sig:
+                SE.LAST_SIGNAL_REJECT_REASONS.update(primary_rejects)
         if not sig and cands:
             reject_map = getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}) or {}
             seen = set()
