@@ -316,4 +316,14 @@ TIME_DECAY_BLEED_FLOOR_PCT = _get_float("TIME_DECAY_BLEED_FLOOR_PCT", "-1.5")
 
 # ===== ADX TREND STRENGTH FILTER =====
 USE_ADX_FILTER = _get_bool("USE_ADX_FILTER", "true")
-ADX_MIN_TREND = _get_float("ADX_MIN_TREND", "20.0")
+ADX_MIN_TREND = _get_float("ADX_MIN_TREND", "25.0")
+
+# ===== SIGNAL QUALITY GATES =====
+# Minimum score before a signal is traded. Filters out weak/chasing setups.
+MIN_SCORE_TREND_LONG      = _get_float("MIN_SCORE_TREND_LONG",      "1.0")
+MIN_SCORE_MEAN_REVERSION  = _get_float("MIN_SCORE_MEAN_REVERSION",  "4.0")
+
+# ===== TRAIL STRONG PROFIT GIVEBACK =====
+# Giveback allowed at the strong-profit stage (peak >= BE_ARM * 2).
+# 15% intraday (was 20%) — tighter to compensate for 20-second tick lag.
+TRAIL_STRONG_GIVEBACK_PCT = _get_float("TRAIL_STRONG_GIVEBACK_PCT", "0.15")

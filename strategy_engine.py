@@ -222,14 +222,15 @@ def normalize_zerodha_interval(interval: str) -> str:
 
 
 def _score_momentum_setup(last: float, trigger: float, rel_vol: float, sma_now: float, sma_prev: float, atr: float) -> float:
+    # Proximity: reward entering close to the trigger (fresh breakout).
+    # Decays linearly to 0 at 0.5% above trigger — anything beyond that is chasing.
     dist_above_trigger = max(0.0, ((last - trigger) / trigger) * 100.0) if trigger > 0 else 0.0
+    proximity = max(0.0, 1.0 - (dist_above_trigger / 0.5))
     sma_slope = max(0.0, ((sma_now - sma_prev) / sma_prev) * 100.0) if sma_prev > 0 else 0.0
-    atr_norm_dist = max(0.0, (last - sma_now) / atr) if atr > 0 else 0.0
     return (
-        (0.40 * dist_above_trigger)
-        + (0.30 * max(0.0, rel_vol))
-        + (0.20 * max(0.0, sma_slope))
-        + (0.10 * max(0.0, atr_norm_dist))
+        (0.40 * max(0.0, rel_vol))
+        + (0.35 * proximity)
+        + (0.25 * max(0.0, sma_slope))
     )
 
 
@@ -351,7 +352,12 @@ def generate_signal(universe):
         return None
     candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
     best = candidates[0]
-    append_log("INFO", "SIG", f"momentum candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    best_score = float(best.get("signal_score") or 0.0)
+    min_score = _cfg_float("MIN_SCORE_TREND_LONG", 1.0)
+    append_log("INFO", "SIG", f"momentum candidates evaluated={len(candidates)} selected={best.get('symbol')} score={best_score:.4f}")
+    if best_score < min_score:
+        append_log("INFO", "SIG", f"trend_long best={best.get('symbol')} score={best_score:.4f} below min={min_score:.2f} → skipped")
+        return None
     return best
 
 
@@ -400,9 +406,11 @@ def generate_mean_reversion_signal(universe):
             prev_lower = float(sma20.iloc[-2] - (2.0 * std20.iloc[-2])) if not pd.isna(std20.iloc[-2]) else lower
             rsi = _calc_rsi(close)
             rsi_last = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+            rsi_prev = float(rsi.iloc[-2]) if len(rsi) >= 2 and not pd.isna(rsi.iloc[-2]) else rsi_last
 
-            # Mean-reversion long setups: RSI oversold or lower-band bounce confirmation.
-            rsi_setup = rsi_last < 30.0
+            # RSI setup: oversold AND already turning up — avoids buying a falling knife.
+            rsi_setup = rsi_last < 30.0 and rsi_last > rsi_prev
+            # BB bounce: price was below lower band last bar, now recovered — price action confirms.
             bb_bounce_setup = prev <= prev_lower and last > lower
             if not (rsi_setup or bb_bounce_setup):
                 _reject_signal(sym, "mean_reversion", "mean_reversion_conditions_not_met")
@@ -440,7 +448,12 @@ def generate_mean_reversion_signal(universe):
         return None
     candidates.sort(key=lambda x: float(x.get("signal_score") or 0.0), reverse=True)
     best = candidates[0]
-    append_log("INFO", "SIG", f"mean_reversion candidates evaluated={len(candidates)} selected={best.get('symbol')} score={float(best.get('signal_score') or 0.0):.4f}")
+    best_score = float(best.get("signal_score") or 0.0)
+    min_score = _cfg_float("MIN_SCORE_MEAN_REVERSION", 4.0)
+    append_log("INFO", "SIG", f"mean_reversion candidates evaluated={len(candidates)} selected={best.get('symbol')} score={best_score:.4f}")
+    if best_score < min_score:
+        append_log("INFO", "SIG", f"mean_reversion best={best.get('symbol')} score={best_score:.4f} below min={min_score:.2f} → skipped")
+        return None
     return best
 
 

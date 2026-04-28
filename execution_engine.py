@@ -93,8 +93,9 @@ def _dynamic_trail_levels(peak_pnl_inr: float, tier: str, product: str = "MIS") 
     if peak_pnl_inr < (be_arm * 2.0):
         # Breakeven stage: 30% giveback (intraday) / 45% (swing)
         return min_lock_floor, max(2.0 * swing_widen, peak_pnl_inr * 0.30 * swing_widen)
-    # Strong profit stage: lock 10%, 20% giveback (intraday) / 30% (swing)
-    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5 * swing_widen, peak_pnl_inr * 0.20 * swing_widen)
+    # Strong profit stage: lock 10%, 15% giveback (intraday) / 22% (swing)
+    give_pct = float(getattr(CFG, "TRAIL_STRONG_GIVEBACK_PCT", 0.15))
+    return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5 * swing_widen, peak_pnl_inr * give_pct * swing_widen)
 
 
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
