@@ -156,7 +156,7 @@ DAILY_RESET_TIME = _get_str("DAILY_RESET_TIME", "09:00")
 
 # ===== TIME & PATHS =====
 ENTRY_START = _get_str("ENTRY_START", "09:20")
-ENTRY_END = _get_str("ENTRY_END", "14:30")
+ENTRY_END = _get_str("ENTRY_END", "13:55")
 FORCE_EXIT = _get_str("FORCE_EXIT", "15:10")
 UNIVERSE_SIZE = _get_int("UNIVERSE_SIZE", "30")
 UNIVERSE_PATH = _get_str("UNIVERSE_PATH", "./data/universe.txt")

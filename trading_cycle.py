@@ -3685,6 +3685,19 @@ def _maybe_enter_from_signal(sig):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
         return False
 
+    # Late-entry guard: block new MIS entries when not enough time remains before
+    # force exit. A position entered too late can't be time-decay exited and will
+    # just get clipped at market close at whatever price, typically a loss.
+    _fh, _fm = _parse_hhmm(getattr(CFG, "FORCE_EXIT", "15:10"))
+    _now = datetime.now(IST)
+    _force_exit_dt = _now.replace(hour=_fh, minute=_fm, second=0, microsecond=0)
+    _mins_to_close = (_force_exit_dt - _now).total_seconds() / 60.0
+    _late_block_mins = float(getattr(CFG, "LATE_ENTRY_BLOCK_MINUTES", 75.0))
+    _sig_trade_mode = str(sig.get("trade_mode") or STATE.get("trading_mode") or "INTRADAY").upper()
+    if product_for_trade_mode(_sig_trade_mode) == "MIS" and 0 < _mins_to_close < _late_block_mins:
+        append_log("INFO", "SKIP", f"{sym} reason=late_entry mins_to_close={_mins_to_close:.0f} threshold={_late_block_mins:.0f}")
+        return False
+
     # 1) Market regime check (requested before buy gating)
     snap = get_market_regime_snapshot() or {}
     regime = str(snap.get("regime", "UNKNOWN") or "UNKNOWN").upper()

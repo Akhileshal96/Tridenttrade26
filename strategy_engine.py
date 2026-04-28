@@ -519,7 +519,7 @@ def generate_pullback_signal(universe):
             score = _score_pullback_setup(sma_slope_pct, float(adx_val or 20.0), rel_vol, reclaim_pct)
 
             atr = _calc_intraday_atr(df)
-            append_log("INFO", "SIG", f"{sym} PULLBACK candidate score={score:.4f} last={last:.2f} sma20={sma_now:.2f} adx={adx_val:.1f if adx_val else 'n/a'} rel_vol={rel_vol:.2f}")
+            append_log("INFO", "SIG", f"{sym} PULLBACK candidate score={score:.4f} last={last:.2f} sma20={sma_now:.2f} adx={f'{adx_val:.1f}' if adx_val is not None else 'n/a'} rel_vol={rel_vol:.2f}")
             candidates.append({
                 "symbol": sym,
                 "side": "BUY",
