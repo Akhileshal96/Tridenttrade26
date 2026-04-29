@@ -1102,10 +1102,14 @@ def _calc_qty(symbol: str, price: float, tier: str = "FULL", tier_weight: float 
     # GOD mode: size against full wallet_net (not live_balance slice).
     # wallet_available can be artificially low when Zerodha blocks margin for
     # collateral/pledged holdings — wallet_net reflects actual capital.
-    # Hard floor is wallet_available so we never exceed broker affordability.
     if _is_god:
         god_base = max(wallet_available, wallet)
-        god_affordability = max(0.0, god_base - open_exposure)
+        # wallet_available is Zerodha's live_balance — already deducts MIS margin for
+        # open positions (~20% of notional). Subtracting open_exposure (full notional)
+        # double-counts that margin and locks entries whenever notional > cash, which
+        # is normal for leveraged intraday. Use god_base directly; between-sync
+        # depletion is tracked via wallet_available_inr decrements after each entry.
+        god_affordability = max(0.0, god_base)
         # Per-symbol cap: never put more than GOD_MAX_SYMBOL_ALLOCATION_PCT in one symbol.
         # Previously uncapped, allowing the full wallet into a single position.
         god_sym_pct = max(1.0, float(_cfg_get("GOD_MAX_SYMBOL_ALLOCATION_PCT", 40.0) or 40.0))
@@ -3660,6 +3664,8 @@ def _maybe_enter_short_from_signal(sig):
     _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
     _log_trade_event("TRADE", {**dict(_positions().get(sym) or {}), "symbol": sym, "exit_reason": "-"})
     _append_runtime_event("recent_entries", {"symbol": sym, "side": "SHORT", "qty": qty, "entry": booked_entry, "family": strategy_family, "tier": str(decision.get("tier") or "n/a"), "ts": datetime.now(IST).isoformat(timespec="seconds")}, limit=40)
+    with STATE_LOCK:
+        STATE["wallet_available_inr"] = max(0.0, float(STATE.get("wallet_available_inr") or 0.0) - booked_entry * qty)
     append_log("INFO", "ENTRY", f"SHORT {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} entry={booked_entry:.2f}")
     append_log("INFO", "EXEC", f"symbol={sym} side=SHORT size={int(round(tier_mult * 100))}%")
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
@@ -4010,6 +4016,8 @@ def _maybe_enter_from_signal(sig):
     _log_trade_event("FILL", {**dict(_positions().get(sym) or {}), "symbol": sym})
     _log_trade_event("TRADE", {**dict(_positions().get(sym) or {}), "symbol": sym, "exit_reason": "-"})
     _append_runtime_event("recent_entries", {"symbol": sym, "side": "BUY", "qty": qty, "entry": booked_entry, "family": strategy_family, "tier": str(decision.get("tier") or "n/a"), "ts": datetime.now(IST).isoformat(timespec="seconds")}, limit=40)
+    with STATE_LOCK:
+        STATE["wallet_available_inr"] = max(0.0, float(STATE.get("wallet_available_inr") or 0.0) - booked_entry * qty)
     append_log("INFO", "SIG", f"BUY trigger {sym}")
     append_log("INFO", "ENTRY", f"BUY {sym} family={strategy_family} tier={decision.get('tier')} source={universe_source} qty={qty} mode={mode}")
     append_log("INFO", "EXEC", f"symbol={sym} side=BUY size={int(round(tier_mult * 100))}%")

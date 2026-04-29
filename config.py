@@ -291,9 +291,25 @@ ATR_STOPLOSS_MAX_PCT = _get_float("ATR_STOPLOSS_MAX_PCT", "4.0")
 
 # ===== HIGH-PROFIT TRAIL LOCK =====
 # When peak P&L >= TRAIL_HIGH_PROFIT_INR, lock LOCK_PCT and allow only GIVEBACK_PCT pullback.
-TRAIL_HIGH_PROFIT_INR          = _get_float("TRAIL_HIGH_PROFIT_INR",          "100")
+# Lowered from 100 → 60: positions peaking between 60–100 now get the tight 90/10 lock
+# instead of the looser 85/15 strong-profit stage.
+TRAIL_HIGH_PROFIT_INR          = _get_float("TRAIL_HIGH_PROFIT_INR",          "60")
 TRAIL_HIGH_PROFIT_LOCK_PCT     = _get_float("TRAIL_HIGH_PROFIT_LOCK_PCT",     "0.90")
 TRAIL_HIGH_PROFIT_GIVEBACK_PCT = _get_float("TRAIL_HIGH_PROFIT_GIVEBACK_PCT", "0.10")
+
+# ===== FAILED DEVELOPMENT EXIT =====
+# Exit a trade that hasn't developed after FAILED_DEV_MINUTES if its peak never
+# reached FAILED_DEV_PEAK_RATIO of the trail activation threshold.
+# Prevents slow bleeders from riding all the way to ATR SL or 90-min time decay.
+USE_FAILED_DEV_EXIT    = _get_bool( "USE_FAILED_DEV_EXIT",    "true")
+FAILED_DEV_MINUTES     = _get_int(  "FAILED_DEV_MINUTES",     "30")
+FAILED_DEV_PEAK_RATIO  = _get_float("FAILED_DEV_PEAK_RATIO",  "0.25")
+
+# ===== OHLC PEAK TRACKING =====
+# Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture
+# intra-tick spikes that the 20s sampler misses, giving the trail a true peak.
+USE_OHLC_PEAK_TRACKING = _get_bool("USE_OHLC_PEAK_TRACKING", "true")
+OHLC_PEAK_REFRESH_SEC  = _get_int( "OHLC_PEAK_REFRESH_SEC",  "60")
 
 # ===== TRAIL RE-ENTRY =====
 # After a TRAIL exit, allow re-entry if price moves favorably past exit price + buffer.

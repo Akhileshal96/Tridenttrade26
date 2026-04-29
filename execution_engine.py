@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from zoneinfo import ZoneInfo
 
 import config as CFG
@@ -98,6 +99,31 @@ def _dynamic_trail_levels(peak_pnl_inr: float, tier: str, product: str = "MIS") 
     return max(min_lock_floor, peak_pnl_inr * 0.10), max(1.5 * swing_widen, peak_pnl_inr * give_pct * swing_widen)
 
 
+def _fetch_ohlc_peak_pnl(sym: str, entry: float, qty: int, side: str, entry_time_str: str) -> float:
+    try:
+        import pandas as pd
+        from broker_zerodha import get_kite
+        from instrument_store import token_for_symbol
+        token = token_for_symbol(sym)
+        if not token:
+            return 0.0
+        entry_dt = datetime.fromisoformat(entry_time_str)
+        if entry_dt.tzinfo is None:
+            entry_dt = entry_dt.replace(tzinfo=IST)
+        data = get_kite().historical_data(token, entry_dt, datetime.now(IST), "minute")
+        if not data:
+            return 0.0
+        df = pd.DataFrame(data)
+        if df.empty:
+            return 0.0
+        if str(side).upper() == "SHORT":
+            return max(0.0, (entry - float(df["low"].min())) * qty)
+        return max(0.0, (float(df["high"].max()) - entry) * qty)
+    except Exception as e:
+        append_log("WARN", "OHLC_PEAK", f"{sym} fetch failed: {e}")
+        return 0.0
+
+
 def force_exit_all(positions: dict, close_position_fn, reason="TIME"):
     ok = True
     for sym in list((positions or {}).keys()):
@@ -150,6 +176,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             pnl_inr = (ltp - entry) * qty
         position_value = entry * qty
         tier = str(trade.get("confidence_tier") or "FULL").upper()
+        entry_time_str = str(trade.get("entry_time") or "")
 
         peak_pnl_inr = float(trade.get("peak_pnl_inr") or 0.0)
         peak_pnl_inr = max(peak_pnl_inr, pnl_inr)
@@ -160,6 +187,18 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         peak_pct = max(existing_peak_pct, pnl_pct)
         trade["peak_pct"] = peak_pct
         trade["peak"] = peak_pct
+
+        # --- OHLC peak tracking: capture intra-tick spikes the 20s sampler misses ---
+        if bool(getattr(CFG, "USE_OHLC_PEAK_TRACKING", True)) and entry_time_str:
+            ohlc_refresh_sec = float(getattr(CFG, "OHLC_PEAK_REFRESH_SEC", 60))
+            last_ohlc = float(trade.get("_last_ohlc_ts") or 0.0)
+            if (time.monotonic() - last_ohlc) >= ohlc_refresh_sec:
+                ohlc_peak = _fetch_ohlc_peak_pnl(sym, entry, qty, side, entry_time_str)
+                trade["_last_ohlc_ts"] = time.monotonic()
+                if ohlc_peak > peak_pnl_inr:
+                    append_log("INFO", "OHLC_PEAK", f"{sym} ohlc_peak={ohlc_peak:.2f} ltp_peak={peak_pnl_inr:.2f} delta={ohlc_peak - peak_pnl_inr:.2f}")
+                    peak_pnl_inr = ohlc_peak
+                    trade["peak_pnl_inr"] = peak_pnl_inr
 
         activate_inr = _calc_trail_activate_inr(entry, qty, tier=tier, side=side, product=trade_product)
 
@@ -248,8 +287,31 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             close_position(sym, reason=reason, ltp_override=ltp)
             continue
 
+        # --- Failed development exit: close non-developing positions early ---
+        if (
+            entry_time_str
+            and trade_product != "CNC"
+            and not trail_active
+            and bool(getattr(CFG, "USE_FAILED_DEV_EXIT", True))
+        ):
+            try:
+                entry_dt = datetime.fromisoformat(entry_time_str)
+                elapsed_min = (datetime.now(IST) - entry_dt).total_seconds() / 60.0
+                failed_dev_min = float(getattr(CFG, "FAILED_DEV_MINUTES", 30))
+                failed_dev_ratio = float(getattr(CFG, "FAILED_DEV_PEAK_RATIO", 0.25))
+                if elapsed_min >= failed_dev_min and peak_pnl_inr < activate_inr * failed_dev_ratio:
+                    append_log(
+                        "WARN", "EXIT",
+                        f"{sym} FAILED_DEV exit elapsed={elapsed_min:.0f}min "
+                        f"peak_pnl_inr={peak_pnl_inr:.2f} threshold={activate_inr * failed_dev_ratio:.2f} "
+                        f"(activate_inr={activate_inr:.2f} ratio={failed_dev_ratio})",
+                    )
+                    close_position(sym, reason="FAILED_DEV", ltp_override=ltp)
+                    continue
+            except Exception:
+                pass
+
         # --- Time-decay exit: close flat positions held too long (MIS only) ---
-        entry_time_str = str(trade.get("entry_time") or "")
         if (
             entry_time_str
             and trade_product != "CNC"
