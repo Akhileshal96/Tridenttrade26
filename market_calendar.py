@@ -33,6 +33,24 @@ _HOLIDAYS_FILE_DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data", "nse_holidays.json"
 )
 
+# Hardcoded fallback so the bot works correctly even without an external JSON
+# file (the data/ directory is .gitignore'd, so deploys don't carry the file).
+# Only fixed-date NSE holidays — variable-date ones (Holi, Eid, Diwali, Good
+# Friday, Mahavir Jayanti, Ganesh Chaturthi, etc.) MUST be added via the JSON
+# file each year from the official NSE annual holiday list.
+_DEFAULT_HOLIDAYS: dict[str, str] = {
+    "2026-01-26": "Republic Day",
+    "2026-05-01": "Maharashtra Day",
+    "2026-08-15": "Independence Day",
+    "2026-10-02": "Mahatma Gandhi Jayanti",
+    "2026-12-25": "Christmas",
+    "2027-01-26": "Republic Day",
+    "2027-05-01": "Maharashtra Day",
+    "2027-08-15": "Independence Day",
+    "2027-10-02": "Mahatma Gandhi Jayanti",
+    "2027-12-25": "Christmas",
+}
+
 # In-memory cache: { "YYYY-MM-DD": "Holiday Name" }
 _HOLIDAYS: dict[str, str] = {}
 _HOLIDAYS_LOADED_FROM: str | None = None
@@ -44,17 +62,21 @@ def _holidays_file_path() -> str:
 
 
 def reload_holidays() -> int:
-    """(Re-)load the holidays file. Returns the number of entries loaded."""
+    """(Re-)load the holidays. Always seeds from _DEFAULT_HOLIDAYS first,
+    then merges any external JSON file on top (file entries take precedence
+    on duplicate dates). Returns the total number of entries loaded.
+    """
     global _HOLIDAYS, _HOLIDAYS_LOADED_FROM
     path = _holidays_file_path()
-    _HOLIDAYS = {}
-    _HOLIDAYS_LOADED_FROM = None
+    # Always start with the hardcoded fallback — fixed-date holidays at minimum.
+    _HOLIDAYS = dict(_DEFAULT_HOLIDAYS)
+    _HOLIDAYS_LOADED_FROM = "builtin_defaults"
     if not os.path.exists(path):
         try:
-            append_log("WARN", "CAL", f"holidays file not found at {path} — calendar will treat all weekdays as trading days")
+            append_log("INFO", "CAL", f"loaded {len(_HOLIDAYS)} builtin default holidays (file not found at {os.path.basename(path)})")
         except Exception:
             pass
-        return 0
+        return len(_HOLIDAYS)
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -76,16 +98,17 @@ def reload_holidays() -> int:
                     _HOLIDAYS[str(k).strip()] = str(v or "Holiday").strip()
         _HOLIDAYS_LOADED_FROM = path
         try:
-            append_log("INFO", "CAL", f"loaded {len(_HOLIDAYS)} holidays from {os.path.basename(path)}")
+            append_log("INFO", "CAL", f"loaded {len(_HOLIDAYS)} holidays (builtin + {os.path.basename(path)})")
         except Exception:
             pass
     except Exception as exc:
         try:
-            append_log("ERROR", "CAL", f"failed to load holidays from {path}: {exc}")
+            append_log("ERROR", "CAL", f"failed to load holidays from {path}: {exc} (falling back to {len(_DEFAULT_HOLIDAYS)} builtins)")
         except Exception:
             pass
-        _HOLIDAYS = {}
-        _HOLIDAYS_LOADED_FROM = None
+        # Keep builtins on parse failure — better than zero entries.
+        _HOLIDAYS = dict(_DEFAULT_HOLIDAYS)
+        _HOLIDAYS_LOADED_FROM = "builtin_defaults"
     return len(_HOLIDAYS)
 
 

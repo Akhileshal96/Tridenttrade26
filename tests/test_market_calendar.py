@@ -112,29 +112,51 @@ def test_loader_handles_nested_year_format(tmp_path):
         MCAL.reload_holidays()
 
 
-def test_loader_fails_open_on_missing_file(tmp_path, monkeypatch):
-    """Missing file → no holidays loaded, all weekdays = trading days (fail-open)."""
+def test_loader_uses_builtins_when_file_missing(tmp_path):
+    """Missing file → fall back to hardcoded defaults (5 fixed-date holidays per year)."""
     missing = tmp_path / "does_not_exist.json"
     os.environ["MARKET_HOLIDAYS_FILE"] = str(missing)
     try:
         n = MCAL.reload_holidays()
-        assert n == 0
-        # 2026-05-01 in seed is a holiday but seed isn't loaded now
-        h, _ = MCAL.is_market_holiday(date(2026, 5, 1))
-        assert h is False
+        assert n >= 10  # at least 2026 + 2027 fixed-date holidays
+        # Maharashtra Day must be in builtins
+        h, name = MCAL.is_market_holiday(date(2026, 5, 1))
+        assert h is True
+        assert "Maharashtra" in name
     finally:
         _clear_env()
         MCAL.reload_holidays()
 
 
-def test_loader_fails_open_on_malformed_json(tmp_path):
+def test_loader_keeps_builtins_on_malformed_json(tmp_path):
+    """Bad JSON → fall back to builtins, never crash."""
     p = tmp_path / "bad.json"
     p.write_text("{ not valid json }", encoding="utf-8")
     os.environ["MARKET_HOLIDAYS_FILE"] = str(p)
     try:
         n = MCAL.reload_holidays()
-        # Bad JSON → 0 entries, no exceptions
-        assert n == 0
+        # Should keep builtins despite parse failure
+        assert n >= 10
+        h, _ = MCAL.is_market_holiday(date(2026, 5, 1))
+        assert h is True
+    finally:
+        _clear_env()
+        MCAL.reload_holidays()
+
+
+def test_external_file_overrides_builtin(tmp_path):
+    """Adding a date to the JSON file should extend the builtin set."""
+    _write_holidays(tmp_path, [
+        {"date": "2026-04-03", "name": "Good Friday"},   # not in builtins
+    ])
+    try:
+        # Builtin (Maharashtra Day) still present
+        h1, _ = MCAL.is_market_holiday(date(2026, 5, 1))
+        assert h1 is True
+        # File-added (Good Friday) also present
+        h2, name2 = MCAL.is_market_holiday(date(2026, 4, 3))
+        assert h2 is True
+        assert name2 == "Good Friday"
     finally:
         _clear_env()
         MCAL.reload_holidays()
