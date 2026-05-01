@@ -33,7 +33,7 @@ def _get_float(key: str, default: str = "0") -> float:
 TELEGRAM_BOT_TOKEN = _get_str("TELEGRAM_BOT_TOKEN", "")
 
 # Runtime fingerprint for deployment verification.
-RUNTIME_VERSION = _get_str("RUNTIME_VERSION", "2026.04.01-runtime-fix")
+RUNTIME_VERSION = _get_str("RUNTIME_VERSION", "2026.04.17-modes-and-god-v1")
 TELEGRAM_API_ID = _get_int("TELEGRAM_API_ID", "0")
 TELEGRAM_API_HASH = _get_str("TELEGRAM_API_HASH", "")
 ADMIN_USER_ID = _get_int("ADMIN_USER_ID", "0")
@@ -304,6 +304,62 @@ TRAIL_HIGH_PROFIT_GIVEBACK_PCT = _get_float("TRAIL_HIGH_PROFIT_GIVEBACK_PCT", "0
 USE_FAILED_DEV_EXIT    = _get_bool( "USE_FAILED_DEV_EXIT",    "true")
 FAILED_DEV_MINUTES     = _get_int(  "FAILED_DEV_MINUTES",     "30")
 FAILED_DEV_PEAK_RATIO  = _get_float("FAILED_DEV_PEAK_RATIO",  "0.25")
+
+# ===== EARLY NO-MOVE BAIL (audit fix #3) =====
+# Catch dead-on-arrival trades faster than FAILED_DEV's 30-min wait. If, after
+# EARLY_NO_MOVE_MINUTES, peak P&L is below EARLY_NO_MOVE_PEAK_RATIO of the
+# trail activation threshold, exit immediately. Independent of trail status.
+USE_EARLY_NO_MOVE_EXIT     = _get_bool( "USE_EARLY_NO_MOVE_EXIT",     "true")
+EARLY_NO_MOVE_MINUTES      = _get_float("EARLY_NO_MOVE_MINUTES",      "5")
+EARLY_NO_MOVE_PEAK_RATIO   = _get_float("EARLY_NO_MOVE_PEAK_RATIO",   "0.10")
+
+# ===== PER-TRADE MAX-LOSS CIRCUIT BREAKER (audit fix #2) =====
+# Hard floor on a single trade's loss as a percentage of wallet. Independent
+# of all strategy/regime/halt logic — a desk-supervisor cap. When wallet=0
+# (boot before sync), falls back to CFG.CAPITAL_INR. Set 0 to disable.
+USE_PER_TRADE_MAX_LOSS     = _get_bool( "USE_PER_TRADE_MAX_LOSS",     "true")
+PER_TRADE_MAX_LOSS_PCT     = _get_float("PER_TRADE_MAX_LOSS_PCT",     "0.5")
+
+# ===== HALT-FOR-DAY LOSER FORCE-CLOSE (audit fix #1) =====
+# When loss_streak halts new entries, also actively manage existing losers.
+# Force-close any open position whose unrealized loss exceeds
+# HALT_LOSER_FORCE_CLOSE_PCT of wallet. Closes the M&M-style "watch loser bleed"
+# gap where halt blocks entries but the bot does nothing about open losses.
+USE_HALT_LOSER_FORCE_CLOSE     = _get_bool( "USE_HALT_LOSER_FORCE_CLOSE",     "true")
+HALT_LOSER_FORCE_CLOSE_PCT     = _get_float("HALT_LOSER_FORCE_CLOSE_PCT",     "0.5")
+
+# ===== DAILY DRAWDOWN KILL-SWITCH (audit fix #8) =====
+# Independent of loss_streak. If today's realized+unrealized P&L drops below
+# −DAILY_DRAWDOWN_KILL_PCT of wallet, halt new entries AND force-close all
+# open intraday positions. Catches single-trade-large-loss scenarios that
+# wouldn't trip a loss-streak counter. Set 0 to disable.
+USE_DAILY_DRAWDOWN_KILL    = _get_bool( "USE_DAILY_DRAWDOWN_KILL",    "true")
+DAILY_DRAWDOWN_KILL_PCT    = _get_float("DAILY_DRAWDOWN_KILL_PCT",    "2.0")
+
+# ===== CANDLE-BASED ENTRY FILTERS (Tier-1 audit recommendations) =====
+# Three filters that gate entries based on the actual candle structure at
+# signal time. By default they run in LOG-ONLY mode — emit
+# "[CANDLE_VETO] would_have_blocked ..." but allow the trade. Flip
+# CANDLE_FILTERS_LOG_ONLY=false ONLY after observing a few sessions of data.
+USE_CANDLE_FILTERS          = _get_bool( "USE_CANDLE_FILTERS",          "true")
+CANDLE_FILTERS_LOG_ONLY     = _get_bool( "CANDLE_FILTERS_LOG_ONLY",     "true")
+CANDLE_PATTERN_INTERVAL     = _get_str(  "CANDLE_PATTERN_INTERVAL",     "5minute")
+CANDLE_CACHE_TTL_SEC        = _get_int(  "CANDLE_CACHE_TTL_SEC",        "30")
+
+# Filter 1: reversal-pattern veto — block SHORT entries on bullish reversal
+# candles (hammer, bullish-engulfing, doji), block LONG entries on bearish
+# reversal candles. Inside-bar = consolidation, blocked for either side.
+USE_REVERSAL_CANDLE_VETO    = _get_bool( "USE_REVERSAL_CANDLE_VETO",    "true")
+
+# Filter 2: volume confirmation — require entry-candle volume ≥ N× rolling
+# average of prior 20 candles. Filters fake breakouts with no commitment.
+USE_VOLUME_CONFIRMATION     = _get_bool( "USE_VOLUME_CONFIRMATION",     "true")
+VOLUME_CONFIRMATION_MULT    = _get_float("VOLUME_CONFIRMATION_MULT",    "1.5")
+
+# Filter 3: fresh-candle settling guard — defer entries within the first
+# N seconds of a new bar to avoid wick-top entries on still-forming candles.
+USE_FRESH_CANDLE_GUARD      = _get_bool( "USE_FRESH_CANDLE_GUARD",      "true")
+FRESH_CANDLE_GUARD_SEC      = _get_int(  "FRESH_CANDLE_GUARD_SEC",      "60")
 
 # ===== OHLC PEAK TRACKING =====
 # Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture

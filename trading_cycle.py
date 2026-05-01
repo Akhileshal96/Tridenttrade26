@@ -162,6 +162,7 @@ _STATE_PERSIST_KEYS = [
     "positions",
     "trading_mode",
     "risk_profile",
+    "daily_drawdown_kill_fired",
 ]
 
 
@@ -259,7 +260,13 @@ def _load_state_snapshot() -> None:
                     STATE["open_trades"] = STATE["positions"]
                 else:
                     STATE[k] = v
-        append_log("INFO", "STATE", f"state_snapshot restored day={saved_day} pnl={snap.get('today_pnl')} positions={len(snap.get('positions') or {})}")
+        append_log(
+            "INFO",
+            "STATE",
+            f"state_snapshot restored day={saved_day} pnl={snap.get('today_pnl')} "
+            f"positions={len(snap.get('positions') or {})} "
+            f"trading_mode={STATE.get('trading_mode')} risk_profile={STATE.get('risk_profile')}"
+        )
     except Exception as exc:
         append_log("WARN", "STATE", f"state_snapshot_load_failed: {exc}")
 
@@ -3474,6 +3481,39 @@ def build_fallback_universe() -> list:
     return out
 
 
+def _run_candle_filters(sym: str, side: str) -> bool:
+    """Run the Tier-1 candle filters and return whether the entry is allowed.
+
+    Always logs the verdict. In log-only mode (CFG.CANDLE_FILTERS_LOG_ONLY=True,
+    the default), returns True regardless of veto so callers proceed with the
+    trade — the log line marks what WOULD have been blocked. After observing a
+    few sessions, flip CANDLE_FILTERS_LOG_ONLY=false in .env to switch to
+    hard-block semantics.
+    """
+    try:
+        from candle_engine import check_candle_filters
+        allow, reason, ctx = check_candle_filters(sym, side)
+    except Exception as exc:
+        append_log("WARN", "CANDLE", f"filter check failed for {sym} {side}: {exc} — fail-open")
+        return True
+
+    if allow:
+        # Only log positive verdicts when filters are enabled — otherwise spam.
+        if bool(_cfg_get("USE_CANDLE_FILTERS", False)) and reason != "filters_disabled":
+            ctx_brief = {k: v for k, v in ctx.items() if k in ("volume_ratio", "volume_threshold", "candles_fetched")}
+            append_log("INFO", "CANDLE", f"{sym} side={side} verdict=ALLOW reason={reason} {ctx_brief}")
+        return True
+
+    # Veto fired. Either log-and-allow or hard-block.
+    log_only = bool(_cfg_get("CANDLE_FILTERS_LOG_ONLY", True))
+    label = "would_have_blocked" if log_only else "blocked"
+    append_log(
+        "WARN", "CANDLE_VETO",
+        f"{label} symbol={sym} side={side} reason={reason} ctx={ctx}",
+    )
+    return True if log_only else False
+
+
 def _maybe_enter_short_from_signal(sig):
     if not sig:
         return False
@@ -3520,6 +3560,10 @@ def _maybe_enter_short_from_signal(sig):
         if htf_comp == "fail":
             append_log("INFO", "CONFIRM", f"SHORT blocked {sym} reason=HTF_Score_Below_Req_for_{regime} htf_status=FAIL htf_score=0")
         append_log("INFO", "CONFIRM", f"symbol={sym} score={decision['score']} tier=BLOCK reason=low_total_confidence")
+        return False
+    # Tier-1 candle filters (audit fix): reversal-veto + volume-confirm + settling guard.
+    # In log-only mode (default), this never blocks — it only logs would_have_blocked.
+    if not _run_candle_filters(sym, "SHORT"):
         return False
     tier_mult = float(decision.get("size_mult") or 0.0)
     strategy_tag = "short_breakdown"
@@ -3838,6 +3882,10 @@ def _maybe_enter_from_signal(sig):
                 append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier={forced_tier}")
             else:
                 append_log("INFO", "MARKET", f"family={strategy_family} regime=SIDEWAYS trend=DOWN forced_tier_skipped current={decision['tier']}>={forced_tier}")
+    # Tier-1 candle filters (audit fix): reversal-veto + volume-confirm + settling guard.
+    # In log-only mode (default), this never blocks — it only logs would_have_blocked.
+    if not _run_candle_filters(sym, "BUY"):
+        return False
     qty, bucket_qty, risk_qty = _calc_qty(
         sym,
         entry,
@@ -4592,6 +4640,61 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
     )
     return max(0, _open_positions_count() - before)
 
+def _check_daily_drawdown_kill_switch() -> bool:
+    """Audit fix #8: independent percentage-of-wallet kill-switch.
+
+    Complements the absolute-INR daily loss cap by also halting on a
+    single-trade large loss expressed as % of wallet. When triggered,
+    halts entries AND force-closes all open intraday positions so a
+    single bad trade can't keep bleeding past the threshold.
+
+    Returns True if kill-switch fired this tick.
+    """
+    if not bool(_cfg_get("USE_DAILY_DRAWDOWN_KILL", True)):
+        return False
+    pct_cap = float(_cfg_get("DAILY_DRAWDOWN_KILL_PCT", 2.0) or 0.0)
+    if pct_cap <= 0:
+        return False
+    pnl = float(STATE.get("today_pnl") or 0.0)
+    if pnl >= 0:
+        return False
+    wallet = float(STATE.get("wallet_net_inr") or getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    if wallet <= 0:
+        return False
+    cap_inr = wallet * pct_cap / 100.0
+    if pnl > -cap_inr:
+        return False
+    if STATE.get("daily_drawdown_kill_fired"):
+        return True  # already fired today; no need to re-act
+    safe_set(STATE, "daily_drawdown_kill_fired", True)
+    safe_set(STATE, "halt_for_day", True)
+    safe_set(STATE, "day_guard_reason", "daily_drawdown_kill")
+    append_log(
+        "ERROR", "RISK",
+        f"DAILY_DRAWDOWN_KILL fired pnl={pnl:.2f} cap=-{cap_inr:.2f} "
+        f"({pct_cap}% of wallet={wallet:.2f}) — halting and force-closing intraday",
+    )
+    # Force-close intraday positions only (legacy safety net for any swings).
+    def _is_intraday(t):
+        tm = str(t.get("trade_mode") or "").upper()
+        if tm in ("INTRADAY", "SWING"):
+            return tm == "INTRADAY"
+        return str(t.get("product") or "MIS").upper() == "MIS"
+    mis_positions = {s: t for s, t in _positions().items() if _is_intraday(t)}
+    if mis_positions:
+        ee_force_exit_all(mis_positions, _close_position, reason="DD_KILL")
+    try:
+        _notify(
+            f"🛑 DAILY_DRAWDOWN_KILL\n"
+            f"PnL: ₹{pnl:.2f} (-{abs(pnl)/wallet*100:.2f}% wallet)\n"
+            f"Cap: -₹{cap_inr:.2f} ({pct_cap}%)\n"
+            f"Action: halt + force-closed {len(mis_positions)} intraday positions"
+        )
+    except Exception:
+        pass
+    return True
+
+
 def tick():
     _cfg_obj()
     _ensure_day_key()
@@ -4600,6 +4703,8 @@ def tick():
     reconcile_broker_positions()
     _refresh_runtime_pnl_fields()
     RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
+    # Audit fix #8: %-wallet kill-switch (complements absolute INR cap above)
+    _check_daily_drawdown_kill_switch()
 
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):

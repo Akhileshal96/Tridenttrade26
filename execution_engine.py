@@ -12,6 +12,23 @@ def check_time_exit(force_exit_check) -> bool:
     return bool(force_exit_check())
 
 
+def _wallet_base_inr(state: dict | None) -> float:
+    """Resolve the wallet base used to compute % thresholds. Falls back to
+    CFG.CAPITAL_INR when wallet hasn't been synced yet (boot-time safety),
+    matching the same fallback as trading_cycle._max_exposure_inr.
+    """
+    try:
+        w = float((state or {}).get("wallet_net_inr") or 0.0)
+    except Exception:
+        w = 0.0
+    if w > 0:
+        return w
+    try:
+        return float(getattr(CFG, "CAPITAL_INR", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
 def check_stoploss(pnl_pct: float, side: str = "LONG", product: str = "MIS") -> bool:
     s = str(side or "LONG").upper()
     is_swing = str(product or "MIS").upper() == "CNC"
@@ -276,6 +293,52 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             f"sl_type={sl_used}",
         )
 
+        # --- Audit fix #2: per-trade max-loss circuit breaker (hard floor) ---
+        # Independent of strategy, regime, or halt status. If a single trade's
+        # unrealized loss exceeds PER_TRADE_MAX_LOSS_PCT of wallet, kill it.
+        if bool(getattr(CFG, "USE_PER_TRADE_MAX_LOSS", True)) and trade_product != "CNC":
+            try:
+                cap_pct = float(getattr(CFG, "PER_TRADE_MAX_LOSS_PCT", 0.5) or 0.0)
+                if cap_pct > 0:
+                    wallet_base = _wallet_base_inr(state)
+                    cap_inr = wallet_base * cap_pct / 100.0
+                    if cap_inr > 0 and pnl_inr <= -cap_inr:
+                        append_log(
+                            "ERROR", "EXIT",
+                            f"{sym} PER_TRADE_MAX_LOSS pnl_inr={pnl_inr:.2f} "
+                            f"cap_inr=-{cap_inr:.2f} cap_pct={cap_pct}% wallet={wallet_base:.2f}",
+                        )
+                        close_position(sym, reason="PER_TRADE_MAX_LOSS", ltp_override=ltp)
+                        continue
+            except Exception as _e:
+                append_log("WARN", "EXIT", f"per_trade_max_loss check failed: {_e}")
+
+        # --- Audit fix #1: halt-for-day loser force-close ---
+        # When loss_streak halts new entries, also actively cull losers above
+        # HALT_LOSER_FORCE_CLOSE_PCT of wallet. Closes the M&M-style "watch
+        # loser bleed" gap where halt blocks entries but does nothing about
+        # open positions.
+        if (
+            bool(getattr(CFG, "USE_HALT_LOSER_FORCE_CLOSE", True))
+            and trade_product != "CNC"
+            and bool((state or {}).get("halt_for_day"))
+        ):
+            try:
+                halt_pct = float(getattr(CFG, "HALT_LOSER_FORCE_CLOSE_PCT", 0.5) or 0.0)
+                if halt_pct > 0:
+                    wallet_base = _wallet_base_inr(state)
+                    halt_cap_inr = wallet_base * halt_pct / 100.0
+                    if halt_cap_inr > 0 and pnl_inr <= -halt_cap_inr:
+                        append_log(
+                            "WARN", "EXIT",
+                            f"{sym} HALT_LOSER_FORCE_CLOSE pnl_inr={pnl_inr:.2f} "
+                            f"halt_cap=-{halt_cap_inr:.2f} pct={halt_pct}% wallet={wallet_base:.2f}",
+                        )
+                        close_position(sym, reason="HALT_LOSER_CLOSE", ltp_override=ltp)
+                        continue
+            except Exception as _e:
+                append_log("WARN", "EXIT", f"halt_loser_force_close check failed: {_e}")
+
         if check_trailing(trade, pnl_inr, trigger_inr):
             reason = "BREAKEVEN_LOCK" if (min_locked_pnl > 0 and pnl_inr <= min_locked_pnl) else "TRAIL"
             append_log(
@@ -286,6 +349,38 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             )
             close_position(sym, reason=reason, ltp_override=ltp)
             continue
+
+        # --- Audit fix #3: early no-move bail (faster than FAILED_DEV) ---
+        # If after EARLY_NO_MOVE_MINUTES the peak P&L hasn't even reached
+        # EARLY_NO_MOVE_PEAK_RATIO of activation, the trade is dead-on-arrival.
+        # Cut the 30-min FAILED_DEV wait short; cap each loser's bleed.
+        if (
+            entry_time_str
+            and trade_product != "CNC"
+            and not trail_active
+            and bool(getattr(CFG, "USE_EARLY_NO_MOVE_EXIT", True))
+        ):
+            try:
+                entry_dt = datetime.fromisoformat(entry_time_str)
+                elapsed_min = (datetime.now(IST) - entry_dt).total_seconds() / 60.0
+                early_min = float(getattr(CFG, "EARLY_NO_MOVE_MINUTES", 5))
+                early_ratio = float(getattr(CFG, "EARLY_NO_MOVE_PEAK_RATIO", 0.10))
+                if (
+                    elapsed_min >= early_min
+                    and activate_inr > 0
+                    and peak_pnl_inr < activate_inr * early_ratio
+                    and pnl_inr < 0
+                ):
+                    append_log(
+                        "WARN", "EXIT",
+                        f"{sym} EARLY_NO_MOVE elapsed={elapsed_min:.0f}min "
+                        f"peak_pnl_inr={peak_pnl_inr:.2f} threshold={activate_inr * early_ratio:.2f} "
+                        f"(activate_inr={activate_inr:.2f} ratio={early_ratio})",
+                    )
+                    close_position(sym, reason="EARLY_NO_MOVE", ltp_override=ltp)
+                    continue
+            except Exception:
+                pass
 
         # --- Failed development exit: close non-developing positions early ---
         if (

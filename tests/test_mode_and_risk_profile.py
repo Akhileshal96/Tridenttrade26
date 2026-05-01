@@ -436,3 +436,67 @@ def test_21_confirm_god_without_pending_fails(monkeypatch):
     ok, msg = CYCLE.confirm_god_mode()
     assert ok is False
     assert CYCLE.current_risk_profile() == "STANDARD"
+
+
+# ============================================================================
+# State persistence (B+C cleanup pass)
+# ============================================================================
+
+def test_22_state_persist_keys_include_mode_and_profile():
+    """Mode and profile MUST be in the persist key list, else they don't survive restart."""
+    assert "trading_mode" in CYCLE._STATE_PERSIST_KEYS
+    assert "risk_profile" in CYCLE._STATE_PERSIST_KEYS
+
+
+def test_23_persistence_round_trip_same_day(monkeypatch, tmp_path):
+    """Save snapshot today, load it back today — mode and profile restore intact."""
+    snap_file = tmp_path / "state_snapshot.json"
+    monkeypatch.setattr(CYCLE, "_STATE_SNAPSHOT_PATH", str(snap_file))
+
+    # Configure source state
+    with CYCLE.STATE_LOCK:
+        CYCLE.STATE["trading_mode"] = "HYBRID"
+        CYCLE.STATE["risk_profile"] = "GOD"
+        CYCLE.STATE["day_key"] = CYCLE.datetime.now(CYCLE.IST).strftime("%Y-%m-%d")
+        CYCLE.STATE["positions"] = {}
+
+    CYCLE._save_state_snapshot()
+    assert snap_file.exists()
+
+    # Wipe the runtime state to simulate a fresh process boot
+    with CYCLE.STATE_LOCK:
+        CYCLE.STATE["trading_mode"] = "INTRADAY"
+        CYCLE.STATE["risk_profile"] = "STANDARD"
+
+    CYCLE._load_state_snapshot()
+
+    # Both must be restored from the same-day snapshot
+    assert CYCLE.current_trading_mode() == "HYBRID"
+    assert CYCLE.current_risk_profile() == "GOD"
+
+
+def test_24_god_auto_reverts_on_stale_day(monkeypatch, tmp_path):
+    """Cross-day boot with saved GOD must auto-revert to STANDARD (safety)."""
+    snap_file = tmp_path / "state_snapshot.json"
+    monkeypatch.setattr(CYCLE, "_STATE_SNAPSHOT_PATH", str(snap_file))
+    monkeypatch.setenv("RISK_PROFILE", "GOD")
+
+    # Save snapshot dated yesterday
+    with CYCLE.STATE_LOCK:
+        CYCLE.STATE["trading_mode"] = "HYBRID"
+        CYCLE.STATE["risk_profile"] = "GOD"
+        CYCLE.STATE["day_key"] = "1999-01-01"  # definitely stale
+        CYCLE.STATE["positions"] = {}
+
+    CYCLE._save_state_snapshot()
+
+    # Stub set_env_value so the test can't accidentally rewrite the real .env
+    import env_utils
+    monkeypatch.setattr(env_utils, "set_env_value", lambda *a, **k: None)
+
+    # Today's load: snapshot is stale → GOD must auto-revert to STANDARD
+    with CYCLE.STATE_LOCK:
+        CYCLE.STATE["risk_profile"] = "GOD"  # simulate env-driven boot
+    CYCLE._load_state_snapshot()
+    assert CYCLE.current_risk_profile() == "STANDARD", \
+        "GOD must auto-revert when snapshot is from a prior day"
