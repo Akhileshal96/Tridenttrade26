@@ -1884,6 +1884,17 @@ def _close_all_open_trades(reason="MANUAL"):
 
 def _within_entry_window():
     now = datetime.now(IST)
+    # Holiday & weekend gate (audit add-on): skip entire entry window when the
+    # exchange is closed. Logs once per session via _maybe_log_market_closed_today
+    # so we don't spam every 20s tick.
+    if bool(_cfg_get("USE_HOLIDAY_CALENDAR", True)):
+        try:
+            import market_calendar as MCAL
+            if not MCAL.is_trading_day(now.date()):
+                _maybe_log_market_closed_today()
+                return False
+        except Exception as exc:
+            append_log("WARN", "CAL", f"holiday check failed (failing open): {exc}")
     mode = str(STATE.get("trading_mode") or "INTRADAY").upper()
     if mode == "SWING":
         # Swing/CNC: wider entry window — can buy anytime during market hours.
@@ -1896,6 +1907,39 @@ def _within_entry_window():
     start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
     end = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     return start <= now <= end
+
+
+def _maybe_log_market_closed_today() -> None:
+    """One-shot log + Telegram notification when today is a non-trading day.
+
+    Re-fires only when the day_key changes (i.e., next calendar day).
+    """
+    try:
+        import market_calendar as MCAL
+        today = datetime.now(IST).date()
+        last = STATE.get("market_closed_logged_date")
+        if str(last) == today.isoformat():
+            return
+        is_we = MCAL.is_weekend(today)
+        is_h, h_name = MCAL.is_market_holiday(today)
+        if not (is_we or is_h):
+            return
+        next_td = MCAL.next_trading_day(today).isoformat()
+        if is_h:
+            label = f"holiday={h_name}"
+            tg = f"📅 Market holiday: {h_name} ({today.isoformat()})\nNext trading day: {next_td}\nBot will idle and resume automatically."
+        else:
+            label = "weekend"
+            tg = f"📅 Weekend ({today.isoformat()})\nNext trading day: {next_td}\nBot will idle and resume automatically."
+        append_log("INFO", "CAL", f"market_closed today={today.isoformat()} {label} next_trading_day={next_td}")
+        with STATE_LOCK:
+            STATE["market_closed_logged_date"] = today.isoformat()
+        try:
+            _notify(tg)
+        except Exception:
+            pass
+    except Exception as exc:
+        append_log("WARN", "CAL", f"_maybe_log_market_closed_today failed: {exc}")
 
 
 def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):

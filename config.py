@@ -361,6 +361,14 @@ VOLUME_CONFIRMATION_MULT    = _get_float("VOLUME_CONFIRMATION_MULT",    "1.5")
 USE_FRESH_CANDLE_GUARD      = _get_bool( "USE_FRESH_CANDLE_GUARD",      "true")
 FRESH_CANDLE_GUARD_SEC      = _get_int(  "FRESH_CANDLE_GUARD_SEC",      "60")
 
+# ===== HOLIDAY CALENDAR =====
+# When enabled, _within_entry_window() returns False on weekends and on
+# any date listed in data/nse_holidays.json. Bot stays idle (still ticks
+# for housekeeping/log rotation/wallet sync) but generates no signals
+# and places no orders. Holiday data must be maintained manually each
+# year from the official NSE holiday list.
+USE_HOLIDAY_CALENDAR        = _get_bool( "USE_HOLIDAY_CALENDAR",        "true")
+
 # ===== OHLC PEAK TRACKING =====
 # Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture
 # intra-tick spikes that the 20s sampler misses, giving the trail a true peak.
