@@ -73,8 +73,10 @@ GOD_FALLBACK_SIZE_MULTIPLIER         = _get_float("GOD_FALLBACK_SIZE_MULTIPLIER"
 # Bucket sizing — GOD gets larger per-trade allocation and higher ceiling
 GOD_BUCKET_ALLOC_PCT                 = _get_float("GOD_BUCKET_ALLOC_PCT",                 "50")
 GOD_BUCKET_CEIL_PCT                  = _get_float("GOD_BUCKET_CEIL_PCT",                  "70")
-# More concurrent positions in GOD mode
-GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "50")
+# More concurrent positions in GOD mode (Phase 3: lowered 50→8 per audit;
+# 30-Apr peak observed was 5 simultaneous, so 8 caps the tail without
+# binding in practice).
+GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "8")
 # Higher risk budget per trade
 GOD_RISK_PER_TRADE_PCT               = _get_float("GOD_RISK_PER_TRADE_PCT",               "3.0")
 # Re-entry cooldown: 5 min minimum even in GOD — prevents immediate re-entry into a
@@ -368,6 +370,24 @@ FRESH_CANDLE_GUARD_SEC      = _get_int(  "FRESH_CANDLE_GUARD_SEC",      "60")
 # and places no orders. Holiday data must be maintained manually each
 # year from the official NSE holiday list.
 USE_HOLIDAY_CALENDAR        = _get_bool( "USE_HOLIDAY_CALENDAR",        "true")
+
+# ===== PHASE 3 CORRELATION + STAGE GUARDS =====
+# Address the "7 shorts in 18 minutes" concentration pattern observed in
+# 30-Apr / 1-May logs. These are pure entry-time gates — they don't
+# change sizing, just block additional entries when limits are hit.
+
+# Sector cap: max simultaneous open positions in the same sector, per side.
+# Reads sector via _sector_for_symbol() (existing universe_builder mapping).
+USE_SECTOR_CAP                  = _get_bool( "USE_SECTOR_CAP",              "true")
+MAX_OPEN_PER_SECTOR_PER_SIDE    = _get_int(  "MAX_OPEN_PER_SECTOR_PER_SIDE", "2")
+
+# Fast-stage entry limit: max new entries in the first N minutes after
+# market open. Forces the bot to wait for first-batch confirmation before
+# piling on. 30-Apr peak: 7 entries in 18 min — under this cap, only 3
+# would have fired in the opening drive.
+USE_FAST_STAGE_ENTRY_LIMIT      = _get_bool( "USE_FAST_STAGE_ENTRY_LIMIT",  "true")
+FAST_STAGE_DURATION_MIN         = _get_int(  "FAST_STAGE_DURATION_MIN",     "15")
+FAST_STAGE_MAX_ENTRIES          = _get_int(  "FAST_STAGE_MAX_ENTRIES",      "3")
 
 # ===== OHLC PEAK TRACKING =====
 # Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture

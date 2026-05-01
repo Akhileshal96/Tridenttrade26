@@ -2598,6 +2598,99 @@ def _open_short_positions_count() -> int:
     return c
 
 
+# ============================================================================
+# Phase 3 — correlation + fast-stage guards
+# ============================================================================
+
+def _open_positions_in_sector(sector: str, side: str | None = None) -> int:
+    """Count open positions in `sector`. If `side` given, restrict to that
+    side ("BUY"/"LONG" or "SHORT"/"SELL"). Used by the sector cap check.
+    """
+    sector_u = str(sector or "UNKNOWN").upper()
+    side_filter = None
+    if side:
+        s = str(side).upper()
+        if s in ("SHORT", "SELL"):
+            side_filter = "SHORT"
+        elif s in ("BUY", "LONG"):
+            side_filter = "LONG"
+    n = 0
+    for sym, tr in _positions().items():
+        psec = str((tr or {}).get("sector") or _sector_for_symbol(sym) or "UNKNOWN").upper()
+        if psec != sector_u:
+            continue
+        if side_filter is None:
+            n += 1
+            continue
+        pside = str((tr or {}).get("side") or "LONG").upper()
+        # Treat SELL as SHORT for counting
+        pside_norm = "SHORT" if pside in ("SHORT", "SELL") else "LONG"
+        if pside_norm == side_filter:
+            n += 1
+    return n
+
+
+def _check_sector_cap(sym: str, side: str) -> tuple[bool, str]:
+    """Phase 3 audit fix #4: per-sector, per-side concurrent open cap.
+
+    Returns (allow, reason). Disabled if USE_SECTOR_CAP=False.
+    """
+    if not bool(_cfg_get("USE_SECTOR_CAP", True)):
+        return True, "disabled"
+    cap = int(_cfg_get("MAX_OPEN_PER_SECTOR_PER_SIDE", 2) or 2)
+    if cap <= 0:
+        return True, "disabled"
+    sector = _sector_for_symbol(sym)
+    if not sector or sector.upper() in ("UNKNOWN", "OTHER"):
+        # If we can't classify sector, don't block — this would fail-closed
+        # too aggressively for unmapped symbols.
+        return True, f"sector_unknown_{sector}"
+    cur = _open_positions_in_sector(sector, side=side)
+    if cur >= cap:
+        return False, f"sector_cap sector={sector} side={side} current={cur} cap={cap}"
+    return True, f"sector_ok sector={sector} count={cur}/{cap}"
+
+
+def _entries_within_first_n_min(n_min: int) -> int:
+    """Count today's entries that occurred in the first `n_min` minutes
+    after market open (09:15 IST). Reads STATE['entry_event_ts'] which is
+    populated by _record_entry_executed() after every order placement.
+    """
+    if n_min <= 0:
+        return 0
+    now = datetime.now(IST)
+    open_dt = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    cutoff_ts = (open_dt + timedelta(minutes=int(n_min))).timestamp()
+    open_ts = open_dt.timestamp()
+    events = list(STATE.get("entry_event_ts") or [])
+    return sum(1 for ts in events if open_ts <= float(ts) <= cutoff_ts)
+
+
+def _check_fast_stage_entry_limit(sym: str, side: str) -> tuple[bool, str]:
+    """Phase 3 audit fix #5: cap new entries during the opening N-minute
+    window. Forces the bot to wait for first-batch confirmation before
+    piling on more positions.
+
+    Only fires if we are still WITHIN the fast-stage window — outside it
+    the limit is irrelevant.
+    """
+    if not bool(_cfg_get("USE_FAST_STAGE_ENTRY_LIMIT", True)):
+        return True, "disabled"
+    n_min = int(_cfg_get("FAST_STAGE_DURATION_MIN", 15) or 15)
+    max_e = int(_cfg_get("FAST_STAGE_MAX_ENTRIES", 3) or 3)
+    if n_min <= 0 or max_e <= 0:
+        return True, "disabled"
+    now = datetime.now(IST)
+    open_dt = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    elapsed_min = (now - open_dt).total_seconds() / 60.0
+    if elapsed_min < 0 or elapsed_min > n_min:
+        return True, f"outside_fast_stage elapsed={elapsed_min:.1f}min"
+    cur = _entries_within_first_n_min(n_min)
+    if cur >= max_e:
+        return False, f"fast_stage_full elapsed={elapsed_min:.1f}min current={cur} max={max_e}"
+    return True, f"fast_stage_ok elapsed={elapsed_min:.1f}min count={cur}/{max_e}"
+
+
 def _calc_pnl(entry: float, ltp: float, qty: int, side: str = "LONG") -> tuple[float, float]:
     side_u = str(side or "LONG").upper()
     if side_u == "SHORT":
@@ -3586,6 +3679,18 @@ def _maybe_enter_short_from_signal(sig):
         append_log("WARN", "RISK", "max short positions reached")
         return False
 
+    # Phase 3 audit fix #4: per-sector cap (block correlated stacking).
+    _ok_sec, _r_sec = _check_sector_cap(sym, "SHORT")
+    if not _ok_sec:
+        append_log("WARN", "RISK", f"SHORT blocked {sym} reason={_r_sec}")
+        return False
+
+    # Phase 3 audit fix #5: fast-stage opening-drive entry limit.
+    _ok_fs, _r_fs = _check_fast_stage_entry_limit(sym, "SHORT")
+    if not _ok_fs:
+        append_log("WARN", "RISK", f"SHORT blocked {sym} reason={_r_fs}")
+        return False
+
     research_universe = _active_trade_universe()
     regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN")
     decision = _build_entry_confidence(sym, "SHORT", sig, regime, research_universe)
@@ -3777,6 +3882,18 @@ def _maybe_enter_from_signal(sig):
 
     if _skip_cooldown_active(sym):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
+        return False
+
+    # Phase 3 audit fix #4: per-sector cap.
+    _ok_sec, _r_sec = _check_sector_cap(sym, "BUY")
+    if not _ok_sec:
+        append_log("WARN", "RISK", f"BUY blocked {sym} reason={_r_sec}")
+        return False
+
+    # Phase 3 audit fix #5: fast-stage opening-drive entry limit.
+    _ok_fs, _r_fs = _check_fast_stage_entry_limit(sym, "BUY")
+    if not _ok_fs:
+        append_log("WARN", "RISK", f"BUY blocked {sym} reason={_r_fs}")
         return False
 
     # Late-entry guard: block new MIS entries when not enough time remains before
@@ -5024,6 +5141,25 @@ def run_loop_forever():
         append_log("WARN", "BOOT", f"startup_wallet_sync_failed={_e}")
         if float(STATE.get("wallet_net_inr") or 0.0) <= 0:
             append_log("CRITICAL", "BOOT", "wallet_net=0 and startup sync failed — trades will use minimum bucket until wallet syncs successfully.")
+
+    # Phase 3 audit fix #7: GOD restart notification — operator awareness when
+    # GOD persisted across a same-day restart. Cross-day auto-revert handles
+    # multi-day cases; this catches the "I forgot GOD was on" scenario after
+    # an in-day /token restart.
+    try:
+        if current_risk_profile() == "GOD":
+            wallet_now = float(STATE.get("wallet_net_inr") or 0.0)
+            mode_now = current_trading_mode()
+            append_log("WARN", "RISK", f"GOD profile active at boot wallet={wallet_now:.2f} mode={mode_now}")
+            _notify(
+                "🔥 GOD profile active after restart\n"
+                f"Mode: {mode_now}\n"
+                f"Wallet: ₹{wallet_now:.2f}\n"
+                "Use /riskprofile standard to revert."
+            )
+    except Exception as _e:
+        append_log("WARN", "RISK", f"god_boot_notify_failed={_e}")
+
     if not _active_trade_universe():
         _load_research_universe_from_file()
     while True:

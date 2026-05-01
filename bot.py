@@ -54,7 +54,8 @@ HELP_TEXT = (
     "• /riskprofile standard       → safe default (current behaviour)\n"
     "• /riskprofile god            → request GOD (shows warning)\n"
     "• /riskprofile god confirm    → confirm + activate GOD\n"
-    "• /riskprofile cancel         → cancel pending GOD confirmation\n\n"
+    "• /riskprofile cancel         → cancel pending GOD confirmation\n"
+    "• /godstatus                  → effective sizing + Phase 3 guards snapshot\n\n"
     "MONITOR [Viewer+]:\n"
     "• /status     → status + daily caps\n"
     "• /pnl        → day P/L snapshot\n"
@@ -704,6 +705,53 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             "`/riskprofile god confirm`      — confirm + activate GOD\n"
             "`/riskprofile cancel`           — cancel a pending GOD confirmation"
         )
+        return True
+
+    # ===== /godstatus — GOD-mode diagnostic snapshot (viewer+) =====
+    if cmd_word == "/godstatus":
+        if not _is_viewer(sender):
+            await event.reply("❌ Not permitted.")
+            return True
+        cur = CYCLE.current_risk_profile()
+        mode = CYCLE.current_trading_mode()
+        wallet = float(CYCLE.STATE.get("wallet_net_inr") or 0.0)
+        # Effective config under current profile (read via _cfg_get so the
+        # GOD branch is reflected when active)
+        max_exp = float(CYCLE._cfg_get("MAX_EXPOSURE_PCT", 0) or 0)
+        max_dep = float(CYCLE._cfg_get("MAX_DEPLOYABLE_PCT", 0) or 0)
+        max_sym = float(CYCLE._cfg_get("MAX_SYMBOL_ALLOCATION_PCT", 0) or 0)
+        full_w = float(CYCLE._cfg_get("FULL_TIER_WEIGHT", 0) or 0)
+        red_w = float(CYCLE._cfg_get("REDUCED_TIER_WEIGHT", 0) or 0)
+        max_conc = CYCLE._dynamic_max_concurrent()
+        sector_cap = int(CYCLE._cfg_get("MAX_OPEN_PER_SECTOR_PER_SIDE", 2) or 2)
+        sector_cap_on = bool(CYCLE._cfg_get("USE_SECTOR_CAP", True))
+        fs_max = int(CYCLE._cfg_get("FAST_STAGE_MAX_ENTRIES", 3) or 3)
+        fs_min = int(CYCLE._cfg_get("FAST_STAGE_DURATION_MIN", 15) or 15)
+        fs_on = bool(CYCLE._cfg_get("USE_FAST_STAGE_ENTRY_LIMIT", True))
+        fs_count = CYCLE._entries_within_first_n_min(fs_min)
+        open_pos = len(CYCLE._positions() or {})
+        pending = CYCLE.STATE.get("pending_risk_profile_confirmation")
+        text = (
+            "🔥 GOD-Mode Status\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Profile: **{cur}**"
+            + (f" (pending {pending} confirm)" if pending else "")
+            + "\n"
+            f"Mode: {mode}\n"
+            f"Wallet: ₹{wallet:.2f}\n"
+            f"Open positions: {open_pos} / {max_conc}\n\n"
+            "**Effective sizing (this profile)**\n"
+            f"• Max exposure:        {max_exp:.0f}%\n"
+            f"• Max deployable:      {max_dep:.0f}%\n"
+            f"• Max symbol alloc:    {max_sym:.0f}%\n"
+            f"• FULL tier weight:    {full_w:.2f}×\n"
+            f"• REDUCED tier weight: {red_w:.2f}×\n\n"
+            "**Phase 3 guards**\n"
+            f"• Sector cap:        {'ON' if sector_cap_on else 'OFF'}  ({sector_cap}/sector/side)\n"
+            f"• Fast-stage limit:  {'ON' if fs_on else 'OFF'}  ({fs_count}/{fs_max} used in first {fs_min}min)\n\n"
+            "Use /riskprofile standard to revert if GOD active."
+        )
+        await event.reply(text)
         return True
 
     # ===== Owner-only LIVE safety =====
