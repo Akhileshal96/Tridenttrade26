@@ -182,19 +182,36 @@ def check_day_drawdown_guard(state: dict, risk_profile: str = "STANDARD"):
         pause_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_PAUSE_PCT", 40.0) or 40.0)
         reduce_pct = float(getattr(CFG, "DAY_PROFIT_GIVEBACK_REDUCE_PCT", 25.0) or 25.0)
 
+    # Log idempotency (audit fix 2026-05-04): the giveback guard runs every
+    # tick (~20s). Without state-change detection it re-emits the WARN line
+    # endlessly — 1,897 occurrences observed in a single session. We log
+    # once per action transition (e.g. None→reduce_size, reduce_size→pause_entries).
+    last_action = str(state.get("_giveback_log_last_action") or "")
+
+    def _log_giveback_once(action: str):
+        signature = f"{action}:{int(round(dd_pct))}"
+        if last_action != signature:
+            append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action={action}")
+            state["_giveback_log_last_action"] = signature
+
     if dd_pct >= halt_pct:
         state["halt_for_day"] = True
         state["day_guard_reason"] = "profit_giveback_guard"
-        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=halt_for_day")
+        _log_giveback_once("halt_for_day")
         return False
     if dd_pct >= pause_pct:
         state["pause_entries_until"] = datetime.now(IST) + timedelta(minutes=30)
         state["reduce_size_factor"] = 0.5
         state["day_guard_reason"] = "profit_giveback_guard"
-        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=pause_entries")
+        _log_giveback_once("pause_entries")
         return False
     if dd_pct >= reduce_pct:
         state["reduce_size_factor"] = 0.5
         state["day_guard_reason"] = "profit_giveback_guard"
-        append_log("WARN", "DAY", f"profit_giveback_guard triggered dd_pct={dd_pct:.1f} action=reduce_size")
+        _log_giveback_once("reduce_size")
+    else:
+        # Below all giveback thresholds → reset the log signature so the
+        # next transition above threshold re-emits.
+        if last_action:
+            state["_giveback_log_last_action"] = ""
     return True

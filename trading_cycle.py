@@ -4760,6 +4760,20 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
             if not sig:
                 sig = generate_mean_reversion_signal(cands)
             if not sig:
+                # Audit fix (2026-05-04): primary's `generate_signal` pops the
+                # reject for candidates it validated-but-didn't-select (rank
+                # filter). Fallback families then overwrite with their own
+                # reject reasons (e.g. mean_reversion_conditions_not_met).
+                # Result: log lines say "family=trend_long ... reject=
+                # mean_reversion_conditions_not_met" — misleading. Fix: clear
+                # any reject for cands NOT in primary_rejects (i.e. symbols
+                # primary passed) so the log loop falls back to the generic
+                # "family_conditions_not_met" string.
+                primary_keys = set(primary_rejects.keys())
+                for raw_sym in (cands or []):
+                    sym_u = str(raw_sym or "").strip().upper()
+                    if sym_u and sym_u not in primary_keys:
+                        SE.LAST_SIGNAL_REJECT_REASONS.pop(sym_u, None)
                 SE.LAST_SIGNAL_REJECT_REASONS.update(primary_rejects)
         if not sig and cands:
             reject_map = getattr(SE, "LAST_SIGNAL_REJECT_REASONS", {}) or {}
