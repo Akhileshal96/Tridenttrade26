@@ -279,26 +279,33 @@ def check_reversal_against_entry(candles: list[dict], side: str) -> tuple[bool, 
 
 def check_volume_confirmation(candles: list[dict], multiplier: float = 1.5,
                               lookback: int = 20) -> tuple[bool, float]:
-    """Return (confirms, ratio). confirms=True if latest candle's volume
-    is ≥ multiplier × the rolling-average of prior `lookback` candles.
+    """Return (confirms, ratio).
 
-    A `confirms=False, ratio=0.0` is returned for missing/insufficient data
-    — caller should treat that as "no confirmation" (block in strict mode,
-    allow in log-only mode).
+    Three semantically distinct results:
+      (True,  ratio≥mult)  : volume confirms — sufficient data + meets threshold
+      (False, ratio<mult)  : volume rejects — sufficient data + below threshold
+      (True,  0.0)         : INSUFFICIENT DATA — no opinion → caller allows
+
+    Audit fix (2026-05-07): previously returned (False, 0.0) for missing
+    data, which the orchestrator treated as a veto. This caused systematic
+    false-veto storms in the first ~30 minutes of every session (when the
+    20-candle rolling baseline isn't yet populated). Now returns (True, 0.0)
+    to fail-open on missing data — consistent with how the rest of the
+    candle engine handles unavailable data (see `no_candle_data` path).
     """
     if not candles or len(candles) < (lookback + 1):
-        return False, 0.0
+        return True, 0.0  # insufficient history → no opinion, allow
     try:
         latest_vol = float(candles[-1].get("volume") or 0)
         prior = candles[-(lookback + 1):-1]
         vols = [float(c.get("volume") or 0) for c in prior]
         avg = sum(vols) / len(vols) if vols else 0.0
         if avg <= 0:
-            return False, 0.0
+            return True, 0.0  # zero baseline → no opinion, allow
         ratio = latest_vol / avg
         return ratio >= multiplier, ratio
     except Exception:
-        return False, 0.0
+        return True, 0.0  # parse error → no opinion, allow (fail-open)
 
 
 def is_within_candle_settling_window(seconds: int = 60, interval_min: int = 5,
@@ -371,7 +378,10 @@ def check_candle_filters(symbol: str, side: str) -> tuple[bool, str, dict]:
         confirms, ratio = check_volume_confirmation(candles, multiplier=mult)
         ctx["volume_ratio"] = round(ratio, 2)
         ctx["volume_threshold"] = mult
-        if not confirms:
+        # Audit fix (2026-05-07): only veto when we have actual data showing
+        # ratio is below threshold. (True, 0.0) means insufficient data and
+        # the function now fail-opens — caller must respect that contract.
+        if not confirms and ratio > 0:
             return False, f"volume_below_{mult}x", ctx
 
     return True, "ok", ctx
