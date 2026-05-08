@@ -4683,6 +4683,31 @@ def reconcile_broker_positions():
     except Exception as e:
         append_log("WARN", "RECON", f"broker position fetch failed: {e}")
         return
+
+    # Audit fix (2026-05-08): also fetch broker holdings.
+    # Zerodha returns settled CNC positions (T+1+) under .holdings(), not .positions().
+    # Without this, multi-day CNC swing positions (HYBRID-to-CNC trades from prior
+    # sessions) appear "missing" and get incorrectly marked RECON_BROKER_FLAT,
+    # producing phantom reconciled_external entries (e.g. HAL on 2026-05-08).
+    holdings_list = []
+    if bool(_cfg_get("USE_HOLDINGS_RECONCILE", True)):
+        try:
+            cache_ttl = float(_cfg_get("HOLDINGS_CACHE_TTL_SEC", 300) or 300)
+            cached = STATE.get("_holdings_cache")
+            cached_ts = float(STATE.get("_holdings_cache_ts") or 0.0)
+            if cached is not None and (time.time() - cached_ts) < cache_ttl:
+                holdings_list = cached
+            else:
+                holdings_list = list(kite.holdings() or [])
+                STATE["_holdings_cache"] = holdings_list
+                STATE["_holdings_cache_ts"] = time.time()
+        except Exception as e:
+            append_log(
+                "WARN", "RECON",
+                f"broker holdings fetch failed (continuing with positions only): {e}"
+            )
+            holdings_list = list(STATE.get("_holdings_cache") or [])
+
     local = _positions()
     now_ts = datetime.now(IST).isoformat(timespec="seconds")
     broker_map = {}
@@ -4697,6 +4722,35 @@ def reconcile_broker_positions():
         # MIS/CNC handling (force exit, trailing, stoploss widths).
         product = str((p or {}).get("product") or _get_product_for_mode()).upper()
         broker_map[sym] = {"qty": abs(qty), "avg": avg, "side": side, "product": product}
+
+    # Merge holdings into broker_map. Holdings are always CNC LONG.
+    # `quantity` = settled/free, `t1_quantity` = bought today, settled tomorrow.
+    # Both count as "owned." `realised_quantity` is sold-but-unsettled (not owned).
+    for h in (holdings_list or []):
+        sym = str((h or {}).get("tradingsymbol") or "").strip().upper()
+        if not sym:
+            continue
+        qty_settled = int((h or {}).get("quantity") or 0)
+        qty_t1 = int((h or {}).get("t1_quantity") or 0)
+        held_qty = qty_settled + qty_t1
+        if held_qty <= 0:
+            continue
+        avg = float((h or {}).get("average_price") or 0.0)
+        if sym in broker_map:
+            # Symbol exists in BOTH positions (today's intraday/CNC) AND
+            # holdings (overnight CNC). Combine — total exposure is the sum.
+            existing = broker_map[sym]
+            # Only merge if existing is also LONG; mixed long/short is unusual
+            # and we keep the position record (today's trade) authoritative.
+            if existing.get("side") == "BUY":
+                existing["qty"] = int(existing.get("qty") or 0) + held_qty
+        else:
+            broker_map[sym] = {
+                "qty": held_qty,
+                "avg": avg,
+                "side": "BUY",
+                "product": "CNC",
+            }
     # Only remove local positions if broker returned at least one position OR
     # we have confirmed the account is genuinely flat (local also has no positions).
     # This prevents a network glitch / empty response from wiping position memory.
@@ -4751,6 +4805,20 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
     before = _open_positions_count()
 
     def _signal_with_family(cands):
+        # Audit fix (2026-05-08): clear inherited reject state from a prior
+        # family's scan before running THIS family's signal_fn. Without this,
+        # `pullback_long` (and any non-primary family) inherits stale
+        # `mean_reversion_conditions_not_met` rejects left over from
+        # `trend_long`'s fallback chain — producing 177+ mislabeled lines/day
+        # like "family=pullback_long reject=mean_reversion_conditions_not_met".
+        # The primary trend_long path is unaffected because its own
+        # snapshot/restore logic below preserves correct rejects.
+        if cands:
+            for raw_sym in cands:
+                sym_u = str(raw_sym or "").strip().upper()
+                if sym_u:
+                    SE.LAST_SIGNAL_REJECT_REASONS.pop(sym_u, None)
+
         sig = signal_fn(cands)
         if not sig and signal_fn is generate_signal:
             # Snapshot primary-family reject reasons before fallback calls overwrite them.

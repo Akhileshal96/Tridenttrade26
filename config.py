@@ -389,6 +389,15 @@ USE_FAST_STAGE_ENTRY_LIMIT      = _get_bool( "USE_FAST_STAGE_ENTRY_LIMIT",  "tru
 FAST_STAGE_DURATION_MIN         = _get_int(  "FAST_STAGE_DURATION_MIN",     "15")
 FAST_STAGE_MAX_ENTRIES          = _get_int(  "FAST_STAGE_MAX_ENTRIES",      "3")
 
+# ===== HOLDINGS RECONCILIATION (audit fix 2026-05-08) =====
+# Without this, the bot only fetches kite.positions() during reconciliation,
+# missing CNC stocks settled from prior days (which Zerodha keeps under
+# .holdings()). Result: any HYBRID-to-CNC swing held >1 day appears
+# "missing" the next morning and gets incorrectly marked RECON_BROKER_FLAT.
+# 5-min TTL cache reduces API call volume.
+USE_HOLDINGS_RECONCILE          = _get_bool( "USE_HOLDINGS_RECONCILE",      "true")
+HOLDINGS_CACHE_TTL_SEC          = _get_int(  "HOLDINGS_CACHE_TTL_SEC",      "300")
+
 # ===== OHLC PEAK TRACKING =====
 # Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture
 # intra-tick spikes that the 20s sampler misses, giving the trail a true peak.

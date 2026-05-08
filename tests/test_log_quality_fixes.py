@@ -143,7 +143,7 @@ def test_giveback_log_idempotent_within_same_dd_pct_bucket(monkeypatch):
 # lightweight assertion that the fix code is present in source.
 
 def test_signal_with_family_clears_fallback_rejects_for_primary_passed():
-    """Source-presence check: confirms the audit fix lives in
+    """Source-presence check: confirms the trend_long audit fix lives in
     trading_cycle.py and clears LAST_SIGNAL_REJECT_REASONS for cands not in
     primary_rejects (i.e., symbols primary trend_long passed/popped).
     """
@@ -155,3 +155,31 @@ def test_signal_with_family_clears_fallback_rejects_for_primary_passed():
     assert "SE.LAST_SIGNAL_REJECT_REASONS.pop(sym_u, None)" in src
     # And the existing restoration line must still come AFTER the clear
     assert "SE.LAST_SIGNAL_REJECT_REASONS.update(primary_rejects)" in src
+
+
+def test_signal_with_family_clears_inherited_state_for_non_primary_families():
+    """Source-presence check: confirms the 2026-05-08 follow-up fix.
+
+    pullback_long and other non-primary scan families share the same
+    `_signal_with_family` helper. Before the follow-up fix, they inherited
+    `LAST_SIGNAL_REJECT_REASONS` state left behind by the previous family's
+    fallback chain (e.g. trend_long's mean_reversion fallback), producing
+    177+ mislabeled lines/day like:
+      `family=pullback_long ... reject=mean_reversion_conditions_not_met`
+
+    The fix: clear inherited state for the cands list at the START of
+    _signal_with_family, BEFORE calling signal_fn, so each family's reject
+    log reflects only what THAT family's signal_fn actually wrote.
+    """
+    src_path = os.path.join(os.path.dirname(__file__), "..", "trading_cycle.py")
+    with open(src_path, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    # Marker comment for the follow-up fix
+    assert "Audit fix (2026-05-08)" in src
+    # The clear-inherited-state block must come BEFORE the signal_fn call
+    # (we check structurally by source order)
+    pre_run_clear = src.find('SE.LAST_SIGNAL_REJECT_REASONS.pop(sym_u, None)')
+    primary_call = src.find('sig = signal_fn(cands)')
+    assert pre_run_clear < primary_call, (
+        "follow-up fix must clear inherited state BEFORE signal_fn(cands) call"
+    )
