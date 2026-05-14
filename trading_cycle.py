@@ -585,6 +585,14 @@ def _ensure_day_key():
             STATE["reduce_size_factor"] = 1.0
             STATE["pause_entries_until"] = None
             STATE["halt_for_day"] = False
+            # Audit fix (2026-05-13): also reset the kill-switch flag.
+            # Without this, the daily DD kill is single-shot for the lifetime
+            # of the bot — once fired on day N, it stays "already fired" on
+            # days N+1, N+2... preventing the kill from re-protecting future
+            # days. Original bug surfaced in May 11→12 phantom loop: kill
+            # fired May 11 at -₹272, didn't re-fire May 12 even though losses
+            # accumulated again. Reset here so each day gets a fresh kill.
+            STATE["daily_drawdown_kill_fired"] = False
             STATE["day_peak_pnl"] = 0.0
             STATE["sector_map_cache"] = None
             STATE["open_feed_retry_count"] = 0

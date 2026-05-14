@@ -355,3 +355,32 @@ def test_daily_drawdown_kill_idempotent_across_ticks(monkeypatch):
 def test_daily_drawdown_kill_persisted_across_restart():
     """The kill flag must be in _STATE_PERSIST_KEYS so restart doesn't unhalt."""
     assert "daily_drawdown_kill_fired" in CYCLE._STATE_PERSIST_KEYS
+
+
+def test_daily_drawdown_kill_resets_on_day_rollover(monkeypatch):
+    """Audit fix (2026-05-13): kill must re-arm each new trading day.
+
+    Bug context: on May 11, kill fired at -₹272 → halt. Midnight rollover
+    cleared halt_for_day but NOT daily_drawdown_kill_fired. On May 12 when
+    phantom losses accumulated again, the kill was 'already fired' (idempotent
+    skip) and did NOT re-fire — letting losses extend.
+    """
+    _reset_kill_state()
+    # Simulate previous-day kill state carrying forward
+    with CYCLE.STATE_LOCK:
+        CYCLE.STATE["daily_drawdown_kill_fired"] = True
+        CYCLE.STATE["halt_for_day"] = True
+        # Force day_key to be 'yesterday' so _ensure_day_key fires rollover
+        CYCLE.STATE["day_key"] = "1999-01-01"
+        CYCLE.STATE["positions"] = {}
+
+    # Patch out external dependencies so _ensure_day_key runs cleanly
+    monkeypatch.setattr(CYCLE, "load_universe_trading", lambda: [], raising=False)
+    monkeypatch.setattr(CYCLE, "load_universe_live", lambda: [], raising=False)
+
+    CYCLE._ensure_day_key()
+
+    assert CYCLE.STATE.get("halt_for_day") is False
+    assert CYCLE.STATE.get("daily_drawdown_kill_fired") is False, (
+        "kill flag must reset on day rollover; otherwise single-shot for life"
+    )

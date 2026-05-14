@@ -178,6 +178,30 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         # Reset LTP failure counter on successful fetch
         trade.pop(f"_ltp_fail_{sym}", None)
 
+        # CRITICAL audit fix (2026-05-13): skip ALL auto-exit logic for
+        # broker-reconciled positions (tier=RECON / family=reconciled_external).
+        # These positions have stale entry prices (days/weeks old) — using
+        # them in SL/trail/profit math triggers spurious closes that loop
+        # against broker settlement state, generating phantom realized losses
+        # (e.g. May 11 M&M loop: 3× phantom -₹142 closes = -₹426 fake loss).
+        # The bot should TRACK reconciled positions (for status + P&L visibility)
+        # but NOT auto-manage them. User closes manually via Zerodha or /panic.
+        tier_v = str(trade.get("confidence_tier") or "").upper()
+        family_v = str(trade.get("strategy_family") or "").lower()
+        if (
+            bool(getattr(CFG, "SKIP_AUTO_EXIT_FOR_RECON", True))
+            and (tier_v == "RECON" or family_v == "reconciled_external")
+        ):
+            # Still keep peak_pnl_inr updated for diagnostics, but no exits.
+            side_r = str(trade.get("side") or "LONG").upper()
+            if side_r == "SHORT":
+                pnl_inr_r = (entry - ltp) * qty
+            else:
+                pnl_inr_r = (ltp - entry) * qty
+            peak_r = float(trade.get("peak_pnl_inr") or 0.0)
+            trade["peak_pnl_inr"] = max(peak_r, pnl_inr_r)
+            continue
+
         # Skip time-based exit for CNC (swing) trades — they hold overnight.
         trade_product = str(trade.get("product") or "MIS").upper()
         if trade_product != "CNC" and check_time_exit(force_exit_check):

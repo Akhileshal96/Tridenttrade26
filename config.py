@@ -398,6 +398,22 @@ FAST_STAGE_MAX_ENTRIES          = _get_int(  "FAST_STAGE_MAX_ENTRIES",      "3")
 USE_HOLDINGS_RECONCILE          = _get_bool( "USE_HOLDINGS_RECONCILE",      "true")
 HOLDINGS_CACHE_TTL_SEC          = _get_int(  "HOLDINGS_CACHE_TTL_SEC",      "300")
 
+# ===== RECONCILED POSITION AUTO-EXIT POLICY (CRITICAL audit fix 2026-05-13) =====
+# When True, the bot SKIPS all auto-exit logic (PER_TRADE_MAX_LOSS, SL_ATR,
+# fixed SL, trail, profit target, FAILED_DEV, EARLY_NO_MOVE, TIME_DECAY,
+# HALT_LOSER_FORCE_CLOSE) for reconciled positions (tier=RECON /
+# family=reconciled_external).
+#
+# Why: reconciled positions have STALE entry prices (broker's original avg
+# from days/weeks ago). Risk math computed against stale entries triggers
+# spurious closes that conflict with broker settlement state, producing
+# phantom realized losses (e.g. May 11 M&M loop: 3× phantom -₹142 closes).
+#
+# Bot still TRACKS reconciled positions (status display + peak P&L), just
+# doesn't auto-manage them. User closes manually via Zerodha or /panic.
+# Set false to revert to pre-fix behavior (NOT recommended).
+SKIP_AUTO_EXIT_FOR_RECON        = _get_bool( "SKIP_AUTO_EXIT_FOR_RECON",    "true")
+
 # ===== OHLC PEAK TRACKING =====
 # Once per OHLC_PEAK_REFRESH_SEC, fetch 1-min candles since entry to capture
 # intra-tick spikes that the 20s sampler misses, giving the trail a true peak.
