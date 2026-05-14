@@ -55,6 +55,17 @@ TRADING_MODE = _get_str("TRADING_MODE", "INTRADAY").upper()
 # RISK_PROFILE: STANDARD (current safe behavior) | GOD (neutralizes bot-imposed soft caps
 # but NEVER bypasses wallet/broker/affordability/market-protection/kill-switch)
 RISK_PROFILE = _get_str("RISK_PROFILE", "STANDARD").upper()
+
+# ===== HYBRID MODE GATE (audit decision 2026-05-15) =====
+# HYBRID routes "strong long continuation" entries to SWING/CNC. Audit found
+# this DESIGN FLAW: CNC positions skip every fast-exit guard (PER_TRADE_MAX_LOSS,
+# EARLY_NO_MOVE, FAILED_DEV, TIME_DECAY, HALT_LOSER, 15:10 force-exit) and get
+# 1.5x-widened stops + overnight gap exposure. With no validated entry edge,
+# HYBRID systematically converts ~50/50 trades into wide-stop, slow-bleed,
+# overnight-exposed positions (see HAL: held 7 days at a loss).
+# Disabled until a backtest specifically validates multi-day continuation edge.
+# When False, _normalize_trading_mode collapses HYBRID -> INTRADAY everywhere.
+ENABLE_HYBRID_MODE = _get_bool("ENABLE_HYBRID_MODE", "false")
 TICK_SECONDS = _get_int("TICK_SECONDS", "20")
 
 # ===== GOD PROFILE OVERRIDES =====
@@ -79,9 +90,11 @@ GOD_BUCKET_CEIL_PCT                  = _get_float("GOD_BUCKET_CEIL_PCT",        
 GOD_MAX_CONCURRENT_TRADES            = _get_int(  "GOD_MAX_CONCURRENT_TRADES",            "8")
 # Higher risk budget per trade
 GOD_RISK_PER_TRADE_PCT               = _get_float("GOD_RISK_PER_TRADE_PCT",               "3.0")
-# Re-entry cooldown: 5 min minimum even in GOD — prevents immediate re-entry into a
-# stopped-out position before the setup has had time to resolve.
-GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",            "5")
+# Re-entry cooldown in GOD mode. Raised 5→15 (audit fix 2026-05-15): 5 min was
+# far too short — combined with the momentum-bypass hole it let INFY get
+# re-entered 7× in 67 min on 2026-05-14. 15 min gives a stopped-out setup
+# real time to resolve before the bot is allowed back in.
+GOD_REENTRY_BLOCK_MINUTES            = _get_int(  "GOD_REENTRY_BLOCK_MINUTES",            "15")
 # Profit drawdown guards relaxed (not removed) in GOD mode
 GOD_DAY_PROFIT_GIVEBACK_HALT_PCT     = _get_float("GOD_DAY_PROFIT_GIVEBACK_HALT_PCT",     "75")
 GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT    = _get_float("GOD_DAY_PROFIT_GIVEBACK_PAUSE_PCT",    "55")
@@ -139,6 +152,21 @@ COOLDOWN_SECONDS = _get_int("COOLDOWN_SECONDS", "120")
 COOLDOWN_FULL_SECONDS = _get_int("COOLDOWN_FULL_SECONDS", "45")
 COOLDOWN_REDUCED_SECONDS = _get_int("COOLDOWN_REDUCED_SECONDS", "75")
 REENTRY_BLOCK_MINUTES = _get_int("REENTRY_BLOCK_MINUTES", "30")
+
+# ===== RE-ENTRY HOLE FIX (audit fix 2026-05-15) =====
+# Bug: _can_open_new_trade bypassed the per-symbol re-entry block whenever
+# `momentum_positive` was true. momentum_positive = momentum_pct > threshold,
+# and the threshold (REENTRY_MOMENTUM_MIN_PCT) was NEVER DEFINED — getattr
+# defaulted it to 0.0. So ANY symbol not actively falling (momentum > 0.0%)
+# bypassed the block. Result: INFY entered 7× in 67 min on 2026-05-14.
+# Fix: define a MEANINGFUL threshold so only genuine momentum bypasses.
+REENTRY_MOMENTUM_MIN_PCT = _get_float("REENTRY_MOMENTUM_MIN_PCT", "0.40")
+
+# Hard cap: max entries into the SAME symbol per trading day. The momentum
+# bypass + short GOD re-entry block could otherwise let one symbol be traded
+# 7-15× in a session (revenge-trading pattern). This is the backstop —
+# independent of momentum, cooldown, or profile. Set 0 to disable.
+MAX_ENTRIES_PER_SYMBOL_PER_DAY = _get_int("MAX_ENTRIES_PER_SYMBOL_PER_DAY", "3")
 # ===== SLIPPAGE GUARD =====
 MAX_ENTRY_SLIPPAGE_PCT = _get_float("MAX_ENTRY_SLIPPAGE_PCT", "0.30")
 
@@ -397,6 +425,14 @@ FAST_STAGE_MAX_ENTRIES          = _get_int(  "FAST_STAGE_MAX_ENTRIES",      "3")
 # 5-min TTL cache reduces API call volume.
 USE_HOLDINGS_RECONCILE          = _get_bool( "USE_HOLDINGS_RECONCILE",      "true")
 HOLDINGS_CACHE_TTL_SEC          = _get_int(  "HOLDINGS_CACHE_TTL_SEC",      "300")
+
+# ===== SWING MAX-HOLD (audit fix #3, 2026-05-15) =====
+# Force-close CNC/swing positions held longer than SWING_MAX_HOLD_DAYS
+# calendar days. Closes the "HAL held 7 days, forgotten" gap — a swing
+# position with no exit trigger can otherwise sit indefinitely. Time-based
+# (not price-based) so it safely applies even to tier=RECON positions.
+USE_SWING_MAX_HOLD              = _get_bool( "USE_SWING_MAX_HOLD",          "true")
+SWING_MAX_HOLD_DAYS             = _get_int(  "SWING_MAX_HOLD_DAYS",         "7")
 
 # ===== RECONCILED POSITION AUTO-EXIT POLICY (CRITICAL audit fix 2026-05-13) =====
 # When True, the bot SKIPS all auto-exit logic (PER_TRADE_MAX_LOSS, SL_ATR,

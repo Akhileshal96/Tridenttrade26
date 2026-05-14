@@ -324,10 +324,18 @@ def generate_signal(universe):
                         append_log("INFO", "SIG", f"{sym} ADX={adx_val:.1f} (min={adx_min:.0f}) OK")
 
                 signal_score = _score_momentum_setup(last, trigger, rel_vol, avg, sma_prev, atr)
+                # Log clarity fix (2026-05-15): renamed "BUY trigger" -> "BUY candidate".
+                # This line only means the symbol passed the price+ADX precondition
+                # and was added to the candidate pool — it is NOT an entry. Only the
+                # top-ranked candidate above MIN_SCORE_TREND_LONG actually trades.
+                # The old label made operators think the bot was "missing" entries
+                # (e.g. RELIANCE logged 296 "BUY trigger" lines on 2026-05-04 but
+                # correctly never traded — low momentum score, never ranked #1).
                 append_log(
                     "INFO",
                     "SIG",
-                    f"{sym} BUY trigger last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} trigger={trigger:.2f}",
+                    f"{sym} BUY candidate last={last:.2f} sma20={avg:.2f} buffer={buffer:.4f} "
+                    f"trigger={trigger:.2f} score={signal_score:.4f} (ranked vs other candidates)",
                 )
                 candidates.append({
                     "symbol": sym,
@@ -423,7 +431,7 @@ def generate_mean_reversion_signal(universe):
             append_log(
                 "INFO",
                 "SIG",
-                f"{sym} MR BUY trigger last={last:.2f} rsi={rsi_last:.2f} lower_bb={lower:.2f} setup={'RSI' if rsi_setup else 'BB_BOUNCE'}",
+                f"{sym} MR BUY candidate last={last:.2f} rsi={rsi_last:.2f} lower_bb={lower:.2f} setup={'RSI' if rsi_setup else 'BB_BOUNCE'} (ranked vs other candidates)",
             )
             candidates.append({
                 "symbol": sym,

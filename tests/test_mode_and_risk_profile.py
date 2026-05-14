@@ -55,6 +55,13 @@ def _patch_bot_perms(monkeypatch):
 
 
 def _reset_state(profile="STANDARD", mode="INTRADAY"):
+    # Audit 2026-05-15: HYBRID is gated off by default (ENABLE_HYBRID_MODE=false)
+    # because of the design flaw where CNC/SWING positions skip every fast-exit
+    # guard. The HYBRID *code path* still exists and must stay correct for if/when
+    # a backtest re-validates it — so tests that set up a HYBRID scenario enable
+    # the gate, and every other test sees it off (the production default).
+    # _reset_state keeps CFG.ENABLE_HYBRID_MODE in lockstep with each test's mode.
+    CFG.ENABLE_HYBRID_MODE = (str(mode).upper() == "HYBRID")
     with CYCLE.STATE_LOCK:
         CYCLE.STATE["trading_mode"] = mode
         CYCLE.STATE["risk_profile"] = profile
@@ -75,10 +82,25 @@ async def _run(cmd_word, cmd_arg="", sender=1001):
 def test_01_mode_hybrid_updates_runtime(monkeypatch):
     _patch_bot_perms(monkeypatch)
     _reset_state()
+    # HYBRID is gated off by default (audit 2026-05-15). This test specifically
+    # exercises the /mode hybrid command path, so enable the gate.
+    monkeypatch.setattr(CFG, "ENABLE_HYBRID_MODE", True, raising=False)
     handled, ev = asyncio.run(_run("/mode", "hybrid"))
     assert handled is True
     assert CYCLE.current_trading_mode() == "HYBRID"
     assert any("HYBRID" in r for r in ev.replies)
+
+
+def test_01b_mode_hybrid_collapses_to_intraday_when_gated_off(monkeypatch):
+    """Production default: HYBRID gated off → /mode hybrid lands on INTRADAY."""
+    _patch_bot_perms(monkeypatch)
+    _reset_state()
+    monkeypatch.setattr(CFG, "ENABLE_HYBRID_MODE", False, raising=False)
+    handled, ev = asyncio.run(_run("/mode", "hybrid"))
+    assert handled is True
+    assert CYCLE.current_trading_mode() == "INTRADAY", (
+        "with HYBRID gated off, /mode hybrid must collapse to INTRADAY"
+    )
 
 
 def test_02_intraday_mode_routes_buy_to_mis(monkeypatch):
@@ -452,6 +474,9 @@ def test_23_persistence_round_trip_same_day(monkeypatch, tmp_path):
     """Save snapshot today, load it back today — mode and profile restore intact."""
     snap_file = tmp_path / "state_snapshot.json"
     monkeypatch.setattr(CYCLE, "_STATE_SNAPSHOT_PATH", str(snap_file))
+    # HYBRID gated off by default; this test deliberately round-trips a HYBRID
+    # snapshot, so enable the gate for the duration of the test.
+    monkeypatch.setattr(CFG, "ENABLE_HYBRID_MODE", True, raising=False)
 
     # Configure source state
     with CYCLE.STATE_LOCK:

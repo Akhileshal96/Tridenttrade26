@@ -58,6 +58,9 @@ STATE = {
     "last_exit_ts": {},
     "trail_reentry": {},
     "skip_cooldown": {},
+    # Per-symbol entry count for the current trading day. Reset on day
+    # rollover. Backstops the re-entry hole (audit fix 2026-05-15).
+    "symbol_entry_count_today": {},
     "loss_streak": 0,
     "consecutive_wins": 0,
     "reduce_size_factor": 1.0,
@@ -163,6 +166,9 @@ _STATE_PERSIST_KEYS = [
     "trading_mode",
     "risk_profile",
     "daily_drawdown_kill_fired",
+    # Audit fix (2026-05-15): persist per-symbol entry counts so a same-day
+    # restart can't reset the cap and let a symbol be re-traded past the limit.
+    "symbol_entry_count_today",
 ]
 
 
@@ -593,6 +599,14 @@ def _ensure_day_key():
             # fired May 11 at -₹272, didn't re-fire May 12 even though losses
             # accumulated again. Reset here so each day gets a fresh kill.
             STATE["daily_drawdown_kill_fired"] = False
+            # Audit fix (2026-05-15): reset the per-symbol daily entry count
+            # so the MAX_ENTRIES_PER_SYMBOL_PER_DAY cap re-arms each session.
+            STATE["symbol_entry_count_today"] = {}
+            # Audit fix (2026-05-15): reset the once-per-trip log-spam guards
+            # so the next day's first daily-loss-guard / giveback-guard trip
+            # logs again instead of staying silent from a stale flag.
+            STATE["_daily_loss_guard_logged"] = False
+            STATE["_giveback_log_last_action"] = ""
             STATE["day_peak_pnl"] = 0.0
             STATE["sector_map_cache"] = None
             STATE["open_feed_retry_count"] = 0
@@ -1378,7 +1392,15 @@ def _normalize_trading_mode(m) -> str:
         return "INTRADAY"
     if m in ("CNC", "DELIVERY"):
         return "SWING"
-    return m if m in _VALID_MODES else "INTRADAY"
+    norm = m if m in _VALID_MODES else "INTRADAY"
+    # Audit decision (2026-05-15): HYBRID is gated off until a backtest
+    # validates multi-day continuation edge. This single chokepoint collapses
+    # HYBRID -> INTRADAY everywhere — current_trading_mode(), classify_trade_mode(),
+    # set_trading_mode() all route through here, so `/mode hybrid` silently
+    # becomes INTRADAY and any persisted HYBRID state is neutralised on load.
+    if norm == "HYBRID" and not bool(getattr(CFG, "ENABLE_HYBRID_MODE", False)):
+        return "INTRADAY"
+    return norm
 
 
 def _normalize_risk_profile(p) -> str:
@@ -1970,6 +1992,22 @@ def _can_open_new_trade(sym, entry, qty=1, momentum_positive=False):
     if _skip_cooldown_active(sym):
         append_log("INFO", "SKIP", f"{sym} reason=skip_cooldown")
         return False
+
+    # Audit fix (2026-05-15): per-symbol daily entry cap — HARD backstop.
+    # Checked BEFORE the momentum-bypass logic below, so it cannot be
+    # bypassed by positive momentum or trail-reentry eligibility. This is
+    # the safety net that stops the INFY-×7 revenge-trading pattern even
+    # if the momentum threshold and re-entry block are both misconfigured.
+    sym_cap = int(_cfg_get("MAX_ENTRIES_PER_SYMBOL_PER_DAY", 3) or 0)
+    if sym_cap > 0:
+        with STATE_LOCK:
+            sym_count = int((STATE.get("symbol_entry_count_today") or {}).get(sym) or 0)
+        if sym_count >= sym_cap:
+            append_log(
+                "WARN", "SKIP",
+                f"{sym} reason=symbol_daily_cap count={sym_count} cap={sym_cap}",
+            )
+            return False
 
     # Check if this symbol is eligible for re-entry after a trail exit.
     # Eligible when price has moved favorably past the trail-exit price + buffer,
@@ -3448,7 +3486,7 @@ def _record_signal_seen():
     _prune_micro_mode_events(now_ts)
 
 
-def _record_entry_executed():
+def _record_entry_executed(sym: str | None = None):
     now_ts = time.time()
     events = list(STATE.get("entry_event_ts") or [])
     events.append(now_ts)
@@ -3456,6 +3494,15 @@ def _record_entry_executed():
     _prune_micro_mode_events(now_ts)
     if bool(STATE.get("micro_mode_active")):
         STATE["micro_mode_trade_count"] = int(STATE.get("micro_mode_trade_count") or 0) + 1
+    # Audit fix (2026-05-15): per-symbol daily entry count — backstops the
+    # re-entry hole. Incremented here so it covers BOTH the BUY and SHORT
+    # entry paths (both call _record_entry_executed after a fill).
+    if sym:
+        sym_u = str(sym).strip().upper()
+        if sym_u:
+            with STATE_LOCK:
+                counts = STATE.setdefault("symbol_entry_count_today", {})
+                counts[sym_u] = int(counts.get(sym_u) or 0) + 1
 
 
 def _is_micro_mode_active() -> bool:
@@ -3872,7 +3919,7 @@ def _maybe_enter_short_from_signal(sig):
     if _is_micro_mode_active() and decision.get("tier") == "MICRO":
         append_log("INFO", "MICRO", f"executing symbol={sym} score={decision['score']} size={int(round(tier_mult * 100))}%")
     _notify(f"🟠 SHORT {mode}\nSymbol: {sym}\nQuantity: {qty}\nEntry: {booked_entry:.2f}")
-    _record_entry_executed()
+    _record_entry_executed(sym)
     return True
 
 def _maybe_enter_from_signal(sig):
@@ -4247,7 +4294,7 @@ def _maybe_enter_from_signal(sig):
         f"Entry: {booked_entry:.2f}\n"
         f"Wallet: {float(STATE.get('wallet_net_inr') or 0.0):.2f}"
     )
-    _record_entry_executed()
+    _record_entry_executed(sym)
     return True
 
 
@@ -4891,6 +4938,58 @@ def _scan_long_entries(universe: list, max_new: int, signal_fn=generate_signal, 
     )
     return max(0, _open_positions_count() - before)
 
+def _check_swing_max_hold() -> int:
+    """Audit fix #3 (2026-05-15): force-close CNC/swing positions held longer
+    than SWING_MAX_HOLD_DAYS calendar days.
+
+    Why a tick()-level sweep (not part of monitor_positions): this is a
+    TIME-based exit, not price-based. It runs even on tier=RECON positions
+    (which monitor_positions deliberately skips) because a stale time-based
+    close cannot create the phantom price-loop the RECON skip was added to
+    prevent. Closes the "HAL held 7 days and forgotten" gap from the HYBRID
+    audit. Returns the number of positions force-closed.
+    """
+    if not bool(_cfg_get("USE_SWING_MAX_HOLD", True)):
+        return 0
+    max_days = float(_cfg_get("SWING_MAX_HOLD_DAYS", 7) or 0)
+    if max_days <= 0:
+        return 0
+    now = datetime.now(IST)
+    closed = 0
+    for sym, tr in list(_positions().items()):
+        try:
+            product = str((tr or {}).get("product") or "MIS").upper()
+            if product != "CNC":
+                continue  # only swing/CNC positions are held multi-day
+            entry_time_str = str((tr or {}).get("entry_time") or "")
+            if not entry_time_str:
+                continue
+            entry_dt = datetime.fromisoformat(entry_time_str)
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=IST)
+            held_days = (now - entry_dt).total_seconds() / 86400.0
+            if held_days >= max_days:
+                append_log(
+                    "WARN", "EXIT",
+                    f"{sym} SWING_MAX_HOLD held_days={held_days:.1f} "
+                    f"limit={max_days:.0f} product=CNC — force-closing stale swing position",
+                )
+                _close_position(sym, reason="SWING_MAX_HOLD")
+                closed += 1
+        except Exception as exc:
+            append_log("WARN", "EXIT", f"swing_max_hold check failed for {sym}: {exc}")
+    if closed:
+        try:
+            _notify(
+                f"⏳ Swing max-hold exit\n"
+                f"Force-closed {closed} CNC position(s) held > {max_days:.0f} days.\n"
+                f"Stale swing positions don't get auto-managed — this is the backstop."
+            )
+        except Exception:
+            pass
+    return closed
+
+
 def _check_daily_drawdown_kill_switch() -> bool:
     """Audit fix #8: independent percentage-of-wallet kill-switch.
 
@@ -4956,6 +5055,8 @@ def tick():
     RISK.check_day_drawdown_guard(STATE, risk_profile=current_risk_profile())
     # Audit fix #8: %-wallet kill-switch (complements absolute INR cap above)
     _check_daily_drawdown_kill_switch()
+    # Audit fix #3 (2026-05-15): force-close stale CNC/swing positions.
+    _check_swing_max_hold()
 
     if _past_force_exit_time() and _positions():
         if not STATE.get("force_exit_done"):

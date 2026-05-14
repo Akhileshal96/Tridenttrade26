@@ -23,18 +23,33 @@ class ISTFormatter(logging.Formatter):
 logger = logging.getLogger("Trident")
 logger.setLevel(_level())
 
+# Log-hygiene fix (2026-05-15): when running under pytest, do NOT attach the
+# rotating file handler. Previously the test suite's append_log() calls wrote
+# straight into the production logs/trident.log — polluting it with test
+# symbols (MNM, ABC, BHEL) and confusing live-log audits. Detection: pytest
+# is in sys.modules during collection (it imports test files -> trading_cycle
+# -> log_store while pytest is already loaded). Override with
+# TRIDENT_LOG_TO_FILE=true/false if ever needed.
+_UNDER_PYTEST = ("pytest" in sys.modules) or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+_LOG_TO_FILE = os.getenv(
+    "TRIDENT_LOG_TO_FILE", "false" if _UNDER_PYTEST else "true"
+).strip().lower() in ("1", "true", "yes", "on")
+
 if not logger.handlers:
     fmt = ISTFormatter("%(asctime)s | %(levelname)s | %(message)s")
 
-    # Rotating file handler: 5 MB per file, keep 5 backups (25 MB total max)
-    fh = logging.handlers.RotatingFileHandler(
-        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    fh.setLevel(_level())
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
+    # Rotating file handler: 5 MB per file, keep 5 backups (25 MB total max).
+    # Skipped under pytest so the test suite never touches the live log file.
+    if _LOG_TO_FILE:
+        fh = logging.handlers.RotatingFileHandler(
+            LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+        )
+        fh.setLevel(_level())
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
 
     # Console handler -> appears in `journalctl -u trident -f`
+    # (pytest captures stdout itself, so this is harmless under tests)
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(_level())
     ch.setFormatter(fmt)

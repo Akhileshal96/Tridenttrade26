@@ -159,7 +159,13 @@ def check_day_drawdown_guard(state: dict, risk_profile: str = "STANDARD"):
     if loss_cap > 0 and pnl <= -loss_cap:
         state["halt_for_day"] = True
         state["day_guard_reason"] = "daily_loss_guard"
-        append_log("WARN", "DAY", f"daily_loss_guard triggered loss={pnl:.2f} cap={loss_cap:.2f} action=halt_for_day")
+        # Log-spam fix (2026-05-15): this runs every tick (~20s) once tripped.
+        # Without state-change detection it re-emits the WARN endlessly
+        # (100s of times/session). Emit once per trip; _ensure_day_key resets
+        # the flag on rollover so the next day's first trip logs again.
+        if not state.get("_daily_loss_guard_logged"):
+            append_log("WARN", "DAY", f"daily_loss_guard triggered loss={pnl:.2f} cap={loss_cap:.2f} action=halt_for_day")
+            state["_daily_loss_guard_logged"] = True
         return False
 
     if peak <= 0:
