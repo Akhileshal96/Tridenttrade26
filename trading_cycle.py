@@ -251,6 +251,39 @@ def _load_state_snapshot() -> None:
                         # inherits a "close after 1 more failure" state.
                         cleaned = {pk: pv for pk, pv in ptrade.items()
                                    if not pk.startswith("_ltp_fail_")}
+                        # Also clear the once-per-session emergency-close
+                        # flag so a restart re-arms emergency-close.
+                        cleaned.pop("_emergency_close_fired", None)
+                        # Audit fix (2026-05-16): normalize the `side` field.
+                        # Historical reconcilers stored side as "BUY"/"SHORT"
+                        # asymmetrically (see trading_cycle._reconcile_with_broker
+                        # `side = "BUY" if qty > 0 else "SHORT"`). Mixing that
+                        # with _close_position's `close_side = "BUY" if side ==
+                        # "SHORT" else "SELL"` is robust for "BUY", but if any
+                        # stale snapshot has side="SELL" or side="LONG", we
+                        # canonicalize here. Friday May 15 HAL spam logged
+                        # "Placing BUY 1x HAL" 1,845 times — implies side was
+                        # stored as SHORT for a position that is actually LONG.
+                        # If the stored side disagrees with stored sign of qty
+                        # or with last-known unrealized direction, force LONG.
+                        raw_side = str(cleaned.get("side") or "").upper()
+                        if raw_side in ("LONG", "BUY", "B"):
+                            cleaned["side"] = "BUY"
+                        elif raw_side in ("SHORT", "SELL", "S"):
+                            # For RECON / holdings (long-only by definition),
+                            # force BUY — holdings cannot be short.
+                            tier = str(cleaned.get("confidence_tier") or "").upper()
+                            family = str(cleaned.get("strategy_family") or "").lower()
+                            product = str(cleaned.get("product") or "MIS").upper()
+                            if (tier == "RECON" or family == "reconciled_external") and product == "CNC":
+                                append_log(
+                                    "WARN", "STATE",
+                                    f"normalized stale side={raw_side} → BUY on RECON CNC position {psym} "
+                                    f"(holdings cannot be SHORT)",
+                                )
+                                cleaned["side"] = "BUY"
+                            else:
+                                cleaned["side"] = "SHORT"
                         # In SWING mode drop any MIS positions — they should
                         # have been force-exited at market close and have no
                         # business surviving into a new SWING session.
@@ -1622,6 +1655,16 @@ def _place_live_order(kite, sym, side, qty, product_override: str | None = None)
                 return place_order_safe(kite, **kwargs)
             except Exception as e:
                 msg = str(e)
+                # Audit fix (2026-05-16): fail fast on auth errors. The retry
+                # loop (3× with 0.25-0.5s backoff) can't recover an expired
+                # token — only the TOTP renewal scheduler can. Friday May 15
+                # HAL loop emitted 1,845 auth-failure ERROR lines (3 retries ×
+                # 615 emergency-close cycles) before the 08:15 IST renewal.
+                # Bail at retry 0 so we get 1 ERROR line per attempt, not 3.
+                lmsg = msg.lower()
+                if "api_key" in lmsg or "access_token" in lmsg or "401" in msg:
+                    append_log("ERROR", "ORDER", f"auth_failure {sym} {side} qty={qty} product={product} — skipping retries: {e}")
+                    return None
                 if "429" in msg and i < (retries - 1):
                     append_log("WARN", "ORDER", f"429 retry {i+1}/{retries} for {sym} {side}")
                     time.sleep(backoff * (2 ** i))
@@ -4753,9 +4796,22 @@ def reconcile_broker_positions():
             if cached is not None and (time.time() - cached_ts) < cache_ttl:
                 holdings_list = cached
             else:
-                holdings_list = list(kite.holdings() or [])
-                STATE["_holdings_cache"] = holdings_list
-                STATE["_holdings_cache_ts"] = time.time()
+                fresh = list(kite.holdings() or [])
+                # Audit fix (2026-05-16): only update cache on a NON-EMPTY
+                # fetch. kite.holdings() can transiently return [] on
+                # weekends, holidays, or right after market close — caching
+                # the empty result poisons the next 5 min of recon and makes
+                # the bot believe legitimate holdings (e.g. HAL) don't exist.
+                # If the fresh call returned empty AND we have a non-stale
+                # cache, prefer the cache over the empty response.
+                if fresh:
+                    holdings_list = fresh
+                    STATE["_holdings_cache"] = fresh
+                    STATE["_holdings_cache_ts"] = time.time()
+                elif cached:
+                    holdings_list = cached
+                else:
+                    holdings_list = []
         except Exception as e:
             append_log(
                 "WARN", "RECON",
@@ -4812,8 +4868,17 @@ def reconcile_broker_positions():
     local_count = len(local)
     broker_count = len(broker_map)
     if local_count > 0 and broker_count == 0:
-        append_log("WARN", "RECON", f"broker returned 0 positions but local has {local_count} — skipping removal to protect local state")
+        # Audit fix (2026-05-16): emit ONCE per state-transition, not every
+        # tick. On weekends/holidays kite.holdings() can return empty for
+        # hours (~20s ticks = 180 lines/hour). Flag clears on next successful
+        # non-empty broker fetch so a genuine future disconnect re-warns.
+        if not STATE.get("_recon_broker_empty_logged"):
+            append_log("WARN", "RECON", f"broker returned 0 positions but local has {local_count} — skipping removal to protect local state")
+            STATE["_recon_broker_empty_logged"] = True
         return
+    # Reset the once-per-trip flag now that broker is reporting positions again.
+    if STATE.get("_recon_broker_empty_logged"):
+        STATE["_recon_broker_empty_logged"] = False
     for sym, bp in broker_map.items():
         if sym in local:
             tr = dict(local.get(sym) or {})

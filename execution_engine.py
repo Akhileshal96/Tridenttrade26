@@ -8,6 +8,14 @@ from log_store import append_log
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _is_market_hours(now: datetime) -> bool:
+    """09:15 – 15:30 IST. Duplicated from trading_cycle to avoid the
+    circular import; one tiny function is cheaper than the dependency."""
+    start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return start <= now <= end
+
+
 def check_time_exit(force_exit_check) -> bool:
     return bool(force_exit_check())
 
@@ -152,31 +160,71 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
     trail_lock_ratio = float(getattr(CFG, "TRAIL_LOCK_RATIO", 0.5))
     trail_buffer_inr = float(getattr(CFG, "TRAIL_BUFFER_INR", 1.0))
 
+    # Audit fix (2026-05-16): compute market-hours flag once per tick.
+    # Used to gate the LTP-unavailable emergency-close path so a pre-market
+    # data outage doesn't spam orders (see Friday May 15 HAL loop: 1,845
+    # failed BUY attempts in 3h 44m, only stopped by token expiry).
+    now = datetime.now(IST)
+    in_market_hours = _is_market_hours(now)
+
     for sym, trade in list((positions or {}).items()):
         entry = float(trade.get("entry") or trade.get("entry_price") or 0.0)
         qty = int(trade.get("qty") or trade.get("quantity") or 1)
         if entry <= 0:
             continue
 
+        # CRITICAL audit fix (2026-05-16): determine RECON status BEFORE any
+        # LTP / exit logic. RECON positions (tier=RECON, family=
+        # reconciled_external) are explicitly opted out of all auto-exit
+        # paths, but the old code checked them AFTER the LTP-unavailable
+        # handler — so a pre-market LTP gap on a held holding (e.g. HAL)
+        # triggered emergency_close every cycle. The Friday May 15 spam
+        # loop fired 615 emergency closes producing 1,845 BUY order
+        # attempts before the auth token recovered.
+        tier_v = str(trade.get("confidence_tier") or "").upper()
+        family_v = str(trade.get("strategy_family") or "").lower()
+        is_recon = (
+            bool(getattr(CFG, "SKIP_AUTO_EXIT_FOR_RECON", True))
+            and (tier_v == "RECON" or family_v == "reconciled_external")
+        )
+
         try:
             ltp = get_ltp(sym)
         except Exception:
             ltp = None
         if ltp is None:
-            # Track consecutive LTP failures per symbol. After 3 consecutive
-            # failures, close position at last known price to avoid holding
-            # a position we can no longer monitor.
+            # RECON positions never auto-close — broker owns the position
+            # regardless of our LTP feed health. Just skip this tick silently
+            # (no fail counter, no spam — recon positions are long-lived and
+            # would otherwise count fails up to thousands overnight).
+            if is_recon:
+                continue
+            # Audit fix (2026-05-16): only run emergency-close during market
+            # hours. Pre/post-market LTP gaps (e.g. 04:30 IST) are predictable,
+            # not emergencies — Zerodha rejects orders outside market hours
+            # anyway, so spamming them just fills the log with auth-error
+            # rejections.
+            if not in_market_hours:
+                continue
             fail_key = f"_ltp_fail_{sym}"
             fails = int(trade.get(fail_key) or 0) + 1
             trade[fail_key] = fails
             append_log("WARN", "LTP", f"{sym} ltp_unavailable consecutive_fails={fails}")
-            if fails >= 3:
+            # Audit fix (2026-05-16): fire emergency close ONCE per session
+            # per symbol. The old code re-fired every cycle past fails>=3
+            # (3, 4, ... 615) because the failed close left the position in
+            # state, the next tick incremented fails, and the threshold
+            # re-tripped. Flag is cleared on the next successful LTP fetch.
+            if fails >= 3 and not trade.get("_emergency_close_fired"):
                 last_entry = float(trade.get("entry") or entry)
+                trade["_emergency_close_fired"] = True
                 append_log("ERROR", "LTP", f"{sym} ltp_unavailable for {fails} cycles → emergency close at entry price")
                 close_position(sym, reason="LTP_UNAVAILABLE", ltp_override=last_entry)
             continue
-        # Reset LTP failure counter on successful fetch
+        # Reset LTP failure counter AND the emergency-close-fired flag on
+        # any successful fetch — feed recovered, re-arm for future outages.
         trade.pop(f"_ltp_fail_{sym}", None)
+        trade.pop("_emergency_close_fired", None)
 
         # CRITICAL audit fix (2026-05-13): skip ALL auto-exit logic for
         # broker-reconciled positions (tier=RECON / family=reconciled_external).
@@ -186,12 +234,7 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
         # (e.g. May 11 M&M loop: 3× phantom -₹142 closes = -₹426 fake loss).
         # The bot should TRACK reconciled positions (for status + P&L visibility)
         # but NOT auto-manage them. User closes manually via Zerodha or /panic.
-        tier_v = str(trade.get("confidence_tier") or "").upper()
-        family_v = str(trade.get("strategy_family") or "").lower()
-        if (
-            bool(getattr(CFG, "SKIP_AUTO_EXIT_FOR_RECON", True))
-            and (tier_v == "RECON" or family_v == "reconciled_external")
-        ):
+        if is_recon:
             # Still keep peak_pnl_inr updated for diagnostics, but no exits.
             side_r = str(trade.get("side") or "LONG").upper()
             if side_r == "SHORT":
