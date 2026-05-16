@@ -426,6 +426,41 @@ FAST_STAGE_MAX_ENTRIES          = _get_int(  "FAST_STAGE_MAX_ENTRIES",      "3")
 USE_HOLDINGS_RECONCILE          = _get_bool( "USE_HOLDINGS_RECONCILE",      "true")
 HOLDINGS_CACHE_TTL_SEC          = _get_int(  "HOLDINGS_CACHE_TTL_SEC",      "300")
 
+# ===== PHANTOM DECAY (audit fix 2026-05-17) =====
+# The "broker returned 0 positions but local has N" guard prevented genuine
+# network glitches from wiping state, but had no time limit — so positions
+# sold via Zerodha (outside the bot) stayed in local state forever. Friday
+# May 15 audit found HAL as such a phantom, inflating reported P&L by ~₹294
+# of fake unrealized. Now: per-symbol "broker_missing_streak" counter; after
+# this many consecutive empty broker responses, accept reality and remove.
+# Default 10 ticks ≈ 3 minutes during market hours (TICK_SECONDS=20).
+PHANTOM_DECAY_TICKS             = _get_int(  "PHANTOM_DECAY_TICKS",         "10")
+
+# ===== ADAPTIVE ROUTER (audit feature 2026-05-17) — "learn from own trades" =====
+# Layer 1: per (strategy_family, market_regime) win-rate monitoring.
+#   If WR < FAMILY_DISABLE_MIN_WR over last FAMILY_DISABLE_LOOKBACK_TRADES
+#   trades (min FAMILY_DISABLE_MIN_N samples), suspend the combo for
+#   FAMILY_SUSPEND_DAYS. After suspension lifts, run FAMILY_REENTRY_PROBE_TRADES
+#   re-test trades at FAMILY_REENTRY_PROBE_SIZE multiplier before full size.
+# Layer 2: per (strategy_family, hour_bucket) win-rate monitoring with
+#   same shape but tighter thresholds and shorter suspension.
+# Safety floors:
+#   - Never suspend more than MAX_DISABLED_FAMILIES at once.
+#   - Always leave at least MIN_OPEN_BUCKETS_PER_FAMILY hour buckets open.
+USE_ADAPTIVE_ROUTER             = _get_bool( "USE_ADAPTIVE_ROUTER",         "true")
+FAMILY_DISABLE_LOOKBACK_TRADES  = _get_int(  "FAMILY_DISABLE_LOOKBACK_TRADES","30")
+FAMILY_DISABLE_MIN_N            = _get_int(  "FAMILY_DISABLE_MIN_N",        "10")
+FAMILY_DISABLE_MIN_WR           = _get_float("FAMILY_DISABLE_MIN_WR",       "35.0")
+FAMILY_SUSPEND_DAYS             = _get_int(  "FAMILY_SUSPEND_DAYS",         "5")
+FAMILY_REENTRY_PROBE_SIZE       = _get_float("FAMILY_REENTRY_PROBE_SIZE",   "0.50")
+FAMILY_REENTRY_PROBE_TRADES     = _get_int(  "FAMILY_REENTRY_PROBE_TRADES", "5")
+BUCKET_DISABLE_LOOKBACK_TRADES  = _get_int(  "BUCKET_DISABLE_LOOKBACK_TRADES","20")
+BUCKET_DISABLE_MIN_N            = _get_int(  "BUCKET_DISABLE_MIN_N",        "10")
+BUCKET_DISABLE_MIN_WR           = _get_float("BUCKET_DISABLE_MIN_WR",       "30.0")
+BUCKET_SUSPEND_DAYS             = _get_int(  "BUCKET_SUSPEND_DAYS",         "3")
+MAX_DISABLED_FAMILIES           = _get_int(  "MAX_DISABLED_FAMILIES",       "2")
+MIN_OPEN_BUCKETS_PER_FAMILY     = _get_int(  "MIN_OPEN_BUCKETS_PER_FAMILY", "1")
+
 # ===== SWING MAX-HOLD (audit fix #3, 2026-05-15) =====
 # Force-close CNC/swing positions held longer than SWING_MAX_HOLD_DAYS
 # calendar days. Closes the "HAL held 7 days, forgotten" gap — a swing

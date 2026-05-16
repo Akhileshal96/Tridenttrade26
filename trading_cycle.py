@@ -809,6 +809,39 @@ def include_symbol(sym):
     return f"ℹ️ {sym} was not in exclusions."
 
 
+def clear_phantom_position(sym):
+    """Manually remove a position from local STATE without sending any
+    broker order. Companion to phantom_decay — for when a symbol stuck
+    in local state needs immediate cleanup (e.g. user sold via Zerodha
+    and doesn't want to wait the PHANTOM_DECAY_TICKS auto-decay).
+
+    Returns a status string suitable for Telegram echo. No-op (with
+    informative message) if the symbol isn't in local state.
+    """
+    sym = (sym or "").strip().upper()
+    if not sym:
+        return "Usage: /clearposition SYMBOL"
+    if sym not in _positions():
+        return f"ℹ️ {sym} is not in local positions — nothing to clear."
+    tr = dict(_positions().get(sym) or {})
+    PM.remove(sym)
+    # Also clear any phantom-decay tracker entry so a subsequent recon
+    # doesn't think we just "decayed" this symbol.
+    streak = STATE.get("_phantom_missing_streak") or {}
+    if sym in streak:
+        streak.pop(sym, None)
+    now_ts = datetime.now(IST).isoformat(timespec="seconds")
+    append_log("WARN", "STATE",
+               f"clear_phantom_position symbol={sym} side={tr.get('side')} "
+               f"qty={tr.get('qty')} entry={tr.get('entry')} — manually removed from local state")
+    _log_trade_event("CLOSE", {**tr, "symbol": sym,
+                               "exit_reason": "MANUAL_CLEAR_PHANTOM",
+                               "exit_time": now_ts})
+    return (f"✅ {sym} removed from local state.\n"
+            f"  side={tr.get('side')} qty={tr.get('qty')} entry={tr.get('entry')}\n"
+            f"  No broker order placed — this only cleans local tracking.")
+
+
 def _atomic_copy(src, dst):
     if not os.path.exists(src):
         return False
@@ -1821,6 +1854,16 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
                 "sector": trade.get("sector") or _sector_for_symbol(sym),
             }
         )
+        # Adaptive router: decrement probe counter if this exit was a probe trade.
+        try:
+            from adaptive_router import record_outcome as _ar_record
+            _ar_record(
+                str(trade.get("strategy_family") or ""),
+                str(trade.get("market_regime") or ""),
+                float(pnl),
+            )
+        except Exception as _e:
+            append_log("WARN", "ALLOC", f"adaptive_router.record_outcome failed: {_e}")
         exit_side = "BUY" if side == "SHORT" else "SELL"
         _notify(f"🔴 {exit_side} PAPER\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
         return True
@@ -1882,6 +1925,16 @@ def _close_position(sym, reason="MANUAL", ltp_override=None):
             "sector": trade.get("sector") or _sector_for_symbol(sym),
         }
     )
+    # Adaptive router: decrement probe counter if this exit was a probe trade.
+    try:
+        from adaptive_router import record_outcome as _ar_record
+        _ar_record(
+            str(trade.get("strategy_family") or ""),
+            str(trade.get("market_regime") or ""),
+            float(pnl),
+        )
+    except Exception as _e:
+        append_log("WARN", "ALLOC", f"adaptive_router.record_outcome failed: {_e}")
     _notify(f"🔴 {close_side} LIVE\nSymbol: {sym}\nExit: {ltp:.2f}\nPnL ₹: {pnl:.2f}\nPnL %: {pnl_pct:.2f}%\nReason: {reason}")
     return True
 
@@ -1894,8 +1947,29 @@ def _apply_strategy_allocation(
     side: str = "",
     regime: str = "",
     trend_direction: str = "",
+    family: str = "",
 ) -> int:
     pre_qty = max(0, int(qty))
+
+    # Adaptive router probe-phase reduction (audit 2026-05-17):
+    # If the (family, regime) is in re-test probe phase (post-suspension),
+    # apply the FAMILY_REENTRY_PROBE_SIZE multiplier (default 0.5x) BEFORE
+    # any other adjustments. Probe trades let a previously-suspended combo
+    # earn its way back to full size with reduced capital exposure.
+    if family:
+        try:
+            from adaptive_router import get_entry_size_multiplier
+            ar_mult = get_entry_size_multiplier(family, regime)
+            if 0.0 < ar_mult < 1.0:
+                pre_qty = max(1, int(math.floor(pre_qty * ar_mult))) if pre_qty > 0 else 0
+                append_log(
+                    "INFO", "ALLOC",
+                    f"strategy={strategy_tag} family={family} regime={regime} "
+                    f"adaptive_probe mult={ar_mult:.2f} post_qty={pre_qty}",
+                )
+        except Exception as _e:
+            append_log("WARN", "ALLOC", f"adaptive probe-multiplier failed (fail-open): {_e}")
+
     with STATE_LOCK:
         _is_god = str(STATE.get("risk_profile") or "STANDARD").upper() == "GOD"
     if _is_god:
@@ -2373,6 +2447,25 @@ def _scan_family(family: str, universe: list, max_new: int, universe_source: str
     fam = str(family or "").strip().lower()
     if max_new <= 0:
         return 0
+    # Adaptive router (audit 2026-05-17): consult Layer 1 (regime-gated) and
+    # Layer 2 (hour-bucket) before generating signals for this family.
+    # Returns (allowed, reason) — log the skip and bail if blocked.
+    try:
+        from adaptive_router import is_entry_allowed
+        cur_regime = str((get_market_regime_snapshot() or {}).get("regime") or "UNKNOWN").upper()
+        allowed, ar_reason = is_entry_allowed(fam, cur_regime)
+        if not allowed:
+            append_log("INFO", "ROUTE",
+                       f"[ROUTE] family={fam} regime={cur_regime} blocked_by_adaptive_router reason={ar_reason}")
+            return 0
+        if ar_reason.startswith("probe_phase"):
+            # Probe entries are allowed but with reduced size; the size adjustment
+            # is read at sizing time via get_entry_size_multiplier. Just log here.
+            append_log("INFO", "ROUTE",
+                       f"[ROUTE] family={fam} regime={cur_regime} probe_phase {ar_reason}")
+    except Exception as _e:
+        # Adaptive router must NEVER take down the trading loop — fail open.
+        append_log("WARN", "ROUTE", f"adaptive_router check failed (fail-open): {_e}")
     if fam == "trend_long":
         return _scan_long_entries(universe, max_new=max_new, signal_fn=generate_signal, strategy_family=fam, universe_source=universe_source)
     if fam == "pullback_long":
@@ -3833,6 +3926,7 @@ def _maybe_enter_short_from_signal(sig):
         side="SHORT",
         regime=regime,
         trend_direction=str((get_market_regime_snapshot() or {}).get("trend_direction") or STATE.get("last_trend_direction") or "UNKNOWN"),
+        family=str(strategy_family or ""),
     )
     if qty <= 0:
         append_log("INFO", "SKIP", f"{sym} reason=qty_zero_post_allocation strategy={strategy_tag}")
@@ -4172,6 +4266,7 @@ def _maybe_enter_from_signal(sig):
         side="LONG",
         regime=regime,
         trend_direction=trend_direction,
+        family=str(strategy_family or ""),
     )
     # Guard: strategy allocation can reduce qty to 0 in edge cases not covered
     # by the floor override. Never submit a zero-qty order to the exchange.
@@ -4875,10 +4970,40 @@ def reconcile_broker_positions():
         if not STATE.get("_recon_broker_empty_logged"):
             append_log("WARN", "RECON", f"broker returned 0 positions but local has {local_count} — skipping removal to protect local state")
             STATE["_recon_broker_empty_logged"] = True
+        # CRITICAL audit fix (2026-05-17): phantom-decay reconciliation.
+        # The original "skip removal to protect local state" guard had no
+        # time limit — so a position the user sold via Zerodha (outside the
+        # bot) stayed in local state forever, inflating reported P&L by its
+        # fake unrealized. Friday May 15 audit revealed HAL was a phantom
+        # for an unknown duration, hiding ~₹294 of fake unrealized profit.
+        # Fix: track a per-symbol "broker_missing_streak". After
+        # PHANTOM_DECAY_TICKS consecutive empty broker responses (default
+        # 10 ticks = ~3 minutes during market hours), accept the broker's
+        # reality and remove the phantom. Still protects against 1-2 tick
+        # network glitches (the original intent).
+        decay_threshold = int(_cfg_get("PHANTOM_DECAY_TICKS", 10) or 10)
+        missing_streak = STATE.setdefault("_phantom_missing_streak", {})
+        for sym in list(local.keys()):
+            missing_streak[sym] = int(missing_streak.get(sym, 0)) + 1
+            if missing_streak[sym] >= decay_threshold:
+                tr = dict(local.get(sym) or {})
+                PM.remove(sym)
+                missing_streak.pop(sym, None)
+                append_log(
+                    "WARN", "RECON",
+                    f"phantom_decay symbol={sym} broker_missing_streak={decay_threshold} → removed from local state",
+                )
+                _log_trade_event("CLOSE", {**tr, "symbol": sym,
+                                           "exit_reason": "RECON_PHANTOM_DECAY",
+                                           "exit_time": now_ts})
         return
     # Reset the once-per-trip flag now that broker is reporting positions again.
     if STATE.get("_recon_broker_empty_logged"):
         STATE["_recon_broker_empty_logged"] = False
+    # Broker confirmed at least one position — wipe the missing-streak tracker
+    # for ALL symbols since the broker fetch is clearly healthy.
+    if STATE.get("_phantom_missing_streak"):
+        STATE["_phantom_missing_streak"] = {}
     for sym, bp in broker_map.items():
         if sym in local:
             tr = dict(local.get(sym) or {})

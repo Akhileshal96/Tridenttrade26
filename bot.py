@@ -99,8 +99,11 @@ HELP_TEXT = (
     "• /include SBIN   → release symbol\n"
     "• /excluded       → list blocked symbols\n\n"
     "EMERGENCY [Owner]:\n"
-    "• /panic     → pause + disengage + close all open positions\n"
-    "• /resetday  → reset today's pnl & risk counters\n"
+    "• /panic               → pause + disengage + close all open positions\n"
+    "• /clearposition SYM   → remove phantom position from local state (no broker order)\n"
+    "• /resetday            → reset today's pnl & risk counters\n\n"
+    "LEARNINGS [Viewer/Trader/Owner]:\n"
+    "• /learnings → show adaptive router suspensions + recent (family,regime) WR\n"
 )
 
 
@@ -967,6 +970,23 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             await event.reply("🛑 PANIC done: paused + disengaged; one or more close actions failed.")
         return True
 
+    # /clearposition SYMBOL — local-state cleanup only (no broker order).
+    # For phantom positions (sold via Zerodha outside the bot). Differs
+    # from /panic which actually SELLS at broker.
+    if cmd_word == "/clearposition":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        sym = cmd_arg.strip().upper()
+        if not sym:
+            await event.reply("Usage: /clearposition SYMBOL\n"
+                              "Removes a phantom position from local state without "
+                              "placing any broker order. For cleanup after selling "
+                              "via Zerodha directly.")
+            return True
+        await event.reply(CYCLE.clear_phantom_position(sym))
+        return True
+
     if cmd_word == "/restart":
         if not _is_owner(sender):
             await event.reply("❌ Not permitted (Owner only).")
@@ -981,6 +1001,17 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
             return True
         CYCLE.manual_reset_day()
         await event.reply("✅ Day reset done.")
+        return True
+
+    # /learnings — surface adaptive_router state (which family/regime combos
+    # and hour buckets are currently suspended, with reasons + recent WR).
+    # Anyone-allowed (viewer-gated): it's read-only diagnostic info.
+    if cmd_word == "/learnings":
+        try:
+            from adaptive_router import get_learnings_summary
+            await event.reply(get_learnings_summary())
+        except Exception as e:
+            await event.reply(f"❌ /learnings failed: {e}")
         return True
 
     # ===== Token flow (Owner only) =====
