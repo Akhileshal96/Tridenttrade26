@@ -101,7 +101,8 @@ HELP_TEXT = (
     "EMERGENCY [Owner]:\n"
     "• /panic               → pause + disengage + close all open positions\n"
     "• /clearposition SYM   → remove phantom position from local state (no broker order)\n"
-    "• /resetday            → reset today's pnl & risk counters\n\n"
+    "• /resetday            → reset today's pnl & risk counters\n"
+    "• /cleanstats          → purge cached strategy_stats.json and rebuild (drops test rows)\n\n"
     "LEARNINGS [Viewer/Trader/Owner]:\n"
     "• /learnings → show adaptive router suspensions + recent (family,regime) WR\n"
 )
@@ -1003,6 +1004,38 @@ async def _dispatch_command(event, sender, cmd_word, cmd_arg):
         await event.reply("✅ Day reset done.")
         return True
 
+    # /cleanstats (Owner only) — purge cached strategy_stats.json so the
+    # next analytics call rebuilds from trade_history.csv with the new
+    # test-pollution filter applied. Useful after upgrading: forces the
+    # stats to reflect the new _is_test_row() filter immediately rather
+    # than waiting for the next trade exit to invalidate the cache.
+    if cmd_word == "/cleanstats":
+        if not _is_owner(sender):
+            await event.reply("❌ Not permitted (Owner only).")
+            return True
+        try:
+            stats_path = SA.STRATEGY_STATS_PATH
+            removed = False
+            if os.path.exists(stats_path):
+                os.remove(stats_path)
+                removed = True
+            # Trigger a fresh rebuild immediately so the next /best, /regimereport,
+            # etc. shows the cleaned data without a cold-cache delay.
+            fresh = SA.rebuild_strategy_stats()
+            n_strategies = len(fresh.get("strategy", {}) or {})
+            n_families = len(fresh.get("family", {}) or {})
+            n_regimes = len(fresh.get("regime", {}) or {})
+            n_sectors = len(fresh.get("sector", {}) or {})
+            await event.reply(
+                f"✅ Stats {'rebuilt (cache wiped)' if removed else 'rebuilt'}\n"
+                f"  strategies={n_strategies} families={n_families} "
+                f"regimes={n_regimes} sectors={n_sectors}\n"
+                f"Test rows (reason=TEST or symbol in ABC/FOO/BAR/XYZ/TEST) excluded."
+            )
+        except Exception as e:
+            await event.reply(f"❌ /cleanstats failed: {e}")
+        return True
+
     # /learnings — surface adaptive_router state (which family/regime combos
     # and hour buckets are currently suspended, with reasons + recent WR).
     # Anyone-allowed (viewer-gated): it's read-only diagnostic info.
@@ -1189,6 +1222,14 @@ async def main():
         "exportlog": _mk_panel_handler("exportlog"),
         "resetlogs": _mk_panel_handler("resetlogs"),
         "positions": _mk_panel_handler("positions"),
+        # Audit fix (2026-05-17): "holdings" panel button at control_panel.py:54
+        # was previously orphaned — button existed but no handler was registered
+        # here, so clicking it popped up "Handler not configured: holdings".
+        "holdings": _mk_panel_handler("holdings"),
+        # Audit feature (2026-05-17): /learnings surfaces adaptive_router
+        # state (suspended combos + recent win-rates). Wired to the new
+        # Learnings button on the main panel.
+        "learnings": _mk_panel_handler("learnings"),
         "nightnow": _mk_panel_handler("nightnow"),
         "universe": _mk_panel_handler("universe"),
         "universe_live": _mk_panel_handler("universe_live"),

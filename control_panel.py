@@ -53,10 +53,20 @@ def _main_buttons(handlers=None):
         [Button.inline(pnl_label, b"cp:cmd:pnlsofar"), Button.inline("📍 Positions", b"cp:cmd:positions")],
         [Button.inline("📦 Holdings", b"cp:cmd:holdings"), Button.inline("📈 Trail", b"cp:cmd:trailstatus")],
         # ── Trading Mode ─────────────────────────────────────────────────────
-        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("🌙 Swing (CNC)", b"cp:cmd:mode_swing"), Button.inline("🧬 Hybrid", b"cp:cmd:mode_hybrid")],
+        # Audit fix (2026-05-17): removed "🧬 Hybrid" button. HYBRID mode is
+        # gated off via ENABLE_HYBRID_MODE=false (Pile-1 cleanup commit 38605d3)
+        # because HYBRID-routed CNC positions skip all fast-exit guards.
+        # Until that's redesigned, the button only confuses users — clicking
+        # it sets mode to HYBRID which then collapses to INTRADAY anyway.
+        [Button.inline("⚡ Intraday (MIS)", b"cp:cmd:mode_intraday"), Button.inline("🌙 Swing (CNC)", b"cp:cmd:mode_swing")],
         # ── Risk Profile ─────────────────────────────────────────────────────
         [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god")],
         [Button.inline("✅ Confirm God", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel God", b"cp:cmd:risk_god_cancel")],
+        # ── Learnings (audit feature 2026-05-17) ─────────────────────────────
+        # Surfaces adaptive_router state: which (family, regime) and
+        # (family, hour_bucket) combos are currently suspended + recent
+        # win-rates. Read-only, viewer-allowed.
+        [Button.inline("🧠 Learnings", b"cp:cmd:learnings")],
         # ── Panels ───────────────────────────────────────────────────────────
         [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🔐 Token", b"cp:panel:token"), Button.inline("🛡 Live & Safety", b"cp:panel:live"), Button.inline("⚙ Admin", b"cp:panel:admin")],
@@ -89,7 +99,11 @@ def _live_buttons():
     return [
         [Button.inline("✅ Arm (Go Live)", b"cp:cmd:arm"), Button.inline("🛑 Disarm (Stop)", b"cp:cmd:disarm")],
         [Button.inline("🚨 Panic Close All", b"cp:cmd:panic"), Button.inline("♻ Reset Day", b"cp:cmd:resetday")],
-        [Button.inline("🌐 IP Status", b"cp:cmd:ipstatus")],
+        # Audit feature (2026-05-17): /clearposition takes a symbol arg, so
+        # use a hint button — popup tells the user the exact command syntax.
+        # Distinct from /panic (which actually SELLS at broker) — this is
+        # local-state cleanup only, for phantom positions.
+        [Button.inline("🗑 Clear Position", b"cp:hint:clearposition"), Button.inline("🌐 IP Status", b"cp:cmd:ipstatus")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]
 
@@ -155,6 +169,11 @@ _HINTS = {
     "setslip": "Use: /setslip 0.30",
     "exclude": "Use: /exclude SBIN",
     "include": "Use: /include SBIN",
+    # /clearposition: removes a phantom position from local state. No broker
+    # order is placed — purely local cleanup. Use after selling via Zerodha
+    # directly, when the bot still shows the position as held.
+    "clearposition": "Use: /clearposition SYMBOL (e.g., /clearposition HAL)\n"
+                     "Local cleanup only — no broker order is placed.",
 }
 
 

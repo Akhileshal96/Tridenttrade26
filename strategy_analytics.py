@@ -105,8 +105,54 @@ def _calc_stats(rows: list[dict]) -> dict:
     }
 
 
+def _is_test_row(r: dict) -> bool:
+    """Detect rows produced by test runs or stub data so they don't pollute
+    real analytics.
+
+    Audit fix (2026-05-17): old test runs wrote to trade_history.csv before
+    the pytest-log-isolation fix (commit 38605d3). The leftover rows have
+    reason='TEST' and symbol in {ABC, FOO, BAR, XYZ, TEST} with
+    strategy_tag='unknown', strategy_family='unknown', market_regime='UNKNOWN'.
+    These poison /beststrategy / /regimereport / /sectorreport by making
+    'unknown'/'UNKNOWN' the dominant bucket in every dimension.
+
+    Filter logic (intentionally conservative — false positives here mean
+    real trades disappear from reports):
+      1. reason='TEST' → always drop (test fixtures use this consistently).
+      2. Stub symbol (ABC/FOO/BAR/XYZ/TEST) AND no real strategy_tag → drop.
+         A stub symbol with a real strategy_tag is treated as a test FIXTURE
+         (not pollution) so existing test_strategy_analytics-style tests
+         that record under symbol='ABC' with strategy_tag='primary_long'
+         still work as expected.
+    """
+    reason = str(r.get("reason") or "").strip().upper()
+    if reason == "TEST":
+        return True
+    symbol = str(r.get("symbol") or "").strip().upper()
+    if symbol in {"ABC", "FOO", "BAR", "XYZ", "TEST"}:
+        tag = str(r.get("strategy_tag") or "").strip().lower()
+        # Only drop the stub-symbol row if its strategy_tag is also
+        # unlabeled — i.e. it really does look like pollution, not a
+        # test fixture that happens to use a stub symbol.
+        if tag in ("", "unknown", "n/a", "none"):
+            return True
+    return False
+
+
+def _is_meaningful_key(k: str) -> bool:
+    """Drop pollution buckets (unknown/UNKNOWN/test/empty) from REPORT output.
+    Stats may still be tracked under these keys internally, but they're not
+    user-meaningful in /beststrategy /worststrategy /regimereport /sectorreport.
+    """
+    s = str(k or "").strip().lower()
+    return s not in ("", "unknown", "n/a", "none", "test", "other")
+
+
 def rebuild_strategy_stats() -> dict:
     rows = _read_csv_rows(TRADE_HISTORY_PATH)
+    # Audit fix (2026-05-17): drop synthetic test rows BEFORE grouping so
+    # they don't show up under "unknown" buckets in the analytics reports.
+    rows = [r for r in rows if not _is_test_row(r)]
     by_strategy = defaultdict(list)
     by_family = defaultdict(list)
     by_regime = defaultdict(list)
@@ -239,8 +285,8 @@ def get_strategy_multiplier(strategy_tag: str, cfg) -> tuple[float, str]:
 
 def strategy_report_text(limit: int = 8) -> str:
     loaded = load_strategy_stats()
-    stats = loaded.get("strategy", {})
-    fam_stats = loaded.get("family", {})
+    stats = {k: v for k, v in (loaded.get("strategy", {}) or {}).items() if _is_meaningful_key(k)}
+    fam_stats = {k: v for k, v in (loaded.get("family", {}) or {}).items() if _is_meaningful_key(k)}
     if not stats and not fam_stats:
         return "📊 Strategy Report\n\nNo strategy stats yet."
     items = sorted(stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)), reverse=True)[:limit]
@@ -261,18 +307,30 @@ def strategy_report_text(limit: int = 8) -> str:
 
 def best_worst_strategy() -> tuple[str, str]:
     stats = load_strategy_stats().get("strategy", {})
+    # Drop pollution buckets at report time (belt + suspenders — the
+    # rebuild filter already drops test rows, but live trades may still
+    # populate "unknown" if strategy_tag wasn't set on entry).
+    stats = {k: v for k, v in stats.items() if _is_meaningful_key(k)}
     if not stats:
-        return "No strategy data", "No strategy data"
+        return "🏆 Best Strategy\n\nNo strategy stats yet.", "⚠️ Worst Strategy\n\nNo strategy stats yet."
     items = sorted(stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)))
     worst = items[0]
     best = items[-1]
-    return f"🏆 Best: {best[0]} net=₹{float(best[1].get('net_pnl',0)):.2f}", f"⚠️ Worst: {worst[0]} net=₹{float(worst[1].get('net_pnl',0)):.2f}"
+    return (
+        f"🏆 Best: {best[0]}\n"
+        f"  trades={best[1].get('trades',0)} net=₹{float(best[1].get('net_pnl',0)):.2f} "
+        f"win={float(best[1].get('win_rate',0)):.1f}% exp=₹{float(best[1].get('expectancy',0)):.2f}",
+        f"⚠️ Worst: {worst[0]}\n"
+        f"  trades={worst[1].get('trades',0)} net=₹{float(worst[1].get('net_pnl',0)):.2f} "
+        f"win={float(worst[1].get('win_rate',0)):.1f}% exp=₹{float(worst[1].get('expectancy',0)):.2f}",
+    )
 
 
 def regime_report_text(limit: int = 8) -> str:
     stats = load_strategy_stats().get("regime", {})
+    stats = {k: v for k, v in stats.items() if _is_meaningful_key(k)}
     if not stats:
-        return "📈 Regime Report\n\nNo regime stats yet."
+        return "📈 Regime Report\n\nNo regime stats yet (need labeled trades)."
     items = sorted(stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)), reverse=True)[:limit]
     return "📈 Regime Report\n\n" + "\n".join(
         f"{k}: trades={v.get('trades',0)} net=₹{float(v.get('net_pnl',0)):.2f} win={float(v.get('win_rate',0)):.1f}%" for k, v in items
@@ -281,8 +339,9 @@ def regime_report_text(limit: int = 8) -> str:
 
 def sector_report_text(limit: int = 8) -> str:
     stats = load_strategy_stats().get("sector", {})
+    stats = {k: v for k, v in stats.items() if _is_meaningful_key(k)}
     if not stats:
-        return "🏭 Sector Report\n\nNo sector stats yet."
+        return "🏭 Sector Report\n\nNo sector stats yet (need labeled trades)."
     items = sorted(stats.items(), key=lambda kv: float(kv[1].get("net_pnl", 0.0)), reverse=True)[:limit]
     return "🏭 Sector Report\n\n" + "\n".join(
         f"{k}: trades={v.get('trades',0)} net=₹{float(v.get('net_pnl',0)):.2f} win={float(v.get('win_rate',0)):.1f}%" for k, v in items
