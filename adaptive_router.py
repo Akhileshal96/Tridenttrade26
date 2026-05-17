@@ -40,7 +40,6 @@ Empirical-only by design:
 """
 from __future__ import annotations
 
-import csv
 import json
 import os
 from collections import defaultdict
@@ -103,6 +102,19 @@ def _cfg(name: str, default):
 # ----------------------------------------------------------------------------
 # State persistence
 # ----------------------------------------------------------------------------
+#
+# Module-level mtime cache (audit fix 2026-05-17): `is_entry_allowed` is
+# called per-family per-tick (3-6× per 20s loop = ~10k calls/day). Without
+# this cache each call re-opened and re-parsed the JSON state file. Now we
+# only re-read when the file's mtime (or path — for tests) changes.
+_STATE_CACHE: Optional[dict] = None
+_STATE_CACHE_MTIME: float = 0.0
+_STATE_CACHE_PATH: str = ""
+
+
+def _empty_state() -> dict:
+    return {"family_suspensions": {}, "bucket_suspensions": {}, "updated_at": None}
+
 
 def _load_state() -> dict:
     """{
@@ -115,27 +127,54 @@ def _load_state() -> dict:
         'bucket_suspensions': {'<family>:<bucket>': {... same shape ...}},
         'updated_at': '...'
     }"""
-    if not os.path.exists(STATE_PATH):
-        return {"family_suspensions": {}, "bucket_suspensions": {}, "updated_at": None}
+    global _STATE_CACHE, _STATE_CACHE_MTIME, _STATE_CACHE_PATH
+    cur_path = STATE_PATH
     try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
+        mtime = os.path.getmtime(cur_path)
+    except OSError:
+        # File doesn't exist. If the cached value is for the SAME path, return
+        # it; otherwise return a fresh empty state (path changed between
+        # tests, or this is first ever call).
+        if _STATE_CACHE is not None and _STATE_CACHE_PATH == cur_path:
+            return _STATE_CACHE
+        return _empty_state()
+    if (
+        _STATE_CACHE is not None
+        and _STATE_CACHE_PATH == cur_path
+        and mtime == _STATE_CACHE_MTIME
+    ):
+        return _STATE_CACHE
+    try:
+        with open(cur_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Be defensive: ensure required keys exist.
         data.setdefault("family_suspensions", {})
         data.setdefault("bucket_suspensions", {})
+        _STATE_CACHE = data
+        _STATE_CACHE_MTIME = mtime
+        _STATE_CACHE_PATH = cur_path
         return data
     except Exception as e:
         append_log("WARN", "ADAPTIVE", f"failed to load adaptive_router_state: {e}")
-        return {"family_suspensions": {}, "bucket_suspensions": {}, "updated_at": None}
+        return _empty_state()
 
 
 def _save_state(state: dict) -> None:
+    global _STATE_CACHE, _STATE_CACHE_MTIME, _STATE_CACHE_PATH
+    cur_path = STATE_PATH
     state["updated_at"] = datetime.now(IST).isoformat(timespec="seconds")
-    tmp = STATE_PATH + ".tmp"
+    tmp = cur_path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
-        os.replace(tmp, STATE_PATH)
+        os.replace(tmp, cur_path)
+        # Refresh the cache in place so subsequent _load_state() calls don't
+        # re-read the file we just wrote. mtime is bumped by os.replace.
+        _STATE_CACHE = state
+        _STATE_CACHE_PATH = cur_path
+        try:
+            _STATE_CACHE_MTIME = os.path.getmtime(cur_path)
+        except OSError:
+            _STATE_CACHE_MTIME = 0.0
     except Exception as e:
         append_log("WARN", "ADAPTIVE", f"failed to save adaptive_router_state: {e}")
 
@@ -143,12 +182,11 @@ def _save_state(state: dict) -> None:
 # ----------------------------------------------------------------------------
 # Trade-history loading + per-bucket stats
 # ----------------------------------------------------------------------------
-
-def _safe_float(v, d=0.0):
-    try:
-        return float(v)
-    except Exception:
-        return float(d)
+#
+# Reuse strategy_analytics helpers instead of re-implementing (audit fix
+# 2026-05-17). _safe_float and _read_csv_rows behave identically; this drops
+# ~15 lines of duplicated code and keeps the CSV-reader behaviour in sync.
+from strategy_analytics import _safe_float, _read_csv_rows
 
 
 def _hour_bucket(entry_time_str: str) -> Optional[str]:
@@ -172,16 +210,7 @@ def _hour_bucket(entry_time_str: str) -> Optional[str]:
 def _load_recent_trades(lookback: int) -> list[dict]:
     """Read the most recent `lookback` trades from trade_history.csv.
     Returns [] if file missing or unreadable. Cheap — file is small."""
-    if not os.path.exists(TRADE_HISTORY_PATH):
-        return []
-    rows = []
-    try:
-        with open(TRADE_HISTORY_PATH, "r", encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                if r:
-                    rows.append(dict(r))
-    except Exception:
-        return []
+    rows = _read_csv_rows(TRADE_HISTORY_PATH)
     return rows[-lookback:] if lookback > 0 else rows
 
 
@@ -194,42 +223,53 @@ def _wr_for_subset(rows: list[dict]) -> tuple[int, float]:
     return n, (wins / n * 100.0)
 
 
-def compute_family_regime_stats() -> dict:
-    """Returns {(family, regime): (trade_count, win_rate_pct)} from
-    the most recent FAMILY_DISABLE_LOOKBACK_TRADES trades."""
-    lookback = _cfg("FAMILY_DISABLE_LOOKBACK_TRADES", FAMILY_DISABLE_LOOKBACK_TRADES)
-    rows = _load_recent_trades(lookback * 6)  # over-fetch to ensure enough per combo
-    buckets: dict[tuple[str, str], list[dict]] = defaultdict(list)
+def _group_by_key(rows: list[dict], lookback: int, key_fn) -> dict:
+    """Group rows by the key returned from key_fn(row); skip rows where key
+    is None/empty. Returns {key: (trade_count, win_rate_pct)} computed over
+    the most recent `lookback` trades per combo."""
+    buckets: dict = defaultdict(list)
     for r in rows:
+        k = key_fn(r)
+        if not k:
+            continue
+        buckets[k].append(r)
+    return {k: _wr_for_subset(subset[-lookback:]) for k, subset in buckets.items()}
+
+
+def compute_family_regime_stats(rows: Optional[list[dict]] = None) -> dict:
+    """Returns {(family, regime): (trade_count, win_rate_pct)} from
+    the most recent FAMILY_DISABLE_LOOKBACK_TRADES trades.
+
+    `rows` lets the caller pass a pre-loaded trade list to avoid duplicate
+    CSV scans (refresh_suspensions does this).
+    """
+    lookback = _cfg("FAMILY_DISABLE_LOOKBACK_TRADES", FAMILY_DISABLE_LOOKBACK_TRADES)
+    if rows is None:
+        rows = _load_recent_trades(lookback * 6)
+
+    def _key(r):
         fam = str(r.get("strategy_family") or "").strip().lower()
         reg = str(r.get("market_regime") or "").strip().upper()
-        if not fam or not reg:
-            continue
-        buckets[(fam, reg)].append(r)
-    out = {}
-    for k, subset in buckets.items():
-        # Take just the most recent `lookback` for THIS combo.
-        recent = subset[-lookback:]
-        out[k] = _wr_for_subset(recent)
-    return out
+        return (fam, reg) if (fam and reg) else None
+
+    return _group_by_key(rows, lookback, _key)
 
 
-def compute_family_bucket_stats() -> dict:
-    """Returns {(family, hour_bucket): (trade_count, win_rate_pct)}."""
+def compute_family_bucket_stats(rows: Optional[list[dict]] = None) -> dict:
+    """Returns {(family, hour_bucket): (trade_count, win_rate_pct)}.
+
+    `rows` lets the caller pass a pre-loaded trade list (see refresh_suspensions).
+    """
     lookback = _cfg("BUCKET_DISABLE_LOOKBACK_TRADES", BUCKET_DISABLE_LOOKBACK_TRADES)
-    rows = _load_recent_trades(lookback * 6)
-    buckets: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    for r in rows:
+    if rows is None:
+        rows = _load_recent_trades(lookback * 6)
+
+    def _key(r):
         fam = str(r.get("strategy_family") or "").strip().lower()
         bucket = _hour_bucket(r.get("entry_time"))
-        if not fam or not bucket:
-            continue
-        buckets[(fam, bucket)].append(r)
-    out = {}
-    for k, subset in buckets.items():
-        recent = subset[-lookback:]
-        out[k] = _wr_for_subset(recent)
-    return out
+        return (fam, bucket) if (fam and bucket) else None
+
+    return _group_by_key(rows, lookback, _key)
 
 
 # ----------------------------------------------------------------------------
@@ -284,8 +324,14 @@ def refresh_suspensions(now: Optional[datetime] = None) -> dict:
             pass
 
     # 2) Add new suspensions where thresholds tripped.
+    # Load trade history ONCE here and pass to both compute calls so we
+    # don't do two full CSV scans per refresh.
+    fam_lookback = _cfg("FAMILY_DISABLE_LOOKBACK_TRADES", FAMILY_DISABLE_LOOKBACK_TRADES)
+    buck_lookback = _cfg("BUCKET_DISABLE_LOOKBACK_TRADES", BUCKET_DISABLE_LOOKBACK_TRADES)
+    rows = _load_recent_trades(max(fam_lookback, buck_lookback) * 6)
+
     # Layer 1: family-regime.
-    fr_stats = compute_family_regime_stats()
+    fr_stats = compute_family_regime_stats(rows=rows)
     min_n = _cfg("FAMILY_DISABLE_MIN_N", FAMILY_DISABLE_MIN_N)
     min_wr = _cfg("FAMILY_DISABLE_MIN_WR", FAMILY_DISABLE_MIN_WR)
     suspend_days = _cfg("FAMILY_SUSPEND_DAYS", FAMILY_SUSPEND_DAYS)
@@ -323,8 +369,8 @@ def refresh_suspensions(now: Optional[datetime] = None) -> dict:
                        f"suspended family={fam} regime={reg} wr={wr:.1f}% n={n} "
                        f"until={until.strftime('%Y-%m-%d')}")
 
-    # Layer 2: family-bucket.
-    b_stats = compute_family_bucket_stats()
+    # Layer 2: family-bucket. Reuses the same `rows` loaded above.
+    b_stats = compute_family_bucket_stats(rows=rows)
     bmin_n = _cfg("BUCKET_DISABLE_MIN_N", BUCKET_DISABLE_MIN_N)
     bmin_wr = _cfg("BUCKET_DISABLE_MIN_WR", BUCKET_DISABLE_MIN_WR)
     bsuspend_days = _cfg("BUCKET_SUSPEND_DAYS", BUCKET_SUSPEND_DAYS)

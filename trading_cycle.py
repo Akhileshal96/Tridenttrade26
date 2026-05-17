@@ -652,6 +652,16 @@ def _ensure_day_key():
             STATE["last_route_universe_source"] = "n/a"
             STATE["last_trend_direction"] = "UNKNOWN"
             STATE["force_exit_done"] = False
+            # Adaptive router daily refresh (audit fix 2026-05-17):
+            # Previously refresh_suspensions() was only triggered by /learnings,
+            # so expired suspensions never lifted unless the user manually
+            # checked. Pull it into day rollover so probe phases auto-activate
+            # at the start of each session.
+            try:
+                from adaptive_router import refresh_suspensions
+                refresh_suspensions()
+            except Exception as _e:
+                append_log("WARN", "ADAPTIVE", f"day-rollover refresh_suspensions failed: {_e}")
             append_log("INFO", "DAY", f"Auto rollover reset for {today}")
 
 
@@ -4905,6 +4915,12 @@ def reconcile_broker_positions():
                     STATE["_holdings_cache_ts"] = time.time()
                 elif cached:
                     holdings_list = cached
+                    # Bug fix (2026-05-17 audit): refresh the cache timestamp
+                    # when serving from cache after an empty broker response.
+                    # Without this bump, the TTL never recovers, so every
+                    # subsequent tick re-hits kite.holdings() unnecessarily
+                    # (weekends → 180 unnecessary broker calls/hour).
+                    STATE["_holdings_cache_ts"] = time.time()
                 else:
                     holdings_list = []
         except Exception as e:
