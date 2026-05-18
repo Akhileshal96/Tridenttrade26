@@ -517,7 +517,19 @@ ADX_MIN_TREND = _get_float("ADX_MIN_TREND", "25.0")
 # ===== SIGNAL QUALITY GATES =====
 # Minimum score before a signal is traded. Filters out weak/chasing setups.
 MIN_SCORE_TREND_LONG      = _get_float("MIN_SCORE_TREND_LONG",      "1.0")
-MIN_SCORE_MEAN_REVERSION  = _get_float("MIN_SCORE_MEAN_REVERSION",  "4.0")
+# Audit fix (2026-05-18): MIN_SCORE_MEAN_REVERSION lowered from 4.0 → 1.5.
+# The MR scoring formula is:
+#     score = 0.50 * (30 - rsi) + 0.30 * bounce_size_pct + 0.20 * recovery_pct
+# A genuinely "decent" RSI-oversold bounce (RSI=26, bounce 0.5%, momentum 0.3%)
+# scores ~1.9. A 4.0 threshold required RSI<22 — rare crash territory — which
+# meant the family was effectively disabled in normal markets.
+# Today's paper session (May 18): all 8 ITC MR candidates scored 1.07–1.90,
+# all rejected by the 4.0 gate. Zero MR trades all day → no data for the
+# adaptive router to learn from. Lowering to 1.5 captures the top ~20–30%
+# of MR setups (today's top 2: 1.77, 1.90 would have entered) without
+# trading every weak rebound. Tightable back via .env once we have win-rate
+# data over a few weeks.
+MIN_SCORE_MEAN_REVERSION  = _get_float("MIN_SCORE_MEAN_REVERSION",  "1.5")
 
 # ===== TRAIL STRONG PROFIT GIVEBACK =====
 # Giveback allowed at the strong-profit stage (peak >= BE_ARM * 2).
