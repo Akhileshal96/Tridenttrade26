@@ -4997,6 +4997,20 @@ def reconcile_broker_positions():
         # 10 ticks = ~3 minutes during market hours), accept the broker's
         # reality and remove the phantom. Still protects against 1-2 tick
         # network glitches (the original intent).
+        #
+        # CRITICAL audit fix (2026-05-19): phantom-decay must NOT run in
+        # paper mode (IS_LIVE=false). In paper mode the broker NEVER sees
+        # paper positions (no real order placed), so broker_count==0 just
+        # means "we're not trading through the broker" — NOT "the user
+        # sold via Zerodha". Day 2 of paper week: KOTAKBANK paper trade
+        # opened at 11:51 was killed at 12:07 by phantom_decay because
+        # broker correctly reported 0 positions for 10 cycles. Every paper
+        # trade held longer than 3 min was at risk. The outer recon gate
+        # allows `live_override=true` (so /holdings can still show real
+        # broker holdings while bot is in paper mode), but the destructive
+        # phantom-decay path requires true IS_LIVE.
+        if not bool(CFG.IS_LIVE):
+            return
         decay_threshold = int(_cfg_get("PHANTOM_DECAY_TICKS", 10) or 10)
         missing_streak = STATE.setdefault("_phantom_missing_streak", {})
         for sym in list(local.keys()):

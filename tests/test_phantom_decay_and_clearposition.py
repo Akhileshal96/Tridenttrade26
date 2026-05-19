@@ -68,8 +68,15 @@ def _setup_phantom_position(sym: str):
         CYCLE.STATE.pop("_holdings_cache_ts", None)
 
 
-def _patch_empty_broker(monkeypatch):
-    """Make get_kite return a kite that has no positions and no holdings."""
+def _patch_empty_broker(monkeypatch, is_live: bool = True):
+    """Make get_kite return a kite that has no positions and no holdings.
+
+    is_live: defaults to True so the existing phantom-decay tests
+    continue to validate the live-mode behavior. Paper-mode tests
+    explicitly pass is_live=False to verify the new gate.
+    """
+    monkeypatch.setattr(CFG, "IS_LIVE", is_live, raising=False)
+
     class _EmptyKite:
         def positions(self): return {"net": []}
         def holdings(self): return []
@@ -266,3 +273,93 @@ def test_clear_phantom_position_does_not_call_broker(monkeypatch):
 
     CYCLE.clear_phantom_position("HAL")
     assert kite_called["n"] == 0
+
+
+# ============================================================================
+# Fix C — phantom-decay must NOT fire in paper mode
+# (audit fix 2026-05-19: Day 2 KOTAKBANK paper trade killed at 12:07)
+# ============================================================================
+
+def test_phantom_decay_does_NOT_fire_in_paper_mode(monkeypatch):
+    """The Day 2 (May 19) bug: in paper mode, the broker NEVER sees paper
+    positions, so broker_count==0 is the natural state — NOT evidence the
+    user sold elsewhere. Phantom-decay treating this as "phantom" wrongly
+    killed a legitimate paper trade (KOTAKBANK 11:51 → 12:07 RECON_PHANTOM_DECAY).
+
+    With IS_LIVE=false the decay path must short-circuit even when
+    `live_override=true` (e.g., user /arm'd while in paper to see /holdings)
+    AND broker_count==0 AND many cycles have accumulated.
+    """
+    monkeypatch.setattr(CFG, "PHANTOM_DECAY_TICKS", 5, raising=False)
+    monkeypatch.setattr(CYCLE, "_cfg_get",
+                        lambda k, d=None: 5 if k == "PHANTOM_DECAY_TICKS" else
+                                          (True if k == "USE_HOLDINGS_RECONCILE" else d),
+                        raising=False)
+    _setup_phantom_position("KOTAKBANK")
+    # IS_LIVE=False: that's the entire point of this test.
+    _patch_empty_broker(monkeypatch, is_live=False)
+
+    # Run 20 cycles — 4x the decay threshold. In LIVE mode this would
+    # have wiped the position 4 times over. In PAPER mode it must survive.
+    for _ in range(20):
+        try:
+            CYCLE.reconcile_broker_positions()
+        except Exception:
+            pass
+
+    assert "KOTAKBANK" in CYCLE.STATE["positions"], (
+        f"paper position must NOT be phantom-decayed; "
+        f"state: {list(CYCLE.STATE['positions'].keys())}"
+    )
+
+
+def test_phantom_decay_still_fires_in_live_mode(monkeypatch):
+    """Sanity / regression: with IS_LIVE=true, the original decay behavior
+    must still work — paper-mode skip must not have neutered the fix for
+    real live-mode phantoms (which is what shipped on 2026-05-17)."""
+    monkeypatch.setattr(CFG, "PHANTOM_DECAY_TICKS", 5, raising=False)
+    monkeypatch.setattr(CYCLE, "_cfg_get",
+                        lambda k, d=None: 5 if k == "PHANTOM_DECAY_TICKS" else
+                                          (True if k == "USE_HOLDINGS_RECONCILE" else d),
+                        raising=False)
+    _setup_phantom_position("HAL")
+    # IS_LIVE=True (the live-mode case the original fix was designed for).
+    _patch_empty_broker(monkeypatch, is_live=True)
+
+    for _ in range(6):  # 1 over threshold
+        try:
+            CYCLE.reconcile_broker_positions()
+        except Exception:
+            pass
+
+    assert "HAL" not in CYCLE.STATE["positions"], (
+        "live-mode phantom must still be decayed by the original 2026-05-17 fix"
+    )
+
+
+def test_paper_mode_does_not_accumulate_missing_streak(monkeypatch):
+    """In paper mode, the per-symbol missing_streak counter should not
+    accumulate at all — even reading it is wasted work, but more importantly,
+    if IS_LIVE flips to true later (user runs /arm during live hours), the
+    counter shouldn't be pre-loaded with stale paper-mode ticks that would
+    immediately trip the threshold."""
+    monkeypatch.setattr(CFG, "PHANTOM_DECAY_TICKS", 5, raising=False)
+    monkeypatch.setattr(CYCLE, "_cfg_get",
+                        lambda k, d=None: 5 if k == "PHANTOM_DECAY_TICKS" else
+                                          (True if k == "USE_HOLDINGS_RECONCILE" else d),
+                        raising=False)
+    _setup_phantom_position("KOTAKBANK")
+    _patch_empty_broker(monkeypatch, is_live=False)
+
+    for _ in range(10):
+        try:
+            CYCLE.reconcile_broker_positions()
+        except Exception:
+            pass
+
+    # Either: tracker never created, OR tracker exists but KOTAKBANK never added.
+    streak = CYCLE.STATE.get("_phantom_missing_streak") or {}
+    assert streak.get("KOTAKBANK", 0) == 0, (
+        f"paper-mode reconciles must not accumulate decay counters; "
+        f"streak: {streak}"
+    )
