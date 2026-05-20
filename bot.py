@@ -1143,6 +1143,41 @@ async def _send_startup_trade_message(client):
         append_log("WARN", "BOT", f"Startup greeting failed: {e}")
 
 
+async def _telegram_client_forever(client):
+    """Keep the Telegram interface alive across disconnects and recv-loop crashes.
+
+    Root cause (2026-05-21 audit): Telethon's internal _recv_loop can die with
+    a TypeNotFoundError when Telegram pushes a TLObject type the installed
+    Telethon version can't parse (constructor 3ae56482 — unparseable even on
+    the latest Telethon 1.43.2). When that happens, run_until_disconnected()
+    returns. Under the old `asyncio.gather(client.run_until_disconnected(), ...)`
+    the bot PROCESS kept running (the trading-loop thread survived) but the
+    Telegram interface was dead — the user saw the bot as "stopped" and had to
+    manually restart it (systemd never saw a crash, NRestarts stayed 0).
+
+    This wrapper reconnects instead of giving up, so a recv-loop death only
+    blips the Telegram interface for a few seconds while the trading loop keeps
+    running uninterrupted. Bounded exponential backoff prevents a tight loop if
+    Telegram is genuinely unreachable.
+    """
+    backoff = 5
+    while True:
+        try:
+            await client.run_until_disconnected()
+            append_log("WARN", "BOT", "Telegram disconnected — reconnecting")
+        except Exception as e:
+            append_log("ERROR", "BOT", f"Telegram client error: {e!r} — reconnecting")
+        await asyncio.sleep(backoff)
+        try:
+            if not client.is_connected():
+                await client.connect()
+            append_log("INFO", "BOT", "Telegram reconnected")
+            backoff = 5  # reset on a successful reconnect
+        except Exception as e:
+            append_log("ERROR", "BOT", f"Telegram reconnect failed: {e!r}")
+            backoff = min(backoff * 2, 60)  # exponential backoff, cap 60s
+
+
 async def main():
     api_id = int(getattr(CFG, "TELEGRAM_API_ID", 9888950))
     api_hash = getattr(CFG, "TELEGRAM_API_HASH", "ecfa673e2c85b4ef16743acf0ba0d1c1")
@@ -1293,7 +1328,7 @@ async def main():
 
 
     await asyncio.gather(
-        client.run_until_disconnected(),
+        _telegram_client_forever(client),
         asyncio.to_thread(CYCLE.run_loop_forever),
         night_scheduler(),
         token_renewal_scheduler(client),
