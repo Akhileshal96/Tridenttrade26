@@ -304,6 +304,7 @@ def test_no_unwired_panel_buttons():
         "startloop", "stoploop", "status",
         "holdings", "positions",
         "learnings",  # NEW
+        "godstatus", "cleanstats",  # NEW 2026-05-21 — closed panel-access gaps
         "panic",
         "ipstatus",
         "beststrategy", "worststrategy", "regimereport", "sectorreport",

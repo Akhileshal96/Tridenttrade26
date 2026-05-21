@@ -62,11 +62,11 @@ def _main_buttons(handlers=None):
         # ── Risk Profile ─────────────────────────────────────────────────────
         [Button.inline("🟢 Standard", b"cp:cmd:risk_standard"), Button.inline("🔥 God Mode", b"cp:cmd:risk_god")],
         [Button.inline("✅ Confirm God", b"cp:cmd:risk_god_confirm"), Button.inline("❌ Cancel God", b"cp:cmd:risk_god_cancel")],
-        # ── Learnings (audit feature 2026-05-17) ─────────────────────────────
-        # Surfaces adaptive_router state: which (family, regime) and
-        # (family, hour_bucket) combos are currently suspended + recent
-        # win-rates. Read-only, viewer-allowed.
-        [Button.inline("🧠 Learnings", b"cp:cmd:learnings")],
+        # ── Learnings + GOD status (audit features) ──────────────────────────
+        # Learnings: adaptive_router state (suspended combos + recent WR).
+        # GOD Status: GOD-profile correlation-guard snapshot (sector cap,
+        # fast-stage limit, concurrent cap). Both read-only, viewer-allowed.
+        [Button.inline("🧠 Learnings", b"cp:cmd:learnings"), Button.inline("🔥 GOD Status", b"cp:cmd:godstatus")],
         # ── Panels ───────────────────────────────────────────────────────────
         [Button.inline("📊 Analytics", b"cp:panel:analytics"), Button.inline("🌙 Research", b"cp:panel:research"), Button.inline("📜 Logs", b"cp:panel:logs")],
         [Button.inline("🔐 Token", b"cp:panel:token"), Button.inline("🛡 Live & Safety", b"cp:panel:live"), Button.inline("⚙ Admin", b"cp:panel:admin")],
@@ -114,6 +114,8 @@ def _admin_buttons():
         [Button.inline("👤 Add Trader", b"cp:hint:addtrader"), Button.inline("❌ Remove Trader", b"cp:hint:removetrader")],
         [Button.inline("👁 Add Viewer", b"cp:hint:addviewer"), Button.inline("🗑 Remove Viewer", b"cp:hint:removeviewer")],
         [Button.inline("🚫 Exclude", b"cp:hint:exclude"), Button.inline("✅ Include", b"cp:hint:include")],
+        # Set max entry slippage % — takes an arg, so hint-style (popup syntax).
+        [Button.inline("📉 Set Slippage", b"cp:hint:setslip")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]
 
@@ -133,6 +135,9 @@ def _analytics_buttons():
         [Button.inline("🏆 Best", b"cp:cmd:beststrategy"), Button.inline("⚠ Worst", b"cp:cmd:worststrategy")],
         [Button.inline("🌐 Regime", b"cp:cmd:regime"), Button.inline("🔀 Route", b"cp:cmd:routestatus")],
         [Button.inline("📈 Regime PnL", b"cp:cmd:regimereport"), Button.inline("🏭 Sector PnL", b"cp:cmd:sectorreport")],
+        # Clean Stats: purge cached strategy_stats.json + rebuild with the
+        # test-pollution filter (owner-only; dispatch enforces it).
+        [Button.inline("🧮 Clean Stats", b"cp:cmd:cleanstats")],
         [Button.inline("⬅ Back", b"cp:panel:main")],
     ]
 

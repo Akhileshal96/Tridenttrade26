@@ -1265,6 +1265,11 @@ async def main():
         # state (suspended combos + recent win-rates). Wired to the new
         # Learnings button on the main panel.
         "learnings": _mk_panel_handler("learnings"),
+        # Audit fix (2026-05-21): wire godstatus + cleanstats — both had
+        # command handlers but no panel access. godstatus → GOD Status button
+        # (main panel); cleanstats → Clean Stats button (Analytics panel).
+        "godstatus": _mk_panel_handler("godstatus"),
+        "cleanstats": _mk_panel_handler("cleanstats"),
         "nightnow": _mk_panel_handler("nightnow"),
         "universe": _mk_panel_handler("universe"),
         "universe_live": _mk_panel_handler("universe_live"),
