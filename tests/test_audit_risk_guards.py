@@ -259,6 +259,81 @@ def test_early_no_move_skipped_when_trail_active(monkeypatch):
 
 
 # ============================================================================
+# Fix #3 revised (2026-05-21): EARLY_NO_MOVE threshold = % of position value
+# (was activate_inr*ratio, which floored at ₹2 for MICRO and killed tiny
+# paper positions in ~5 min — Day-4 paper: KOTAKBANK & ONGC cut at peak ₹0.15)
+# ============================================================================
+
+def _disable_other_exits(monkeypatch):
+    """Disable every exit path except EARLY_NO_MOVE so it's the only rule
+    that can fire."""
+    monkeypatch.setattr(CFG, "USE_EARLY_NO_MOVE_EXIT", True, raising=False)
+    monkeypatch.setattr(CFG, "USE_PER_TRADE_MAX_LOSS", False, raising=False)
+    monkeypatch.setattr(CFG, "USE_HALT_LOSER_FORCE_CLOSE", False, raising=False)
+    monkeypatch.setattr(CFG, "USE_ATR_STOPLOSS", False, raising=False)
+    monkeypatch.setattr(CFG, "STOPLOSS_PCT", 99.0, raising=False)
+    monkeypatch.setattr(CFG, "SHORT_STOPLOSS_PCT", 99.0, raising=False)
+    monkeypatch.setattr(CFG, "USE_PROFIT_TARGET", False, raising=False)
+    monkeypatch.setattr(CFG, "USE_FAILED_DEV_EXIT", False, raising=False)
+    monkeypatch.setattr(CFG, "USE_TIME_DECAY_EXIT", False, raising=False)
+
+
+def test_early_no_move_threshold_scales_with_position_value(monkeypatch):
+    """The Day-4 fix: threshold is now EARLY_NO_MOVE_MIN_FAVORABLE_PCT of the
+    position VALUE, not a floored activate_inr*ratio. The SAME peak P&L should
+    survive a small position but cut a large one — proving it scales with size
+    (the old floor made tiny positions disproportionately easy to kill)."""
+    _disable_other_exits(monkeypatch)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MINUTES", 12, raising=False)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MIN_FAVORABLE_PCT", 0.08, raising=False)
+
+    # Small position: pos_value = 100×1 = 100 → threshold = 100×0.08% = ₹0.08.
+    # peak_pnl ₹1.0 is well above → SURVIVES.
+    small = {"S": _make_trade(side="BUY", entry=100.0, qty=1, minutes_ago=15, peak_pnl=1.0)}
+    rec_small = _run_monitor(small, _make_state(), {"S": 99.5})  # small loss
+    assert "EARLY_NO_MOVE" not in [r for _, r in rec_small.calls], (
+        f"small position with healthy peak must survive; got {rec_small.calls}"
+    )
+
+    # Large position: pos_value = 100×100 = 10000 → threshold = ₹8.0.
+    # SAME peak_pnl ₹1.0 is far below → FIRES.
+    large = {"L": _make_trade(side="BUY", entry=100.0, qty=100, minutes_ago=15, peak_pnl=1.0)}
+    rec_large = _run_monitor(large, _make_state(), {"L": 99.99})  # tiny loss
+    assert ("L", "EARLY_NO_MOVE") in rec_large.calls, (
+        f"large position with peak below %threshold must fire; got {rec_large.calls}"
+    )
+
+
+def test_early_no_move_still_cuts_genuinely_dead_trade(monkeypatch):
+    """Safety preserved: a trade that after the window shows ~zero favorable
+    peak AND is losing still gets cut. The fix loosens the bar for tiny
+    positions but doesn't disable the guard."""
+    _disable_other_exits(monkeypatch)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MINUTES", 12, raising=False)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MIN_FAVORABLE_PCT", 0.08, raising=False)
+    # pos_value = 100×10 = 1000 → threshold ₹0.80; peak ₹0.10 well below; losing; 15 min.
+    pos = {"D": _make_trade(side="BUY", entry=100.0, qty=10, minutes_ago=15, peak_pnl=0.10)}
+    rec = _run_monitor(pos, _make_state(), {"D": 99.8})
+    assert ("D", "EARLY_NO_MOVE") in rec.calls, (
+        f"genuinely dead trade must still be cut; got {rec.calls}"
+    )
+
+
+def test_early_no_move_waits_for_12min_window(monkeypatch):
+    """The window was extended 5 → 12 min so trades get room to reach SL/target.
+    A dead trade at 8 min must NOT yet fire when the window is 12."""
+    _disable_other_exits(monkeypatch)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MINUTES", 12, raising=False)
+    monkeypatch.setattr(CFG, "EARLY_NO_MOVE_MIN_FAVORABLE_PCT", 0.08, raising=False)
+    # Dead trade (peak 0) but only 8 min in → must NOT fire yet.
+    pos = {"W": _make_trade(side="BUY", entry=100.0, qty=10, minutes_ago=8, peak_pnl=0.0)}
+    rec = _run_monitor(pos, _make_state(), {"W": 99.8})
+    assert "EARLY_NO_MOVE" not in [r for _, r in rec.calls], (
+        f"must not fire before the 12-min window; got {rec.calls}"
+    )
+
+
+# ============================================================================
 # Fix #8: DAILY_DRAWDOWN_KILL — %-wallet kill-switch
 # ============================================================================
 

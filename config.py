@@ -335,13 +335,24 @@ USE_FAILED_DEV_EXIT    = _get_bool( "USE_FAILED_DEV_EXIT",    "true")
 FAILED_DEV_MINUTES     = _get_int(  "FAILED_DEV_MINUTES",     "30")
 FAILED_DEV_PEAK_RATIO  = _get_float("FAILED_DEV_PEAK_RATIO",  "0.25")
 
-# ===== EARLY NO-MOVE BAIL (audit fix #3) =====
+# ===== EARLY NO-MOVE BAIL (audit fix #3; revised 2026-05-21) =====
 # Catch dead-on-arrival trades faster than FAILED_DEV's 30-min wait. If, after
-# EARLY_NO_MOVE_MINUTES, peak P&L is below EARLY_NO_MOVE_PEAK_RATIO of the
-# trail activation threshold, exit immediately. Independent of trail status.
-USE_EARLY_NO_MOVE_EXIT     = _get_bool( "USE_EARLY_NO_MOVE_EXIT",     "true")
-EARLY_NO_MOVE_MINUTES      = _get_float("EARLY_NO_MOVE_MINUTES",      "5")
-EARLY_NO_MOVE_PEAK_RATIO   = _get_float("EARLY_NO_MOVE_PEAK_RATIO",   "0.10")
+# EARLY_NO_MOVE_MINUTES, the peak favorable P&L hasn't reached
+# EARLY_NO_MOVE_MIN_FAVORABLE_PCT of the POSITION VALUE, exit early.
+#
+# Revised 2026-05-21: the old check compared peak against
+# `trail_activate_inr * EARLY_NO_MOVE_PEAK_RATIO`, but trail_activate_inr has a
+# per-tier rupee FLOOR (MICRO ₹2.0) that dominates for small positions —
+# inflating the bar and killing tiny paper trades in ~5 min before they could
+# develop (Day 4 paper: KOTAKBANK & ONGC both cut at peak ₹0.15 vs a ₹0.20-0.30
+# floored bar). Now a clean % of position value (scales correctly with size)
+# and a longer 12-min window so trades get room to reach SL / target — which is
+# what produces real win/loss data. EARLY_NO_MOVE_PEAK_RATIO is retained only
+# for backward-compat / any external override; the live path uses the PCT.
+USE_EARLY_NO_MOVE_EXIT          = _get_bool( "USE_EARLY_NO_MOVE_EXIT",          "true")
+EARLY_NO_MOVE_MINUTES           = _get_float("EARLY_NO_MOVE_MINUTES",           "12")
+EARLY_NO_MOVE_MIN_FAVORABLE_PCT = _get_float("EARLY_NO_MOVE_MIN_FAVORABLE_PCT", "0.08")
+EARLY_NO_MOVE_PEAK_RATIO        = _get_float("EARLY_NO_MOVE_PEAK_RATIO",        "0.10")
 
 # ===== PER-TRADE MAX-LOSS CIRCUIT BREAKER (audit fix #2) =====
 # Hard floor on a single trade's loss as a percentage of wallet. Independent

@@ -417,10 +417,18 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             close_position(sym, reason=reason, ltp_override=ltp)
             continue
 
-        # --- Audit fix #3: early no-move bail (faster than FAILED_DEV) ---
-        # If after EARLY_NO_MOVE_MINUTES the peak P&L hasn't even reached
-        # EARLY_NO_MOVE_PEAK_RATIO of activation, the trade is dead-on-arrival.
-        # Cut the 30-min FAILED_DEV wait short; cap each loser's bleed.
+        # --- Audit fix #3 (revised 2026-05-21): early no-move bail ---
+        # If after EARLY_NO_MOVE_MINUTES the peak favorable P&L hasn't reached
+        # EARLY_NO_MOVE_MIN_FAVORABLE_PCT of the POSITION VALUE, the trade is
+        # dead-on-arrival — the bounce/breakout thesis failed. Cut it early.
+        #
+        # Revised: the old check compared peak against `activate_inr * ratio`,
+        # but activate_inr carries a per-tier rupee FLOOR (MICRO ₹2.0) that
+        # dominates for small positions — inflating the bar and killing tiny
+        # paper trades in ~5 min before they could develop (Day 4 paper:
+        # KOTAKBANK & ONGC cut at peak ₹0.15). A clean % of position value
+        # scales correctly with size; a 12-min window gives trades room to
+        # reach SL / target so we get real win/loss data.
         if (
             entry_time_str
             and trade_product != "CNC"
@@ -430,19 +438,20 @@ def monitor_positions(state: dict, positions: dict, get_ltp, close_position, for
             try:
                 entry_dt = datetime.fromisoformat(entry_time_str)
                 elapsed_min = (datetime.now(IST) - entry_dt).total_seconds() / 60.0
-                early_min = float(getattr(CFG, "EARLY_NO_MOVE_MINUTES", 5))
-                early_ratio = float(getattr(CFG, "EARLY_NO_MOVE_PEAK_RATIO", 0.10))
+                early_min = float(getattr(CFG, "EARLY_NO_MOVE_MINUTES", 12))
+                early_pct = float(getattr(CFG, "EARLY_NO_MOVE_MIN_FAVORABLE_PCT", 0.08)) / 100.0
+                threshold_inr = position_value * early_pct
                 if (
                     elapsed_min >= early_min
-                    and activate_inr > 0
-                    and peak_pnl_inr < activate_inr * early_ratio
+                    and threshold_inr > 0
+                    and peak_pnl_inr < threshold_inr
                     and pnl_inr < 0
                 ):
                     append_log(
                         "WARN", "EXIT",
                         f"{sym} EARLY_NO_MOVE elapsed={elapsed_min:.0f}min "
-                        f"peak_pnl_inr={peak_pnl_inr:.2f} threshold={activate_inr * early_ratio:.2f} "
-                        f"(activate_inr={activate_inr:.2f} ratio={early_ratio})",
+                        f"peak_pnl_inr={peak_pnl_inr:.2f} threshold={threshold_inr:.2f} "
+                        f"(pos_value={position_value:.0f} pct={early_pct*100:.2f}%)",
                     )
                     close_position(sym, reason="EARLY_NO_MOVE", ltp_override=ltp)
                     continue
