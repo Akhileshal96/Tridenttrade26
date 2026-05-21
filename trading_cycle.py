@@ -4998,18 +4998,23 @@ def reconcile_broker_positions():
         # reality and remove the phantom. Still protects against 1-2 tick
         # network glitches (the original intent).
         #
-        # CRITICAL audit fix (2026-05-19): phantom-decay must NOT run in
-        # paper mode (IS_LIVE=false). In paper mode the broker NEVER sees
-        # paper positions (no real order placed), so broker_count==0 just
-        # means "we're not trading through the broker" — NOT "the user
-        # sold via Zerodha". Day 2 of paper week: KOTAKBANK paper trade
-        # opened at 11:51 was killed at 12:07 by phantom_decay because
-        # broker correctly reported 0 positions for 10 cycles. Every paper
-        # trade held longer than 3 min was at risk. The outer recon gate
-        # allows `live_override=true` (so /holdings can still show real
-        # broker holdings while bot is in paper mode), but the destructive
-        # phantom-decay path requires true IS_LIVE.
-        if not bool(CFG.IS_LIVE):
+        # CRITICAL audit fix (2026-05-19, corrected 2026-05-21): phantom-decay
+        # must NOT run unless the bot is actually placing REAL broker orders.
+        # The broker only knows about a position if it was sent as a live
+        # order — i.e. is_live_enabled() (= initiated AND (IS_LIVE or
+        # live_override)) was true when the order was placed.
+        #
+        # The 2026-05-19 fix gated on CFG.IS_LIVE alone — but that's too
+        # coarse. Day 4 (2026-05-21) revealed the bot was running with
+        # IS_LIVE=true in .env but NOT initiated → orders simulate ([paper],
+        # order_id=-) yet CFG.IS_LIVE was true, so phantom-decay still fired
+        # and killed paper trades (KOTAKBANK @12:42, ITC @13:57). Two of the
+        # day's four trades were destroyed by this.
+        #
+        # is_live_enabled() is the correct gate: when orders are simulated
+        # (not initiated), the broker has no record of them, so broker_count==0
+        # is the natural state and must NOT be treated as "user sold elsewhere".
+        if not is_live_enabled():
             return
         decay_threshold = int(_cfg_get("PHANTOM_DECAY_TICKS", 10) or 10)
         missing_streak = STATE.setdefault("_phantom_missing_streak", {})

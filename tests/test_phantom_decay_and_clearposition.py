@@ -71,11 +71,17 @@ def _setup_phantom_position(sym: str):
 def _patch_empty_broker(monkeypatch, is_live: bool = True):
     """Make get_kite return a kite that has no positions and no holdings.
 
-    is_live: defaults to True so the existing phantom-decay tests
-    continue to validate the live-mode behavior. Paper-mode tests
-    explicitly pass is_live=False to verify the new gate.
+    is_live: whether the bot is in REAL-order mode. Corrected 2026-05-21:
+    phantom-decay now gates on is_live_enabled() (= initiated AND (IS_LIVE
+    or live_override)), NOT CFG.IS_LIVE alone. So to simulate "really
+    placing live orders" we must set BOTH IS_LIVE=true AND initiated=true.
+    To simulate paper, we set initiated=false (orders simulate even if
+    IS_LIVE happens to be true — which was exactly the Day 4 bug state).
     """
     monkeypatch.setattr(CFG, "IS_LIVE", is_live, raising=False)
+    with STATE_LOCK:
+        CYCLE.STATE["initiated"] = bool(is_live)
+        CYCLE.STATE["live_override"] = False
 
     class _EmptyKite:
         def positions(self): return {"net": []}
@@ -310,6 +316,49 @@ def test_phantom_decay_does_NOT_fire_in_paper_mode(monkeypatch):
     assert "KOTAKBANK" in CYCLE.STATE["positions"], (
         f"paper position must NOT be phantom-decayed; "
         f"state: {list(CYCLE.STATE['positions'].keys())}"
+    )
+
+
+def test_phantom_decay_skipped_when_live_config_but_not_initiated(monkeypatch):
+    """The Day 4 (May 21) bug: IS_LIVE=true in .env but the bot is NOT
+    initiated (not armed). Orders simulate ([paper], order_id=-) but the
+    2026-05-19 fix gated phantom-decay on CFG.IS_LIVE (true) so it still
+    fired — killing KOTAKBANK @12:42 and ITC @13:57.
+
+    Corrected gate is is_live_enabled() = initiated AND (IS_LIVE or
+    live_override). With initiated=false, phantom-decay must skip even
+    though CFG.IS_LIVE is true and reconcile itself runs.
+    """
+    monkeypatch.setattr(CFG, "PHANTOM_DECAY_TICKS", 5, raising=False)
+    monkeypatch.setattr(CYCLE, "_cfg_get",
+                        lambda k, d=None: 5 if k == "PHANTOM_DECAY_TICKS" else
+                                          (True if k == "USE_HOLDINGS_RECONCILE" else d),
+                        raising=False)
+    _setup_phantom_position("KOTAKBANK")
+    # The exact Day-4 state: IS_LIVE=true, but NOT initiated → orders simulate.
+    monkeypatch.setattr(CFG, "IS_LIVE", True, raising=False)
+    with STATE_LOCK:
+        CYCLE.STATE["initiated"] = False        # not armed → paper orders
+        CYCLE.STATE["live_override"] = False
+    monkeypatch.setattr(CYCLE, "append_log", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(CYCLE, "_log_trade_event", lambda *a, **k: None, raising=False)
+
+    class _EmptyKite:
+        def positions(self): return {"net": []}
+        def holdings(self): return []
+    monkeypatch.setattr(CYCLE, "get_kite", lambda: _EmptyKite(), raising=False)
+
+    # reconcile RUNS (IS_LIVE=true) but phantom-decay must NOT fire
+    # (is_live_enabled() is false because initiated=false).
+    for _ in range(20):
+        try:
+            CYCLE.reconcile_broker_positions()
+        except Exception:
+            pass
+
+    assert "KOTAKBANK" in CYCLE.STATE["positions"], (
+        f"simulated/paper position (IS_LIVE=true but not initiated) must NOT "
+        f"be phantom-decayed; state: {list(CYCLE.STATE['positions'].keys())}"
     )
 
 
